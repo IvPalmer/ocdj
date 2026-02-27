@@ -1,0 +1,82 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=djtools
+      - POSTGRES_USER=djtools_user
+      - POSTGRES_PASSWORD=djtools_password
+    ports:
+      - "5433:5432"  # 5433 to avoid conflict with Vault's postgres
+    restart: always
+
+  # slskd (Soulseek daemon)
+  slskd:
+    image: slskd/slskd:latest
+    ports:
+      - "5030:5030"
+      - "50300:50300"
+    volumes:
+      - /Users/palmer/Music/Musicas/Electronic/ID3/soulseek_sync/slskd_app:/app
+      - /Users/palmer/Music/Musicas/Electronic/ID3/soulseek:/downloads
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=true
+      - SLSKD_HTTP_PORT=5030
+      - SLSKD_SLSK_LISTEN_PORT=50300
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5030"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Django Backend
+  backend:
+    build: ./backend
+    restart: always
+    depends_on:
+      - db
+      - slskd
+    environment:
+      - DEBUG=1
+      - POSTGRES_DB=djtools
+      - POSTGRES_USER=djtools_user
+      - POSTGRES_PASSWORD=djtools_password
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - SLSKD_BASE_URL=http://slskd:5030
+      - SLSKD_API_KEY=${SLSKD_API_KEY}
+      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY}
+      - MUSIC_ROOT=/music
+      - SOULSEEK_DOWNLOAD_ROOT=/music/soulseek
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./backend:/app
+      - /Users/palmer/Music/Musicas:/music
+      - static_volume:/app/staticfiles
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8002"
+
+  # React Frontend (dev mode)
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    restart: unless-stopped
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    ports:
+      - "5174:5174"
+    command: npm run dev -- --host --port 5174
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  static_volume:
+  node_modules:

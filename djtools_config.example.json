@@ -1,0 +1,34 @@
+{
+  "//": "Shared config for dj-tools. This file is optional; tools also read their own tools/*/config.json. Env vars still override everything.",
+
+  "pixeldrain_api_key": "REPLACE_ME",
+  "djtools_id3_root": "/path/to/your/music/library/ID3",
+  "traxdb_cookies": "/absolute/path/to/traxdb_cookies.txt",
+  "traxdb_requires_cookies": false,
+  "traxdb_start_url": "https://traxdb2.blogspot.com/search?updated-max=YYYY-MM-DDTHH:MM:SS-TZ",
+
+  "slskd_base_url": "http://localhost:5030",
+  "slskd_api_key": "REPLACE_ME",
+
+  "//downloads_only": "ID3 should only contain downloaded files/folders. Logs/reports stay in the repo (default) unless DJTOOLS_ARTIFACTS_ROOT is set.",
+  "soulseek_root": "/path/to/your/music/library/ID3/soulseek",
+
+  "//future_spotify": "Used by the macOS app later (not consumed by Python tools today).",
+  "spotify_client_id": "REPLACE_ME",
+  "spotify_client_secret": "REPLACE_ME",
+  "spotify_redirect_uri": "djtools://oauth/spotify",
+  "spotify_user_id": "palmer",
+
+  "//future_telegram": "Used by the macOS app later (not consumed by Python tools today).",
+  "telegram_bot_token": "REPLACE_ME",
+  "telegram_chat_id": "REPLACE_ME",
+
+  "//future_audio_tools": "Used by the macOS app later (ShazamKit + yt-dlp + ffmpeg).",
+  "yt_dlp_path": "tools/bin/yt-dlp",
+  "ffmpeg_path": "tools/bin/ffmpeg",
+
+  "//recognize_tuning": "yt-dlp downloads can be HLS/DASH 'fragments' (lots of parts). This controls parallelism; higher is faster but uses more CPU/network.",
+  "recognize_concurrent_fragments": 8
+}
+
+

@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  slskd:
+    container_name: slskd
+    image: slskd/slskd:latest
+    # If you prefer building from the cloned repo instead of using the official image:
+    # build:
+    #   context: ./slskd
+    ports:
+      - "5030:5030/tcp"     # Web UI / API (HTTP)
+      - "50300:50300/tcp"   # Soulseek incoming
+    environment:
+      - SLSKD_REMOTE_CONFIGURATION=true
+    volumes:
+      - ./slskd_app:/app:rw
+      - ../soulseek:/downloads:rw
+    restart: unless-stopped
+
+

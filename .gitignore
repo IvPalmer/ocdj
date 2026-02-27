@@ -1,0 +1,45 @@
+.DS_Store
+
+# Local secrets / user config
+ocdj_config.json
+djtools_config.json
+.env
+tools/**/config.json
+tools/**/traxdb_cookies.txt
+backend/.secret_key
+
+# Local artifacts
+logs/
+**/__pycache__/
+*.pyc
+
+# Swift / Xcode build artifacts (legacy)
+app/DJToolsApp/.build/
+app/**/.swiftpm/
+app/**/xcuserdata/
+DerivedData/
+
+# slskd local runtime data
+tools/soulseek_sync/slskd/
+tools/soulseek_sync/slskd_app/
+tools/soulseek_sync/wanted.txt
+
+# Node
+node_modules/
+
+# Django
+backend/staticfiles/
+backend/media/
+backend/db.sqlite3
+
+# Vite
+dist/
+
+# Python venv
+.venv/
+
+# Binaries
+tools/bin/
+
+# Claude Code
+.claude/

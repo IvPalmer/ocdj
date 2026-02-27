@@ -1,0 +1,75 @@
+.settings-panel {
+  max-width: 700px;
+}
+
+.settings-section {
+  margin-bottom: 32px;
+}
+
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.setting-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.setting-value {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+
+.text-green {
+  color: var(--accent-green);
+}
+
+.text-red {
+  color: var(--accent-red);
+}
+
+/* ── Quick Links ── */
+.links-grid {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.quick-link {
+  padding: 8px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 450;
+  transition: all 0.12s;
+}
+
+.quick-link:hover {
+  background: var(--bg-surface);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+/* ── About ── */
+.settings-about {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
