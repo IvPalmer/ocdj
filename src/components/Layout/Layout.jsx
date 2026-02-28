@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/wanted', label: 'Wanted' },
   { to: '/soulseek', label: 'Soulseek' },
+  { to: '/traxdb', label: 'TraxDB' },
   { to: '/settings', label: 'Settings' },
 ]
 

@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/wanted/', include('wanted.urls')),
     path('api/soulseek/', include('soulseek.urls')),
+    path('api/traxdb/', include('traxdb.urls')),
     path('api/core/', include('core.urls')),
 ]
 

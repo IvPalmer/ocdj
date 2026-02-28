@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'core',
     'wanted',
     'soulseek',
+    'traxdb',
 ]
 
 MIDDLEWARE = [

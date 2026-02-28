@@ -239,3 +239,89 @@ export function useClearDownloads() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['downloads'] }),
   })
 }
+
+// ── TraxDB ──────────────────────────────────────────────────
+
+export function useTraxDBInventory() {
+  return useQuery({
+    queryKey: ['traxdb-inventory'],
+    queryFn: () => api.get('/traxdb/inventory/'),
+    staleTime: 60000, // 1 min — directory scan is lightweight but no need to spam it
+  })
+}
+
+export function useTraxDBOperations(params = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.op_type) searchParams.set('op_type', params.op_type)
+  if (params.status) searchParams.set('status', params.status)
+
+  const qs = searchParams.toString()
+  return useQuery({
+    queryKey: ['traxdb-operations', params],
+    queryFn: () => api.get(`/traxdb/operations/${qs ? '?' + qs : ''}`),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const ops = data?.results || []
+      if (ops.some(o => o.status === 'running')) return 5000
+      return false
+    },
+  })
+}
+
+export function useTraxDBOperation(id) {
+  return useQuery({
+    queryKey: ['traxdb-operation', id],
+    queryFn: () => api.get(`/traxdb/operations/${id}/`),
+    enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.status === 'running') return 3000
+      return false
+    },
+  })
+}
+
+export function useTriggerSync() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data = {}) => api.post('/traxdb/sync/', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['traxdb-operations'] }),
+  })
+}
+
+export function useTriggerDownload() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data = {}) => api.post('/traxdb/download/', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['traxdb-operations'] }),
+  })
+}
+
+export function useTriggerAudit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data = {}) => api.post('/traxdb/audit/', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['traxdb-operations'] }),
+  })
+}
+
+export function useTraxDBDownloadProgress(id) {
+  return useQuery({
+    queryKey: ['traxdb-download-progress', id],
+    queryFn: () => api.get(`/traxdb/download/${id}/progress/`),
+    enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.status === 'running') return 3000
+      return false
+    },
+  })
+}
+
+export function useCancelTraxDBDownload() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/traxdb/download/${id}/cancel/`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['traxdb-operations'] }),
+  })
+}
