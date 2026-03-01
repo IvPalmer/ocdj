@@ -9,29 +9,32 @@ const CONFIG_SECTIONS = [
   {
     title: 'YouTube',
     keys: [
-      { key: 'YOUTUBE_API_KEY', label: 'API Key', placeholder: 'AIzaSy...' },
+      { key: 'YOUTUBE_API_KEY', label: 'API Key', placeholder: 'AIzaSy...', secret: true },
+      { key: 'YOUTUBE_DEFAULT_PLAYLIST', label: 'Default Playlist', placeholder: 'https://www.youtube.com/playlist?list=...' },
     ],
   },
   {
     title: 'SoundCloud',
     keys: [
-      { key: 'SC_CLIENT_ID', label: 'Client ID', placeholder: 'Client ID' },
-      { key: 'SC_CLIENT_SECRET', label: 'Client Secret', placeholder: 'Client Secret' },
+      { key: 'SC_CLIENT_ID', label: 'Client ID', placeholder: 'Client ID', secret: true },
+      { key: 'SC_CLIENT_SECRET', label: 'Client Secret', placeholder: 'Client Secret', secret: true },
+      { key: 'SC_DEFAULT_PLAYLIST', label: 'Default Playlist', placeholder: 'https://soundcloud.com/user/sets/playlist' },
     ],
   },
   {
     title: 'Spotify',
     keys: [
-      { key: 'SPOTIFY_CLIENT_ID', label: 'Client ID', placeholder: 'Client ID' },
-      { key: 'SPOTIFY_CLIENT_SECRET', label: 'Client Secret', placeholder: 'Client Secret' },
-      { key: 'SPOTIFY_REDIRECT_URI', label: 'Redirect URI', placeholder: 'http://localhost:8002/api/wanted/import/spotify/callback/' },
+      { key: 'SPOTIFY_CLIENT_ID', label: 'Client ID', placeholder: 'Client ID', secret: true },
+      { key: 'SPOTIFY_CLIENT_SECRET', label: 'Client Secret', placeholder: 'Client Secret', secret: true },
+      { key: 'SPOTIFY_REDIRECT_URI', label: 'Redirect URI', placeholder: 'http://127.0.0.1:8002/api/wanted/import/spotify/callback', secret: true },
+      { key: 'SPOTIFY_DEFAULT_PLAYLIST', label: 'Default Playlist', placeholder: 'https://open.spotify.com/playlist/...' },
     ],
     hasConnect: true,
   },
   {
     title: 'Discogs',
     keys: [
-      { key: 'DISCOGS_PERSONAL_TOKEN', label: 'Personal Token', placeholder: 'Token' },
+      { key: 'DISCOGS_PERSONAL_TOKEN', label: 'Personal Token', placeholder: 'Token', secret: true },
       { key: 'DISCOGS_USERNAME', label: 'Username', placeholder: 'your_username' },
     ],
   },

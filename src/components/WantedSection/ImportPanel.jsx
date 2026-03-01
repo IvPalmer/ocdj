@@ -1,15 +1,21 @@
 import { useState } from 'react'
 import {
   useImportOperation, useTriggerImport, useConfirmImport,
-  useImportConfigStatus, useSpotifyStatus,
+  useImportConfigStatus, useSpotifyStatus, useConfig,
 } from '../../api/hooks'
 import ImportPreview from './ImportPreview'
 import './ImportPanel.css'
 
+const DEFAULT_PLAYLIST_KEYS = {
+  youtube: 'YOUTUBE_DEFAULT_PLAYLIST',
+  soundcloud: 'SC_DEFAULT_PLAYLIST',
+  spotify: 'SPOTIFY_DEFAULT_PLAYLIST',
+}
+
 const SOURCE_CARDS = [
-  { type: 'youtube', label: 'YouTube', desc: 'Import from playlist URL', needsUrl: true },
-  { type: 'soundcloud', label: 'SoundCloud', desc: 'Import from playlist URL', needsUrl: true },
-  { type: 'spotify', label: 'Spotify', desc: 'Import from playlist URL', needsUrl: true },
+  { type: 'youtube', label: 'YouTube', needsUrl: true },
+  { type: 'soundcloud', label: 'SoundCloud', needsUrl: true },
+  { type: 'spotify', label: 'Spotify', needsUrl: true },
   { type: 'discogs', label: 'Discogs', desc: 'Import your wantlist', needsUrl: false },
 ]
 
@@ -21,9 +27,17 @@ function ImportPanel({ onClose }) {
 
   const { data: configStatus } = useImportConfigStatus()
   const { data: spotifyStatus } = useSpotifyStatus()
+  const { data: configData } = useConfig()
   const { data: operation } = useImportOperation(operationId)
   const triggerImport = useTriggerImport()
   const confirmImport = useConfirmImport()
+
+  const getDefaultPlaylist = (type) => {
+    const key = DEFAULT_PLAYLIST_KEYS[type]
+    if (!key || !configData) return ''
+    const entry = configData[key]
+    return entry?.set ? (entry.value || '') : ''
+  }
 
   // When operation status changes, advance the step
   if (operation && step === 'fetching') {
@@ -35,13 +49,14 @@ function ImportPanel({ onClose }) {
   }
 
   const handleSelectSource = (type) => {
-    const card = SOURCE_CARDS.find(c => c.type === type)
     setSelectedType(type)
 
-    if (!card.needsUrl) {
-      // Discogs: trigger immediately
+    if (!SOURCE_CARDS.find(c => c.type === type).needsUrl) {
       handleTrigger(type, '')
     } else {
+      // Pre-fill with default playlist if configured
+      const defaultUrl = getDefaultPlaylist(type)
+      setUrl(defaultUrl)
       setStep('url')
     }
   }
@@ -49,7 +64,7 @@ function ImportPanel({ onClose }) {
   const handleTrigger = (type, triggerUrl) => {
     setStep('fetching')
     triggerImport.mutate(
-      { import_type: type || selectedType, url: triggerUrl || url },
+      { import_type: type || selectedType, url: triggerUrl ?? url },
       {
         onSuccess: (data) => setOperationId(data.id),
         onError: () => setStep('error'),
@@ -67,6 +82,13 @@ function ImportPanel({ onClose }) {
   const getAvailability = (type) => {
     if (!configStatus) return { available: type === 'youtube' || type === 'soundcloud' }
     return configStatus[type] || { available: false }
+  }
+
+  const getCardDesc = (card) => {
+    if (card.desc) return card.desc
+    const defaultUrl = getDefaultPlaylist(card.type)
+    if (defaultUrl) return 'Default playlist configured'
+    return 'Paste a playlist URL'
   }
 
   const handleSpotifyConnect = async () => {
@@ -111,7 +133,7 @@ function ImportPanel({ onClose }) {
                   >
                     <div className="import-source-card__label">{card.label}</div>
                     <div className="import-source-card__desc">
-                      {!avail.available ? 'Not configured' : card.desc}
+                      {!avail.available ? 'Not configured' : getCardDesc(card)}
                     </div>
                     {isSpotifyDisconnected && (
                       <button

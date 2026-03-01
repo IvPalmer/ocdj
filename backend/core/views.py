@@ -11,11 +11,14 @@ from .models import Config
 # Keys that can be stored/read via the API
 ALLOWED_CONFIG_KEYS = [
     'YOUTUBE_API_KEY',
+    'YOUTUBE_DEFAULT_PLAYLIST',
     'SC_CLIENT_ID',
     'SC_CLIENT_SECRET',
+    'SC_DEFAULT_PLAYLIST',
     'SPOTIFY_CLIENT_ID',
     'SPOTIFY_CLIENT_SECRET',
     'SPOTIFY_REDIRECT_URI',
+    'SPOTIFY_DEFAULT_PLAYLIST',
     'DISCOGS_PERSONAL_TOKEN',
     'DISCOGS_USERNAME',
 ]
@@ -30,15 +33,24 @@ def get_config(key, default=''):
         return os.environ.get(key, '') or getattr(settings, key, default)
 
 
+NON_SECRET_KEYS = {
+    'YOUTUBE_DEFAULT_PLAYLIST',
+    'SC_DEFAULT_PLAYLIST',
+    'SPOTIFY_DEFAULT_PLAYLIST',
+    'SPOTIFY_REDIRECT_URI',
+    'DISCOGS_USERNAME',
+}
+
+
 @api_view(['GET'])
 def config_list(request):
-    """Return all configurable settings with current values (masked)."""
+    """Return all configurable settings with current values (secrets masked)."""
     result = {}
     for key in ALLOWED_CONFIG_KEYS:
         value = get_config(key)
         result[key] = {
             'set': bool(value),
-            'value': _mask(value) if value else '',
+            'value': value if key in NON_SECRET_KEYS else (_mask(value) if value else ''),
             'source': _source(key),
         }
     return Response(result)
