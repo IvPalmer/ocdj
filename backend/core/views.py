@@ -62,6 +62,50 @@ def config_list(request):
     return Response(result)
 
 
+PLAYLIST_URL_TO_NAME_KEY = {
+    'YOUTUBE_DEFAULT_PLAYLIST': 'YOUTUBE_DEFAULT_PLAYLIST_NAME',
+    'SC_DEFAULT_PLAYLIST': 'SC_DEFAULT_PLAYLIST_NAME',
+    'SPOTIFY_DEFAULT_PLAYLIST': 'SPOTIFY_DEFAULT_PLAYLIST_NAME',
+}
+
+
+def _resolve_playlist_name(url_key, url_value):
+    """Resolve a playlist name from its URL in a background thread."""
+    import threading
+
+    name_key = PLAYLIST_URL_TO_NAME_KEY.get(url_key)
+    if not name_key or not url_value:
+        return
+
+    def worker():
+        try:
+            name = ''
+            if url_key == 'SPOTIFY_DEFAULT_PLAYLIST':
+                import re
+                match = re.search(r'playlist[/:]([a-zA-Z0-9]+)', url_value)
+                if match:
+                    from wanted.services.spotify import _get_sp
+                    sp, _ = _get_sp()
+                    info = sp.playlist(match.group(1), fields='name')
+                    name = info.get('name', '')
+            else:
+                import yt_dlp
+                opts = {'quiet': True, 'no_warnings': True, 'extract_flat': 'in_playlist', 'skip_download': True}
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url_value, download=False)
+                name = info.get('title', '')
+
+            if name:
+                Config.objects.update_or_create(key=name_key, defaults={'value': name})
+        except Exception:
+            pass
+        finally:
+            from django import db
+            db.connections.close_all()
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 @api_view(['POST'])
 def config_update(request):
     """Update one or more config values."""
@@ -74,6 +118,10 @@ def config_update(request):
             defaults={'value': value},
         )
         updated.append(key)
+
+        # Auto-resolve playlist name when a playlist URL is saved
+        if key in PLAYLIST_URL_TO_NAME_KEY and value:
+            _resolve_playlist_name(key, value)
 
     if not updated:
         return Response(
