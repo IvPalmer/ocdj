@@ -146,3 +146,19 @@ ACOUSTID_API_KEY = os.getenv('ACOUSTID_API_KEY', '')
 # Music paths
 MUSIC_ROOT = os.getenv('MUSIC_ROOT', '/music')
 SOULSEEK_DOWNLOAD_ROOT = os.getenv('SOULSEEK_DOWNLOAD_ROOT', '/music/soulseek')
+
+# Spotify OAuth
+SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID', '')
+SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET', '')
+SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:8002/api/wanted/import/spotify/callback/')
+
+# Discogs
+DISCOGS_PERSONAL_TOKEN = os.getenv('DISCOGS_PERSONAL_TOKEN', '')
+DISCOGS_USERNAME = os.getenv('DISCOGS_USERNAME', '')
+
+# YouTube Data API
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
+
+# SoundCloud API
+SC_CLIENT_ID = os.getenv('SC_CLIENT_ID', '')
+SC_CLIENT_SECRET = os.getenv('SC_CLIENT_SECRET', '')

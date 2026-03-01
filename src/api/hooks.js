@@ -240,6 +240,70 @@ export function useClearDownloads() {
   })
 }
 
+// ── Wanted Imports ─────────────────────────────────────────
+
+export function useImportOperations() {
+  return useQuery({
+    queryKey: ['import-operations'],
+    queryFn: () => api.get('/wanted/import/operations/'),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const ops = data?.results || []
+      if (ops.some(o => o.status === 'fetching' || o.status === 'importing')) return 3000
+      return false
+    },
+  })
+}
+
+export function useImportOperation(id) {
+  return useQuery({
+    queryKey: ['import-operation', id],
+    queryFn: () => api.get(`/wanted/import/operations/${id}/`),
+    enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.status === 'fetching' || data?.status === 'pending') return 2000
+      return false
+    },
+  })
+}
+
+export function useTriggerImport() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data) => api.post('/wanted/import/trigger/', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['import-operations'] }),
+  })
+}
+
+export function useConfirmImport() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, items }) => api.post(`/wanted/import/operations/${id}/confirm/`, { items }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['import-operations'] })
+      qc.invalidateQueries({ queryKey: ['wanted-items'] })
+      qc.invalidateQueries({ queryKey: ['wanted-sources'] })
+    },
+  })
+}
+
+export function useImportConfigStatus() {
+  return useQuery({
+    queryKey: ['import-config-status'],
+    queryFn: () => api.get('/wanted/import/config-status/'),
+    staleTime: 60000,
+  })
+}
+
+export function useSpotifyStatus() {
+  return useQuery({
+    queryKey: ['spotify-status'],
+    queryFn: () => api.get('/wanted/import/spotify/status/'),
+    staleTime: 60000,
+  })
+}
+
 // ── TraxDB ──────────────────────────────────────────────────
 
 export function useTraxDBInventory() {

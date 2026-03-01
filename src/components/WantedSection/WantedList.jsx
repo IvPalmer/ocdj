@@ -5,6 +5,7 @@ import {
   useBulkDeleteItems, useAddToQueue,
 } from '../../api/hooks'
 import AddItemForm from './AddItemForm'
+import ImportPanel from './ImportPanel'
 import './WantedList.css'
 
 const STATUS_LABELS = {
@@ -183,6 +184,7 @@ function WantedList() {
   const [filters, setFilters] = useState({})
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [showAddForm, setShowAddForm] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [editingItem, setEditingItem] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [queuingId, setQueuingId] = useState(null)
@@ -261,9 +263,14 @@ function WantedList() {
     <div className="wanted-list">
       <div className="wanted-header">
         <h2 className="page-title">Wanted List</h2>
-        <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
-          + Add
-        </button>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button className="btn btn-accent" onClick={() => setShowImport(true)}>
+            Import
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowAddForm(true)}>
+            + Add
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -411,6 +418,11 @@ function WantedList() {
           }}
           onClose={() => setShowAddForm(false)}
         />
+      )}
+
+      {/* Import Modal */}
+      {showImport && (
+        <ImportPanel onClose={() => setShowImport(false)} />
       )}
 
       {/* Edit Form Modal */}

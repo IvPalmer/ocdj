@@ -11,6 +11,7 @@ class WantedSource(models.Model):
         ('soundcloud', 'SoundCloud'),
         ('youtube', 'YouTube'),
         ('telegram', 'Telegram'),
+        ('discogs', 'Discogs'),
     ]
 
     name = models.CharField(max_length=255)
@@ -93,3 +94,48 @@ class WantedItem(models.Model):
         elif self.release_name:
             parts.append(self.release_name)
         return ' - '.join(parts) or f"WantedItem #{self.pk}"
+
+
+class ImportOperation(models.Model):
+    """Tracks a playlist/wishlist import from an external source."""
+
+    IMPORT_TYPES = [
+        ('youtube', 'YouTube'),
+        ('soundcloud', 'SoundCloud'),
+        ('spotify', 'Spotify'),
+        ('discogs', 'Discogs'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('fetching', 'Fetching'),
+        ('previewing', 'Previewing'),
+        ('importing', 'Importing'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    import_type = models.CharField(max_length=20, choices=IMPORT_TYPES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    url = models.URLField(blank=True)
+    source = models.ForeignKey(
+        WantedSource,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='import_operations',
+    )
+    preview_data = models.JSONField(default=list, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    total_found = models.IntegerField(default=0)
+    duplicates_found = models.IntegerField(default=0)
+    items_imported = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created']
+
+    def __str__(self):
+        return f"{self.get_import_type_display()} import ({self.status})"
