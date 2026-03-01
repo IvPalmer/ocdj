@@ -51,7 +51,7 @@ services:
       - SLSKD_API_KEY=${SLSKD_API_KEY}
       - ACOUSTID_API_KEY=${ACOUSTID_API_KEY}
       - MUSIC_ROOT=/music
-      - SOULSEEK_DOWNLOAD_ROOT=/music/soulseek
+      - SOULSEEK_DOWNLOAD_ROOT=/music/Electronic/ID3/soulseek
       - TRAXDB_ROOT=/music/Electronic/ID3/traxdb
       - TRAXDB_START_URL=${TRAXDB_START_URL:-}
       - PIXELDRAIN_API_KEY=${PIXELDRAIN_API_KEY:-}

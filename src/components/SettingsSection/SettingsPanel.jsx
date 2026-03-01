@@ -38,6 +38,12 @@ const CONFIG_SECTIONS = [
       { key: 'DISCOGS_USERNAME', label: 'Username', placeholder: 'your_username' },
     ],
   },
+  {
+    title: 'Organize',
+    keys: [
+      { key: 'ORGANIZE_RENAME_TEMPLATE', label: 'Rename Template', placeholder: '{artist} - {title} [{label} {catalog}]' },
+    ],
+  },
 ]
 
 function ConfigSection({ section, configData, onSave, importStatus, spotifyStatus }) {

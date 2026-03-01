@@ -24,6 +24,7 @@ ALLOWED_CONFIG_KEYS = [
     'SPOTIFY_DEFAULT_PLAYLIST_NAME',
     'DISCOGS_PERSONAL_TOKEN',
     'DISCOGS_USERNAME',
+    'ORGANIZE_RENAME_TEMPLATE',
 ]
 
 
@@ -45,6 +46,7 @@ NON_SECRET_KEYS = {
     'SPOTIFY_DEFAULT_PLAYLIST_NAME',
     'SPOTIFY_REDIRECT_URI',
     'DISCOGS_USERNAME',
+    'ORGANIZE_RENAME_TEMPLATE',
 }
 
 
@@ -175,6 +177,14 @@ def stats(request):
         .values_list('status', 'count')
     )
 
+    # Pipeline stats
+    from organize.models import PipelineItem
+    pipeline_counts = dict(
+        PipelineItem.objects.values_list('stage')
+        .annotate(count=Count('id'))
+        .values_list('stage', 'count')
+    )
+
     return Response({
         'wanted': {
             'total': sum(status_counts.values()),
@@ -183,5 +193,12 @@ def stats(request):
             'downloading': status_counts.get('downloading', 0),
             'downloaded': status_counts.get('downloaded', 0),
             'failed': status_counts.get('failed', 0),
-        }
+        },
+        'pipeline': {
+            'total': sum(pipeline_counts.values()),
+            'downloaded': pipeline_counts.get('downloaded', 0),
+            'tagged': pipeline_counts.get('tagged', 0),
+            'ready': pipeline_counts.get('ready', 0),
+            'failed': pipeline_counts.get('failed', 0),
+        },
     })

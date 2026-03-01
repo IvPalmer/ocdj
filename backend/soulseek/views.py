@@ -469,6 +469,13 @@ def downloads_status(request):
                 dl.save()
                 data['status'] = 'completed'
                 data['progress'] = 100
+                # Auto-trigger organize pipeline
+                try:
+                    from organize.services.pipeline import auto_ingest_download
+                    import threading
+                    threading.Thread(target=auto_ingest_download, args=(dl.id,), daemon=True).start()
+                except Exception:
+                    pass
             elif 'InProgress' in state and dl.status != 'downloading':
                 dl.status = 'downloading'
                 dl.progress = transfer.get('percentComplete', 0)
