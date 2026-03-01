@@ -67,45 +67,101 @@ def _fetch_via_api(url, client_id):
     return tracks
 
 
+def _parse_sc_url(url):
+    """Extract artist/title from a SoundCloud URL slug as fallback."""
+    # URL format: https://soundcloud.com/{user}/{track-slug}
+    from urllib.parse import urlparse
+    path = urlparse(url).path.strip('/')
+    parts = path.split('/')
+    if len(parts) >= 2:
+        user = parts[0].replace('-', ' ')
+        slug = parts[1].replace('-', ' ')
+        return user, slug
+    return '', url
+
+
 def _fetch_via_ytdlp(url):
-    """Fetch playlist using yt-dlp (fallback)."""
+    """Fetch playlist using yt-dlp. Uses full extraction for SoundCloud (extract_flat returns no metadata)."""
     import yt_dlp
 
-    ydl_opts = {
+    # First get the track list with extract_flat (fast)
+    flat_opts = {
         'quiet': True,
         'no_warnings': True,
         'extract_flat': 'in_playlist',
         'skip_download': True,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(flat_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
-    entries = info.get('entries', [])
+    entries = list(info.get('entries', []))
     if not entries and info.get('title'):
         entries = [info]
 
+    # Check if flat extraction gave us metadata
+    has_metadata = any(
+        (e.get('title') or e.get('track') or e.get('artist'))
+        for e in entries[:3] if e
+    )
+
+    if has_metadata:
+        # Flat extraction worked (e.g. YouTube) — use it
+        return _parse_entries(entries)
+
+    # SoundCloud flat extraction has no metadata — do full extraction
+    # This fetches each track's page but gets actual titles
+    full_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+        'ignoreerrors': True,
+    }
+
+    with yt_dlp.YoutubeDL(full_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    full_entries = list(info.get('entries', []))
+    if not full_entries and info.get('title'):
+        full_entries = [info]
+
+    return _parse_entries(full_entries)
+
+
+def _parse_entries(entries):
+    """Parse yt-dlp entries into track dicts."""
     tracks = []
     for entry in entries:
         if not entry:
             continue
 
-        artist = entry.get('artist') or entry.get('uploader') or ''
+        uploader = entry.get('uploader') or ''
+        artist = entry.get('artist') or ''
         title = entry.get('track') or ''
+        source_url = entry.get('webpage_url') or entry.get('url', '')
 
         if not title:
-            parsed = parse_video_title(entry.get('title', ''))
-            artist = parsed['artist'] or artist
-            title = parsed['title']
-            raw_title = parsed['raw_title']
+            raw = entry.get('title', '')
+            if raw:
+                parsed = parse_video_title(raw)
+                artist = parsed['artist'] or uploader
+                title = parsed['title']
+                raw_title = parsed['raw_title']
+            elif source_url:
+                artist, title = _parse_sc_url(source_url)
+                raw_title = f"{artist} - {title}" if artist else title
+            else:
+                continue
         else:
+            if not artist:
+                artist = uploader
             raw_title = entry.get('title', '')
 
         tracks.append({
             'artist': artist.strip(),
             'title': title.strip(),
             'raw_title': raw_title,
-            'source_url': entry.get('url') or entry.get('webpage_url', ''),
+            'source_url': source_url,
         })
 
     return tracks
