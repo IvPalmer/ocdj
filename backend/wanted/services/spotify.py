@@ -18,10 +18,11 @@ CACHE_PATH = None
 
 
 def _get_config():
+    from core.views import get_config
     return {
-        'client_id': getattr(settings, 'SPOTIFY_CLIENT_ID', '') or os.environ.get('SPOTIFY_CLIENT_ID', ''),
-        'client_secret': getattr(settings, 'SPOTIFY_CLIENT_SECRET', '') or os.environ.get('SPOTIFY_CLIENT_SECRET', ''),
-        'redirect_uri': getattr(settings, 'SPOTIFY_REDIRECT_URI', '') or os.environ.get('SPOTIFY_REDIRECT_URI', ''),
+        'client_id': get_config('SPOTIFY_CLIENT_ID'),
+        'client_secret': get_config('SPOTIFY_CLIENT_SECRET'),
+        'redirect_uri': get_config('SPOTIFY_REDIRECT_URI') or 'http://localhost:8002/api/wanted/import/spotify/callback/',
         'cache_path': os.path.join(settings.BASE_DIR, '.spotify_cache'),
     }
 

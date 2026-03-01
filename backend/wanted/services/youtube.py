@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_api_key():
-    return getattr(settings, 'YOUTUBE_API_KEY', '') or os.environ.get('YOUTUBE_API_KEY', '')
+    from core.views import get_config
+    return get_config('YOUTUBE_API_KEY')
 
 
 def _extract_playlist_id(url):

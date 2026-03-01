@@ -240,6 +240,27 @@ export function useClearDownloads() {
   })
 }
 
+// ── Config (Settings) ──────────────────────────────────────
+
+export function useConfig() {
+  return useQuery({
+    queryKey: ['config'],
+    queryFn: () => api.get('/core/config/'),
+  })
+}
+
+export function useUpdateConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data) => api.post('/core/config/update/', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['config'] })
+      qc.invalidateQueries({ queryKey: ['import-config-status'] })
+      qc.invalidateQueries({ queryKey: ['spotify-status'] })
+    },
+  })
+}
+
 // ── Wanted Imports ─────────────────────────────────────────
 
 export function useImportOperations() {

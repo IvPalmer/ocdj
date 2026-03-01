@@ -42,6 +42,106 @@
   color: var(--accent-red);
 }
 
+/* ── Config Sections ── */
+.config-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-section {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.config-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.config-section__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.config-section__status-row {
+  display: flex;
+  gap: 6px;
+}
+
+.config-badge {
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.config-badge--set {
+  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  color: var(--accent-green);
+}
+
+.config-badge--unset {
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text-muted);
+}
+
+.config-badge--connected {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  color: var(--accent-blue);
+}
+
+.config-field-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.config-field-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.config-field-value {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+
+.config-field-value--empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-family: inherit;
+}
+
+.config-fields-edit .form-group {
+  margin-bottom: 8px;
+}
+
+.config-fields-edit .form-group label {
+  font-size: 11px;
+}
+
+.config-fields-edit .form-group input {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.config-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
 /* ── Quick Links ── */
 .links-grid {
   display: flex;

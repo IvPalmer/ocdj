@@ -147,20 +147,15 @@ def trigger_import(request):
     import_type = ser.validated_data['import_type']
     url = ser.validated_data.get('url', '')
 
-    # Create or reuse a WantedSource for this import
+    # Reuse a single source per import type
     source_name = f"{import_type.capitalize()} Import"
-    if url:
-        source, _ = WantedSource.objects.get_or_create(
-            url=url,
-            source_type=import_type,
-            defaults={'name': source_name},
-        )
-    else:
-        source, _ = WantedSource.objects.get_or_create(
-            source_type=import_type,
-            name=source_name,
-            defaults={'url': ''},
-        )
+    source, _ = WantedSource.objects.get_or_create(
+        source_type=import_type,
+        defaults={'name': source_name, 'url': url},
+    )
+    if url and source.url != url:
+        source.url = url
+        source.save(update_fields=['url'])
 
     op = ImportOperation.objects.create(
         import_type=import_type,
@@ -284,13 +279,13 @@ def spotify_status(request):
 @api_view(['GET'])
 def import_config_status(request):
     """Return which import sources are configured and available."""
-    import os
+    from core.views import get_config
 
     spotify_cfg = check_spotify_status()
-    discogs_token = os.environ.get('DISCOGS_PERSONAL_TOKEN', '') or getattr(settings, 'DISCOGS_PERSONAL_TOKEN', '')
-    discogs_user = os.environ.get('DISCOGS_USERNAME', '') or getattr(settings, 'DISCOGS_USERNAME', '')
-    yt_api_key = os.environ.get('YOUTUBE_API_KEY', '') or getattr(settings, 'YOUTUBE_API_KEY', '')
-    sc_client_id = os.environ.get('SC_CLIENT_ID', '') or getattr(settings, 'SC_CLIENT_ID', '')
+    discogs_token = get_config('DISCOGS_PERSONAL_TOKEN')
+    discogs_user = get_config('DISCOGS_USERNAME')
+    yt_api_key = get_config('YOUTUBE_API_KEY')
+    sc_client_id = get_config('SC_CLIENT_ID')
 
     return Response({
         'youtube': {

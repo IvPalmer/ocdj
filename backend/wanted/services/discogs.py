@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 def _get_config():
+    from core.views import get_config
     return {
-        'token': getattr(settings, 'DISCOGS_PERSONAL_TOKEN', '') or os.environ.get('DISCOGS_PERSONAL_TOKEN', ''),
-        'username': getattr(settings, 'DISCOGS_USERNAME', '') or os.environ.get('DISCOGS_USERNAME', ''),
+        'token': get_config('DISCOGS_PERSONAL_TOKEN'),
+        'username': get_config('DISCOGS_USERNAME'),
     }
 
 

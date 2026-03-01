@@ -17,9 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 def _get_config():
+    from core.views import get_config
     return {
-        'client_id': getattr(settings, 'SC_CLIENT_ID', '') or os.environ.get('SC_CLIENT_ID', ''),
-        'client_secret': getattr(settings, 'SC_CLIENT_SECRET', '') or os.environ.get('SC_CLIENT_SECRET', ''),
+        'client_id': get_config('SC_CLIENT_ID'),
+        'client_secret': get_config('SC_CLIENT_SECRET'),
     }
 
 
