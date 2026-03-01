@@ -1,0 +1,420 @@
+.recognize-panel {
+  max-width: 1100px;
+}
+
+/* ── Header ── */
+.recognize-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.recognize-header .page-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── URL Input ── */
+.recognize-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.recognize-input-row input {
+  flex: 1;
+}
+
+/* ── Active Job Card ── */
+.recognize-active {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+.recognize-active-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.recognize-active-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.recognize-active-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  margin-top: 8px;
+}
+
+/* ── Status Badge ── */
+.recognize-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.recognize-status--downloading { color: var(--accent-blue); }
+.recognize-status--recognizing { color: var(--accent-amber); }
+.recognize-status--completed { color: var(--accent-green); }
+.recognize-status--failed { color: var(--accent-red); }
+.recognize-status--pending { color: var(--text-muted); }
+
+.recognize-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: recognize-spin 0.6s linear infinite;
+}
+
+@keyframes recognize-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Progress Bar ── */
+.recognize-progress {
+  margin-top: 12px;
+}
+
+.recognize-progress-bar {
+  height: 8px;
+  background: var(--bg-surface);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.recognize-progress-fill {
+  height: 100%;
+  background: var(--accent-green);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.recognize-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+
+/* ── Tracklist Table ── */
+.recognize-tracklist {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.recognize-tracklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.recognize-tracklist-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.recognize-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.recognize-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.recognize-table th:first-child {
+  width: 36px;
+  text-align: center;
+}
+
+.recognize-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.recognize-table td:first-child {
+  text-align: center;
+}
+
+.recognize-table tr:last-child td {
+  border-bottom: none;
+}
+
+.recognize-table tr:hover td {
+  background: color-mix(in srgb, var(--bg-surface) 50%, transparent);
+}
+
+.recognize-table .track-artist {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.recognize-table .track-title {
+  color: var(--text-secondary);
+}
+
+.recognize-table .track-timestamp {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.recognize-table .track-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Confidence Badges ── */
+.confidence-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.confidence-badge--high {
+  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  color: var(--accent-green);
+}
+
+.confidence-badge--medium {
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  color: var(--accent-amber);
+}
+
+.confidence-badge--low {
+  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  color: var(--accent-red);
+}
+
+/* ── Actions Row ── */
+.recognize-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.recognize-actions .select-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* ── Description Tracks ── */
+.recognize-description {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.recognize-description-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.recognize-description-header:hover {
+  background: var(--bg-surface);
+}
+
+.recognize-description-header h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.recognize-description-toggle {
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+
+.recognize-description-toggle--open {
+  transform: rotate(90deg);
+}
+
+.recognize-description-body {
+  padding: 0;
+}
+
+.recognize-description-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.recognize-description-table td {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.recognize-description-table .track-timestamp {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  width: 70px;
+}
+
+/* ── Past Jobs List ── */
+.recognize-history {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.recognize-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.recognize-history-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.recognize-job-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.recognize-job-card:last-child {
+  border-bottom: none;
+}
+
+.recognize-job-card:hover {
+  background: var(--bg-surface);
+}
+
+.recognize-job-card--active {
+  background: color-mix(in srgb, var(--accent-blue) 4%, transparent);
+  border-left: 3px solid var(--accent-blue);
+}
+
+.recognize-job-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.recognize-job-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recognize-job-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.recognize-job-meta .mono {
+  font-family: var(--mono);
+}
+
+/* ── Error ── */
+.recognize-error {
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--accent-red) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-red) 15%, transparent);
+  border-radius: var(--radius);
+  color: var(--accent-red);
+  font-size: 12px;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 16px;
+}
+
+/* ── Empty ── */
+.recognize-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  padding: 16px;
+  text-align: center;
+}
+
+/* ── Success message ── */
+.recognize-success {
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--accent-green) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-green) 15%, transparent);
+  border-radius: var(--radius);
+  color: var(--accent-green);
+  font-size: 12px;
+  margin-bottom: 16px;
+}

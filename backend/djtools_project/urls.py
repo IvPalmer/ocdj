@@ -9,6 +9,8 @@ urlpatterns = [
     path('api/soulseek/', include('soulseek.urls')),
     path('api/traxdb/', include('traxdb.urls')),
     path('api/core/', include('core.urls')),
+    path('api/recognize/', include('recognize.urls')),
+    path('api/organize/', include('organize.urls')),
 ]
 
 if settings.DEBUG:

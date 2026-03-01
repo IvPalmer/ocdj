@@ -403,10 +403,145 @@ export function useTraxDBDownloadProgress(id) {
   })
 }
 
+// ── Recognize ────────────────────────────────────────────────
+
+export function useRecognizeJobs() {
+  return useQuery({
+    queryKey: ['recognize-jobs'],
+    queryFn: () => api.get('/recognize/jobs/'),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const jobs = data?.results || []
+      if (jobs.some(j => j.status === 'downloading' || j.status === 'recognizing')) return 5000
+      return false
+    },
+  })
+}
+
+export function useRecognizeJob(id) {
+  return useQuery({
+    queryKey: ['recognize-job', id],
+    queryFn: () => api.get(`/recognize/jobs/${id}/`),
+    enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.status === 'downloading' || data?.status === 'recognizing') return 3000
+      return false
+    },
+  })
+}
+
+export function useCreateRecognizeJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data) => api.post('/recognize/jobs/create/', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recognize-jobs'] }),
+  })
+}
+
+export function useAddRecognizeToWanted() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, track_indices }) =>
+      api.post(`/recognize/jobs/${id}/add-to-wanted/`, { track_indices }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
+      qc.invalidateQueries({ queryKey: ['wanted-items'] })
+    },
+  })
+}
+
 export function useCancelTraxDBDownload() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.post(`/traxdb/download/${id}/cancel/`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['traxdb-operations'] }),
+  })
+}
+
+// ── Organize Pipeline ────────────────────────────────────────
+
+export function usePipelineStats() {
+  return useQuery({
+    queryKey: ['pipeline-stats'],
+    queryFn: () => api.get('/organize/pipeline/stats/'),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.tagging > 0 || data?.renaming > 0) return 3000
+      return 30000
+    },
+  })
+}
+
+export function usePipelineItems(params = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.stage) searchParams.set('stage', params.stage)
+  if (params.page) searchParams.set('page', params.page)
+
+  const qs = searchParams.toString()
+  return useQuery({
+    queryKey: ['pipeline-items', params],
+    queryFn: () => api.get(`/organize/pipeline/${qs ? '?' + qs : ''}`),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const items = data?.results || []
+      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming')) return 3000
+      return false
+    },
+  })
+}
+
+export function useProcessPipeline() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post('/organize/pipeline/process/'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+export function useProcessSingle() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/organize/pipeline/${id}/process/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+export function useRetryItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/organize/pipeline/${id}/retry/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+export function useSkipStage() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/organize/pipeline/${id}/skip/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+export function useScanDownloads() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post('/organize/pipeline/scan/'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
   })
 }
