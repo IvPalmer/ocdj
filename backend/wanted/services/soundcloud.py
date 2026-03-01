@@ -80,11 +80,28 @@ def _parse_sc_url(url):
     return '', url
 
 
-def _fetch_via_ytdlp(url):
-    """Fetch playlist using yt-dlp. Uses full extraction for SoundCloud (extract_flat returns no metadata)."""
+def _extract_single_track(track_url):
+    """Extract metadata for a single SoundCloud track."""
     import yt_dlp
 
-    # First get the track list with extract_flat (fast)
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(track_url, download=False)
+    except Exception:
+        return None
+
+
+def _fetch_via_ytdlp(url):
+    """Fetch playlist using yt-dlp. Parallelizes track metadata fetching for SoundCloud."""
+    import yt_dlp
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Get the track list with extract_flat (fast — single request)
     flat_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -106,24 +123,13 @@ def _fetch_via_ytdlp(url):
     )
 
     if has_metadata:
-        # Flat extraction worked (e.g. YouTube) — use it
         return _parse_entries(entries)
 
-    # SoundCloud flat extraction has no metadata — do full extraction
-    # This fetches each track's page but gets actual titles
-    full_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'ignoreerrors': True,
-    }
+    # SoundCloud flat extraction has no metadata — fetch each track in parallel
+    track_urls = [e.get('url') for e in entries if e and e.get('url')]
 
-    with yt_dlp.YoutubeDL(full_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-
-    full_entries = list(info.get('entries', []))
-    if not full_entries and info.get('title'):
-        full_entries = [info]
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        full_entries = list(pool.map(_extract_single_track, track_urls))
 
     return _parse_entries(full_entries)
 
