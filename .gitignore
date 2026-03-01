@@ -7,6 +7,7 @@ djtools_config.json
 tools/**/config.json
 tools/**/traxdb_cookies.txt
 backend/.secret_key
+backend/.spotify_cache
 
 # Local artifacts
 logs/
