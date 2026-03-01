@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   useWantedItems, useWantedSources, useCreateWantedItem,
   useUpdateWantedItem, useDeleteWantedItem, useBulkUpdateStatus,
-  useBulkDeleteItems, useAddToQueue,
+  useBulkDeleteItems, useAddToQueue, useSearch,
 } from '../../api/hooks'
 import AddItemForm from './AddItemForm'
 import ImportPanel from './ImportPanel'
@@ -200,6 +200,7 @@ function WantedList() {
   const bulkUpdate = useBulkUpdateStatus()
   const bulkDelete = useBulkDeleteItems()
   const addToQueue = useAddToQueue()
+  const searchSlsk = useSearch()
 
   const items = data?.results || []
   const sources = sourcesData?.results || sourcesData || []
@@ -241,6 +242,15 @@ function WantedList() {
     addToQueue.mutate(
       { wanted_item_ids: [itemId] },
       {
+        onSuccess: (data) => {
+          // Auto-search each created queue item
+          const queueItems = Array.isArray(data) ? data : []
+          queueItems.forEach(qi => {
+            if (qi.id && qi.status === 'pending') {
+              searchSlsk.mutate({ queue_item_id: qi.id })
+            }
+          })
+        },
         onSettled: () => setQueuingId(null),
       },
     )
@@ -249,7 +259,19 @@ function WantedList() {
   const handleBulkAddToQueue = () => {
     const ids = Array.from(selectedIds)
     if (!ids.length) return
-    addToQueue.mutate({ wanted_item_ids: ids })
+    addToQueue.mutate(
+      { wanted_item_ids: ids },
+      {
+        onSuccess: (data) => {
+          const queueItems = Array.isArray(data) ? data : []
+          queueItems.forEach(qi => {
+            if (qi.id && qi.status === 'pending') {
+              searchSlsk.mutate({ queue_item_id: qi.id })
+            }
+          })
+        },
+      },
+    )
     setSelectedIds(new Set())
   }
 

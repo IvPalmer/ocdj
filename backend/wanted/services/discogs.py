@@ -43,6 +43,8 @@ def _discogs_worker(operation_id):
 
         d = discogs_client.Client('DJTools/2.0', user_token=config['token'])
         user = d.identity()
+        op.playlist_name = f"{config['username']}'s Wantlist"
+        op.save()
         wantlist = user.wantlist
 
         import re

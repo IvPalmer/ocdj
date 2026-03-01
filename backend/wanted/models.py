@@ -118,6 +118,7 @@ class ImportOperation(models.Model):
     import_type = models.CharField(max_length=20, choices=IMPORT_TYPES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     url = models.URLField(blank=True)
+    playlist_name = models.CharField(max_length=500, blank=True)
     source = models.ForeignKey(
         WantedSource,
         on_delete=models.SET_NULL,

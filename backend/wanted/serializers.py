@@ -54,7 +54,8 @@ class ImportOperationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImportOperation
         fields = [
-            'id', 'import_type', 'status', 'url', 'source', 'source_name',
+            'id', 'import_type', 'status', 'url', 'playlist_name',
+            'source', 'source_name',
             'preview_data', 'summary', 'total_found', 'duplicates_found',
             'items_imported', 'error_message', 'created', 'updated',
         ]
@@ -67,7 +68,8 @@ class ImportOperationListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImportOperation
         fields = [
-            'id', 'import_type', 'status', 'url', 'source', 'source_name',
+            'id', 'import_type', 'status', 'url', 'playlist_name',
+            'source', 'source_name',
             'total_found', 'duplicates_found', 'items_imported',
             'error_message', 'created', 'updated',
         ]

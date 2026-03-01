@@ -24,6 +24,18 @@ def _extract_playlist_id(url):
     return match.group(1) if match else None
 
 
+def _fetch_playlist_name_api(playlist_id, api_key):
+    """Fetch playlist title from YouTube Data API."""
+    import urllib.request
+    import json
+    url = f'https://www.googleapis.com/youtube/v3/playlists?part=snippet&id={playlist_id}&key={api_key}'
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read())
+    items = data.get('items', [])
+    return items[0]['snippet']['title'] if items else ''
+
+
 def _fetch_via_api(playlist_id, api_key):
     """Fetch playlist items using the YouTube Data API v3. Works with private playlists if the key has access."""
     import urllib.request
@@ -68,7 +80,7 @@ def _fetch_via_api(playlist_id, api_key):
     return tracks
 
 
-def _fetch_via_ytdlp(url):
+def _fetch_via_ytdlp(url, op=None):
     """Fetch playlist using yt-dlp (public playlists only)."""
     import yt_dlp
 
@@ -81,6 +93,10 @@ def _fetch_via_ytdlp(url):
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+
+    if op and info.get('title') and not op.playlist_name:
+        op.playlist_name = info['title']
+        op.save()
 
     entries = info.get('entries', [])
     if not entries and info.get('title'):
@@ -134,12 +150,14 @@ def _youtube_worker(operation_id):
         # Try YouTube Data API first (supports private playlists), fallback to yt-dlp
         if api_key and playlist_id:
             try:
+                op.playlist_name = _fetch_playlist_name_api(playlist_id, api_key)
+                op.save()
                 tracks = _fetch_via_api(playlist_id, api_key)
             except Exception as api_err:
                 logger.warning(f'YouTube API failed, falling back to yt-dlp: {api_err}')
-                tracks = _fetch_via_ytdlp(op.url)
+                tracks = _fetch_via_ytdlp(op.url, op)
         else:
-            tracks = _fetch_via_ytdlp(op.url)
+            tracks = _fetch_via_ytdlp(op.url, op)
 
         tracks = check_duplicates(tracks)
 

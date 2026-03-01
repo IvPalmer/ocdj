@@ -110,8 +110,8 @@ function ImportPanel({ onClose }) {
           <h3>
             {step === 'select' && 'Import Tracks'}
             {step === 'url' && `Import from ${SOURCE_CARDS.find(c => c.type === selectedType)?.label}`}
-            {step === 'fetching' && 'Fetching...'}
-            {step === 'preview' && 'Preview Import'}
+            {step === 'fetching' && (operation?.playlist_name || 'Fetching...')}
+            {step === 'preview' && (operation?.playlist_name || 'Preview Import')}
             {step === 'error' && 'Import Failed'}
           </h3>
           <button className="btn-close" onClick={onClose} aria-label="Close" />
@@ -182,7 +182,12 @@ function ImportPanel({ onClose }) {
           {step === 'fetching' && (
             <div className="import-fetching">
               <div className="import-spinner" />
-              <p>Fetching tracks from {SOURCE_CARDS.find(c => c.type === selectedType)?.label}...</p>
+              <p>
+                {operation?.playlist_name
+                  ? `Fetching tracks from "${operation.playlist_name}"...`
+                  : `Fetching tracks from ${SOURCE_CARDS.find(c => c.type === selectedType)?.label}...`
+                }
+              </p>
             </div>
           )}
 

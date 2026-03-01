@@ -128,6 +128,14 @@ def _spotify_worker(operation_id):
         if not playlist_id:
             raise ValueError(f'Could not extract playlist ID from URL: {op.url}')
 
+        # Fetch playlist name
+        try:
+            playlist_info = sp.playlist(playlist_id, fields='name')
+            op.playlist_name = playlist_info.get('name', '')
+            op.save()
+        except Exception:
+            pass
+
         tracks = []
         results = sp.playlist_items(playlist_id, limit=100)
 

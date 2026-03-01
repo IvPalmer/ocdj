@@ -32,9 +32,13 @@ def _resolve_url(url, client_id):
         return json.loads(resp.read())
 
 
-def _fetch_via_api(url, client_id):
+def _fetch_via_api(url, client_id, op=None):
     """Fetch playlist/set tracks using the SoundCloud API."""
     data = _resolve_url(url, client_id)
+
+    if op and data.get('title') and not op.playlist_name:
+        op.playlist_name = data['title']
+        op.save()
 
     # Could be a playlist/set or a user's likes/tracks
     tracks_data = data.get('tracks', [])
@@ -96,7 +100,7 @@ def _extract_single_track(track_url):
         return None
 
 
-def _fetch_via_ytdlp(url):
+def _fetch_via_ytdlp(url, op=None):
     """Fetch playlist using yt-dlp. Parallelizes track metadata fetching for SoundCloud."""
     import yt_dlp
     from concurrent.futures import ThreadPoolExecutor
@@ -111,6 +115,10 @@ def _fetch_via_ytdlp(url):
 
     with yt_dlp.YoutubeDL(flat_opts) as ydl:
         info = ydl.extract_info(url, download=False)
+
+    if op and info.get('title') and not op.playlist_name:
+        op.playlist_name = info['title']
+        op.save()
 
     entries = list(info.get('entries', []))
     if not entries and info.get('title'):
@@ -194,12 +202,12 @@ def _soundcloud_worker(operation_id):
         # Try SoundCloud API first (supports private playlists), fallback to yt-dlp
         if config['client_id']:
             try:
-                tracks = _fetch_via_api(op.url, config['client_id'])
+                tracks = _fetch_via_api(op.url, config['client_id'], op)
             except Exception as api_err:
                 logger.warning(f'SoundCloud API failed, falling back to yt-dlp: {api_err}')
-                tracks = _fetch_via_ytdlp(op.url)
+                tracks = _fetch_via_ytdlp(op.url, op)
         else:
-            tracks = _fetch_via_ytdlp(op.url)
+            tracks = _fetch_via_ytdlp(op.url, op)
 
         tracks = check_duplicates(tracks)
 
