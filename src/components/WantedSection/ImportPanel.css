@@ -59,6 +59,60 @@
   margin-bottom: 16px;
 }
 
+.import-default-playlist {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+.import-default-playlist__card {
+  flex: 1;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.import-default-playlist__card:hover {
+  background: var(--bg-raised);
+  border-color: var(--accent-green);
+}
+
+.import-default-playlist__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+
+.import-default-playlist__url {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.import-default-playlist__change {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.import-default-playlist__change:hover {
+  background: var(--bg-raised);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
 /* ── Fetching ── */
 .import-fetching {
   display: flex;

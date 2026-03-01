@@ -12,6 +12,24 @@ const DEFAULT_PLAYLIST_KEYS = {
   spotify: 'SPOTIFY_DEFAULT_PLAYLIST',
 }
 
+const DEFAULT_PLAYLIST_NAME_KEYS = {
+  youtube: 'YOUTUBE_DEFAULT_PLAYLIST_NAME',
+  soundcloud: 'SC_DEFAULT_PLAYLIST_NAME',
+  spotify: 'SPOTIFY_DEFAULT_PLAYLIST_NAME',
+}
+
+function shortenUrl(url) {
+  if (!url) return ''
+  try {
+    const u = new URL(url)
+    const path = u.pathname.replace(/^\//, '')
+    const host = u.hostname.replace('www.', '').replace('on.', '')
+    return path ? `${host}/.../${path.split('/').pop()}` : host
+  } catch {
+    return url.length > 40 ? url.slice(0, 37) + '...' : url
+  }
+}
+
 const SOURCE_CARDS = [
   { type: 'youtube', label: 'YouTube', needsUrl: true },
   { type: 'soundcloud', label: 'SoundCloud', needsUrl: true },
@@ -24,6 +42,7 @@ function ImportPanel({ onClose }) {
   const [selectedType, setSelectedType] = useState(null)
   const [url, setUrl] = useState('')
   const [operationId, setOperationId] = useState(null)
+  const [customUrlMode, setCustomUrlMode] = useState(false)
 
   const { data: configStatus } = useImportConfigStatus()
   const { data: spotifyStatus } = useSpotifyStatus()
@@ -34,6 +53,13 @@ function ImportPanel({ onClose }) {
 
   const getDefaultPlaylist = (type) => {
     const key = DEFAULT_PLAYLIST_KEYS[type]
+    if (!key || !configData) return ''
+    const entry = configData[key]
+    return entry?.set ? (entry.value || '') : ''
+  }
+
+  const getDefaultPlaylistName = (type) => {
+    const key = DEFAULT_PLAYLIST_NAME_KEYS[type]
     if (!key || !configData) return ''
     const entry = configData[key]
     return entry?.set ? (entry.value || '') : ''
@@ -50,11 +76,11 @@ function ImportPanel({ onClose }) {
 
   const handleSelectSource = (type) => {
     setSelectedType(type)
+    setCustomUrlMode(false)
 
     if (!SOURCE_CARDS.find(c => c.type === type).needsUrl) {
       handleTrigger(type, '')
     } else {
-      // Pre-fill with default playlist if configured
       const defaultUrl = getDefaultPlaylist(type)
       setUrl(defaultUrl)
       setStep('url')
@@ -150,33 +176,59 @@ function ImportPanel({ onClose }) {
           )}
 
           {/* Step 2: URL Input */}
-          {step === 'url' && (
-            <div className="import-url-step">
-              <div className="form-group">
-                <label>Playlist URL</label>
-                <input
-                  type="url"
-                  value={url}
-                  onChange={e => setUrl(e.target.value)}
-                  placeholder={`Paste ${SOURCE_CARDS.find(c => c.type === selectedType)?.label} playlist URL...`}
-                  autoFocus
-                  onKeyDown={e => e.key === 'Enter' && url && handleTrigger()}
-                />
+          {step === 'url' && (() => {
+            const defaultUrl = getDefaultPlaylist(selectedType)
+            const defaultName = getDefaultPlaylistName(selectedType)
+            const hasDefault = defaultUrl && !customUrlMode
+
+            return (
+              <div className="import-url-step">
+                {hasDefault ? (
+                  <div className="import-default-playlist">
+                    <div className="import-default-playlist__card" onClick={() => handleTrigger()}>
+                      <div className="import-default-playlist__name">{defaultName || 'Default Playlist'}</div>
+                      <div className="import-default-playlist__url">{shortenUrl(defaultUrl)}</div>
+                    </div>
+                    <button
+                      className="btn btn-sm import-default-playlist__change"
+                      onClick={() => { setCustomUrlMode(true); setUrl('') }}
+                      title="Use a different URL"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label>Playlist URL</label>
+                    <input
+                      type="url"
+                      value={url}
+                      onChange={e => setUrl(e.target.value)}
+                      placeholder={`Paste ${SOURCE_CARDS.find(c => c.type === selectedType)?.label} playlist URL...`}
+                      autoFocus
+                      onKeyDown={e => e.key === 'Enter' && url && handleTrigger()}
+                    />
+                  </div>
+                )}
+                <div className="form-actions">
+                  <button className="btn" onClick={() => { setStep('select'); setSelectedType(null); setUrl(''); setCustomUrlMode(false) }}>
+                    Back
+                  </button>
+                  {!hasDefault && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => handleTrigger()}
+                      disabled={!url}
+                    >
+                      Go
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="form-actions">
-                <button className="btn" onClick={() => { setStep('select'); setSelectedType(null); setUrl('') }}>
-                  Back
-                </button>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => handleTrigger()}
-                  disabled={!url}
-                >
-                  Go
-                </button>
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Step 3: Fetching */}
           {step === 'fetching' && (

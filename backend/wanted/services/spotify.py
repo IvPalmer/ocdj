@@ -172,6 +172,9 @@ def _spotify_worker(operation_id):
         op.status = 'previewing'
         op.save()
 
+        from . import save_default_playlist_name
+        save_default_playlist_name('spotify', op.playlist_name)
+
     except Exception as e:
         logger.exception(f'Spotify import failed for operation {operation_id}')
         try:

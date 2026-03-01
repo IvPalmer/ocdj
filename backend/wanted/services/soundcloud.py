@@ -218,6 +218,9 @@ def _soundcloud_worker(operation_id):
         op.status = 'previewing'
         op.save()
 
+        from . import save_default_playlist_name
+        save_default_playlist_name('soundcloud', op.playlist_name)
+
     except Exception as e:
         logger.exception(f'SoundCloud import failed for operation {operation_id}')
         try:
