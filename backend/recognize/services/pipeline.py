@@ -15,6 +15,14 @@ from .clustering import cluster_results, find_gaps
 
 logger = logging.getLogger(__name__)
 
+# Pipeline configuration
+SEGMENT_DURATION = 10   # seconds per segment (optimal for Shazam on mixed audio)
+SEGMENT_STEP = 15       # seconds between segment starts (~66% coverage)
+GAP_THRESHOLD = 30      # min gap in seconds to trigger pass 2
+GAP_SEGMENT_DURATION = 12
+GAP_SEGMENT_STEP = 8
+MAX_GAP_SEGMENTS = 100  # cap pass 2 to avoid excessive scanning of unrecognizable audio
+
 
 def run_recognize(job_id):
     """Launch the recognition pipeline in a background thread."""
@@ -46,14 +54,18 @@ def _recognize_worker(job_id):
         job.description_tracks = description_tracks
         job.save()
 
-        # Step 3: Segment audio (pass 1: 5s segments every 10s)
+        # Step 3: Segment audio (pass 1: 10s segments every 15s)
         job.status = 'recognizing'
-        segments = segment_audio(audio_path, segment_duration=5, step=10)
+        segments = segment_audio(
+            audio_path,
+            segment_duration=SEGMENT_DURATION,
+            step=SEGMENT_STEP,
+        )
         job.segments_total = len(segments)
         job.segments_done = 0
         job.save()
 
-        # Step 4: Recognize pass 1
+        # Step 4: Recognize pass 1 (concurrent ShazamIO)
         def on_progress_pass1(done, total):
             job.segments_done = done
             job.save(update_fields=['segments_done', 'updated'])
@@ -62,10 +74,19 @@ def _recognize_worker(job_id):
 
         # Step 5: Find gaps and do pass 2 with longer segments
         duration = job.duration_seconds or 0
-        gaps = find_gaps(raw_results, duration, min_gap=60)
+        gaps = find_gaps(raw_results, duration, min_gap=GAP_THRESHOLD, step=SEGMENT_STEP)
 
         if gaps:
-            gap_segs = segment_gaps(audio_path, gaps, segment_duration=12, step=8)
+            gap_segs = segment_gaps(
+                audio_path, gaps,
+                segment_duration=GAP_SEGMENT_DURATION,
+                step=GAP_SEGMENT_STEP,
+            )
+            # Cap gap segments to avoid spending ages on unrecognizable audio
+            if gap_segs and len(gap_segs) > MAX_GAP_SEGMENTS:
+                logger.info(f'Capping gap segments from {len(gap_segs)} to {MAX_GAP_SEGMENTS}')
+                gap_segs = gap_segs[:MAX_GAP_SEGMENTS]
+
             if gap_segs:
                 job.segments_total += len(gap_segs)
                 job.save()
@@ -76,12 +97,22 @@ def _recognize_worker(job_id):
                     job.segments_done = pass1_done + done
                     job.save(update_fields=['segments_done', 'updated'])
 
-                gap_results = recognize_segments(gap_segs, on_progress=on_progress_pass2)
+                # Pass 2 uses shorter timeout and single attempt — these are
+                # segments that already failed in pass 1, no point being patient
+                gap_results = recognize_segments(
+                    gap_segs,
+                    on_progress=on_progress_pass2,
+                    timeout=10,
+                    retries=1,
+                )
                 raw_results.extend(gap_results)
                 # Re-sort by start_sec
                 raw_results.sort(key=lambda r: r['start_sec'])
 
-        # Step 6: Cluster results into tracklist
+        # Step 6: Store raw results for re-clustering
+        job.raw_results = raw_results
+
+        # Step 7: Cluster results into tracklist
         tracklist = cluster_results(raw_results, description_tracks)
 
         job.tracklist = tracklist
@@ -90,7 +121,7 @@ def _recognize_worker(job_id):
         job.status = 'completed'
         job.save()
 
-        # Step 7: Clean up temp audio files
+        # Step 8: Clean up temp audio files
         try:
             shutil.rmtree(output_dir, ignore_errors=True)
         except Exception:

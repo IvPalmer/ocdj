@@ -8,7 +8,7 @@ class RecognizeJobSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'url', 'title', 'status',
             'segments_total', 'segments_done', 'tracks_found',
-            'tracklist', 'description_tracks',
+            'tracklist', 'raw_results', 'description_tracks',
             'duration_seconds', 'error_message',
             'created', 'updated',
         ]

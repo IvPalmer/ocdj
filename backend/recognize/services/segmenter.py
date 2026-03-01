@@ -4,7 +4,7 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def segment_audio(audio_path, segment_duration=5, step=10):
+def segment_audio(audio_path, segment_duration=10, step=15):
     """Split audio into segments for recognition.
 
     Args:

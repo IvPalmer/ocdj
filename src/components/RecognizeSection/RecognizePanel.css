@@ -221,6 +221,11 @@
   text-transform: capitalize;
 }
 
+.confidence-badge--verified {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  color: var(--accent-blue);
+}
+
 .confidence-badge--high {
   background: color-mix(in srgb, var(--accent-green) 12%, transparent);
   color: var(--accent-green);
@@ -234,6 +239,11 @@
 .confidence-badge--low {
   background: color-mix(in srgb, var(--accent-red) 12%, transparent);
   color: var(--accent-red);
+}
+
+.confidence-badge--uncertain {
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text-muted);
 }
 
 /* ── Actions Row ── */

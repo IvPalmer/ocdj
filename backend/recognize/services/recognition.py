@@ -4,33 +4,57 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-# Rate limit between Shazam API requests (seconds)
-RATE_LIMIT_SECONDS = 1.5
+# Recognition configuration
+RATE_LIMIT_SECONDS = 1.5   # Delay between Shazam requests
+REQUEST_TIMEOUT = 15       # Timeout per Shazam request (seconds)
+MAX_RETRIES = 2            # Retries per segment on failure
 
 
-async def _recognize_single(shazam, segment_path):
-    """Recognize a single audio segment."""
-    try:
-        result = await shazam.recognize(segment_path)
-        return result
-    except Exception as e:
-        logger.warning(f'Recognition failed for {segment_path}: {e}')
-        return None
+async def _recognize_single(shazam, segment_path, timeout=REQUEST_TIMEOUT, retries=MAX_RETRIES):
+    """Recognize a single audio segment with timeout and retry."""
+    for attempt in range(retries):
+        try:
+            result = await asyncio.wait_for(
+                shazam.recognize(segment_path),
+                timeout=timeout,
+            )
+            return result
+        except asyncio.TimeoutError:
+            if attempt < retries - 1:
+                logger.warning(f'Timeout on attempt {attempt + 1} for {segment_path}, retrying')
+                await asyncio.sleep(2)
+            else:
+                logger.debug(f'Timed out after {retries} attempts for {segment_path}')
+                return None
+        except Exception as e:
+            if attempt < retries - 1:
+                logger.warning(f'Attempt {attempt + 1} failed for {segment_path}: {e}, retrying')
+                await asyncio.sleep(2)
+            else:
+                logger.warning(f'Failed after {retries} attempts for {segment_path}: {e}')
+                return None
+    return None
 
 
-async def _recognize_all(segments, progress_counter):
-    """Recognize all segments with rate limiting."""
+async def _recognize_all(segments, progress_counter, timeout=REQUEST_TIMEOUT, retries=MAX_RETRIES):
+    """Recognize all segments sequentially with rate limiting."""
     from shazamio import Shazam
 
     shazam = Shazam()
     results = []
 
     for i, (seg_path, start_sec) in enumerate(segments):
-        result = await _recognize_single(shazam, seg_path)
+        result = await _recognize_single(shazam, seg_path, timeout=timeout, retries=retries)
 
         track_info = None
+        confidence_score = 0.0
+
         if result and result.get('track'):
             track = result['track']
+            matches = result.get('matches', [])
+            # Normalize confidence: more fingerprint matches = higher confidence
+            confidence_score = min(len(matches) / 5.0, 1.0) if matches else 0.5
+
             track_info = {
                 'title': track.get('title', ''),
                 'artist': track.get('subtitle', ''),
@@ -39,11 +63,14 @@ async def _recognize_all(segments, progress_counter):
                 'apple_music_url': _extract_apple_music_url(track),
                 'album': _extract_metadata(track, 'Album'),
                 'label': _extract_metadata(track, 'Label'),
+                'confidence_score': confidence_score,
             }
 
         results.append({
             'start_sec': start_sec,
             'track': track_info,
+            'engine': 'shazam',
+            'confidence_score': confidence_score,
         })
 
         # Thread-safe counter update (no Django ORM here)
@@ -56,16 +83,19 @@ async def _recognize_all(segments, progress_counter):
     return results
 
 
-def recognize_segments(segments, on_progress=None):
+def recognize_segments(segments, on_progress=None, timeout=REQUEST_TIMEOUT, retries=MAX_RETRIES):
     """Recognize audio segments via ShazamIO.
 
     Args:
         segments: List of (segment_path, start_seconds) tuples
         on_progress: Callback(done, total) for progress updates, called from a
                      separate thread (safe for Django ORM calls)
+        timeout: Per-request timeout in seconds
+        retries: Number of retry attempts per segment
 
     Returns:
-        List of {start_sec, track: {title, artist, key, ...} or None}
+        List of {start_sec, track: {title, artist, key, confidence_score, ...} or None,
+                 engine: str, confidence_score: float}
     """
     progress_counter = {'done': 0}
     total = len(segments)
@@ -83,14 +113,14 @@ def recognize_segments(segments, on_progress=None):
                 last_reported = current
             if current >= total:
                 break
-            stop_event.wait(timeout=5)
+            stop_event.wait(timeout=2)
 
     if on_progress:
         progress_thread = threading.Thread(target=_report_progress, daemon=True)
         progress_thread.start()
 
     try:
-        results = asyncio.run(_recognize_all(segments, progress_counter))
+        results = asyncio.run(_recognize_all(segments, progress_counter, timeout=timeout, retries=retries))
     finally:
         stop_event.set()
         if on_progress:

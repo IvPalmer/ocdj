@@ -19,6 +19,7 @@ class RecognizeJob(models.Model):
     segments_done = models.IntegerField(default=0)
     tracks_found = models.IntegerField(default=0)
     tracklist = models.JSONField(default=list, blank=True)
+    raw_results = models.JSONField(default=list, blank=True)
     description_tracks = models.JSONField(default=list, blank=True)
     duration_seconds = models.IntegerField(null=True, blank=True)
     error_message = models.TextField(blank=True)
