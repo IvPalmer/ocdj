@@ -9,6 +9,7 @@ from .serializers import (
     RecognizeJobSerializer, RecognizeJobListSerializer, CreateJobSerializer,
 )
 from .services.pipeline import run_recognize
+from .services.trackid import lookup_by_url
 
 logger = logging.getLogger(__name__)
 
@@ -114,4 +115,28 @@ def add_to_wanted(request, pk):
     return Response({
         'created': created_count,
         'total_requested': len(track_indices),
+    })
+
+
+@api_view(['POST'])
+def trackid_lookup(request):
+    """Look up a mix URL on TrackID.net and return any existing tracklist."""
+    url = request.data.get('url', '').strip()
+    if not url:
+        return Response(
+            {'error': 'url is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    result = lookup_by_url(url)
+    if not result:
+        return Response({'found': False})
+
+    return Response({
+        'found': True,
+        'title': result.get('title', ''),
+        'duration_seconds': result.get('duration_seconds', 0),
+        'trackid_status': result.get('trackid_status', ''),
+        'tracklist': result.get('tracklist', []),
+        'track_count': len(result.get('tracklist', [])),
     })

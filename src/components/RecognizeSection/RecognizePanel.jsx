@@ -41,6 +41,13 @@ function StatusBadge({ status }) {
   )
 }
 
+function EngineBadge({ engine }) {
+  if (!engine || engine === 'shazam') return null
+  const labels = { trackid: 'TrackID.net', hybrid: 'Hybrid', acrcloud: 'ACRCloud', dual: 'Dual Engine' }
+  const classes = { trackid: 'engine-badge--trackid', hybrid: 'engine-badge--hybrid', acrcloud: 'engine-badge--acrcloud', dual: 'engine-badge--hybrid' }
+  return <span className={`engine-badge ${classes[engine] || 'engine-badge--hybrid'}`}>{labels[engine] || engine}</span>
+}
+
 function ProgressBar({ job }) {
   const { segments_done, segments_total } = job
   const pct = segments_total > 0 ? Math.round((segments_done / segments_total) * 100) : 0
@@ -138,6 +145,7 @@ function Tracklist({ job }) {
     <div className="recognize-tracklist">
       <div className="recognize-tracklist-header">
         <h3>Tracklist ({tracklist.length} tracks)</h3>
+        <EngineBadge engine={job.engine} />
       </div>
       {successMsg && <div className="recognize-success">{successMsg}</div>}
       <table className="recognize-table">
@@ -154,6 +162,7 @@ function Tracklist({ job }) {
             <th>Track</th>
             <th>Album / Label</th>
             <th>Confidence</th>
+            <th>Source</th>
           </tr>
         </thead>
         <tbody>
@@ -184,6 +193,9 @@ function Tracklist({ job }) {
                 <span className={`confidence-badge confidence-badge--${track.confidence}`}>
                   {track.confidence}
                 </span>
+              </td>
+              <td className="track-meta">
+                {(track.engines || []).join(', ') || 'shazam'}
               </td>
             </tr>
           ))}
@@ -263,6 +275,7 @@ function JobHistory({ jobs, activeJobId, onSelect }) {
             <div className="recognize-job-title">{job.title || job.url}</div>
             <div className="recognize-job-meta">
               <StatusBadge status={job.status} />
+              <EngineBadge engine={job.engine} />
               {job.tracks_found > 0 && <span className="mono">{job.tracks_found} tracks</span>}
               {job.duration_seconds > 0 && <span>{formatDuration(job.duration_seconds)}</span>}
               <span>{timeAgo(job.created)}</span>

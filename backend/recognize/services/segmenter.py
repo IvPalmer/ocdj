@@ -4,7 +4,7 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def segment_audio(audio_path, segment_duration=10, step=15):
+def segment_audio(audio_path, segment_duration=5, step=10):
     """Split audio into segments for recognition.
 
     Args:
@@ -84,4 +84,55 @@ def segment_gaps(audio_path, gaps, segment_duration=12, step=8):
             start_ms += step * 1000
 
     logger.info(f'Created {len(segments)} gap segments from {len(gaps)} gaps')
+    return segments
+
+
+def segment_verification(audio_path, candidates, segment_duration=5, offsets=(-5, 5)):
+    """Create verification segments for single-hit tracks.
+
+    For each candidate timestamp, create segments at offset positions
+    to check if Shazam can identify the same track from a different slice.
+
+    Args:
+        audio_path: Path to the audio file
+        candidates: List of (start_sec, track_key) tuples
+        segment_duration: Length of each verification segment
+        offsets: Offsets from the original start_sec to try
+
+    Returns:
+        List of (segment_file_path, start_time_seconds) tuples
+    """
+    from pydub import AudioSegment
+
+    audio = AudioSegment.from_file(audio_path)
+    total_ms = len(audio)
+
+    output_dir = os.path.join(os.path.dirname(audio_path), 'verify_segments')
+    os.makedirs(output_dir, exist_ok=True)
+
+    segments = []
+    seen_starts = set()
+
+    for start_sec, _track_key in candidates:
+        for offset in offsets:
+            verify_start = max(0, start_sec + offset)
+            # Skip duplicates and out-of-range
+            if verify_start in seen_starts:
+                continue
+            start_ms = verify_start * 1000
+            if start_ms >= total_ms:
+                continue
+
+            end_ms = min(start_ms + segment_duration * 1000, total_ms)
+            if end_ms - start_ms < 3000:
+                continue
+
+            segment = audio[start_ms:end_ms]
+            seg_path = os.path.join(output_dir, f'verify_{verify_start:06d}.mp3')
+            segment.export(seg_path, format='mp3')
+
+            segments.append((seg_path, verify_start))
+            seen_starts.add(verify_start)
+
+    logger.info(f'Created {len(segments)} verification segments from {len(candidates)} candidates')
     return segments

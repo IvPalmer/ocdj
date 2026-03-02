@@ -44,3 +44,4 @@ tools/bin/
 
 # Claude Code
 .claude/
+.research/

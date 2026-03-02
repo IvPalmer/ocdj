@@ -22,6 +22,7 @@ class RecognizeJob(models.Model):
     raw_results = models.JSONField(default=list, blank=True)
     description_tracks = models.JSONField(default=list, blank=True)
     duration_seconds = models.IntegerField(null=True, blank=True)
+    engine = models.CharField(max_length=20, default='shazam', blank=True)  # shazam, trackid, hybrid
     error_message = models.TextField(blank=True)
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

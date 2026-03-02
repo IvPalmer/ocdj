@@ -5,6 +5,7 @@ logger = logging.getLogger(__name__)
 # Clustering configuration
 NONE_TOLERANCE = 2       # Max consecutive Nones before splitting a group
 DEDUP_WINDOW_SEC = 60    # Only dedup same track if within this many seconds
+MIN_SEGMENT_HITS = 2     # Minimum segment hits to include in tracklist (filters false positives)
 
 
 def cluster_results(raw_results, description_tracks=None):
@@ -39,7 +40,15 @@ def cluster_results(raw_results, description_tracks=None):
         seg_count = len(segments)
 
         timestamp_start = segments[0]['start_sec']
-        timestamp_end = segments[-1]['start_sec'] + 15  # approximate segment coverage
+        timestamp_end = segments[-1]['start_sec'] + 10  # approximate segment coverage
+
+        track = group['track']
+
+        # Filter single-segment results (almost always false positives in mix recognition)
+        if seg_count < MIN_SEGMENT_HITS:
+            logger.debug(f'Filtering single-segment track: {track.get("artist")} - {track.get("title")} '
+                         f'at {timestamp_start}s ({seg_count} hit)')
+            continue
 
         # Position-aware dedup: only skip if same track appeared within DEDUP_WINDOW_SEC
         if key in last_seen:
@@ -52,7 +61,6 @@ def cluster_results(raw_results, description_tracks=None):
         avg_score = sum(scores) / len(scores) if scores else 0
 
         # Cross-validate with description tracks
-        track = group['track']
         in_description = _check_description_match(track, desc_set)
 
         # 5-tier confidence system
@@ -123,14 +131,13 @@ def _group_segments(raw_results):
 
 
 def _compute_confidence(seg_count, avg_score, in_description):
-    """Compute 5-tier confidence level.
+    """Compute confidence level.
 
-    Tiers:
+    Tiers (single-segment results are pre-filtered by MIN_SEGMENT_HITS):
         verified  — 4+ segment hits, or cross-validated with description
         high      — 3+ segments, or 2+ with strong Shazam confidence (>0.7)
         medium    — 2 segment hits
-        low       — 1 segment hit with decent confidence (>0.3)
-        uncertain — 1 segment hit with low confidence (<=0.3)
+        low       — 1 segment hit (only seen if MIN_SEGMENT_HITS=1)
     """
     if seg_count >= 4 or (seg_count >= 2 and in_description):
         return 'verified'
@@ -138,12 +145,31 @@ def _compute_confidence(seg_count, avg_score, in_description):
         return 'high'
     if seg_count >= 2:
         return 'medium'
-    if avg_score > 0.3:
-        return 'low'
-    return 'uncertain'
+    return 'low'
 
 
-def find_gaps(raw_results, duration_seconds, min_gap=30, step=15):
+def find_single_segment_candidates(raw_results):
+    """Find single-segment results that could be verified with additional scanning.
+
+    Returns:
+        List of (start_sec, track_key) tuples for single-hit tracks
+        that could be real tracks worth verifying.
+    """
+    groups = _group_segments(raw_results)
+    candidates = []
+
+    for group in groups:
+        if len(group['segments']) == 1:
+            seg = group['segments'][0]
+            # Only verify segments with decent confidence (skip very weak matches)
+            if seg.get('confidence_score', 0) > 0.3:
+                candidates.append((seg['start_sec'], group['key']))
+
+    logger.info(f'Found {len(candidates)} single-segment candidates for verification')
+    return candidates
+
+
+def find_gaps(raw_results, duration_seconds, min_gap=30, step=10):
     """Find unidentified gaps in recognition results.
 
     Args:

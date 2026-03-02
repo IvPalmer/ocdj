@@ -9,18 +9,20 @@ from django.conf import settings
 from recognize.models import RecognizeJob
 from .downloader import download_audio
 from .description_parser import parse_tracklist_from_description
-from .segmenter import segment_audio, segment_gaps
-from .recognition import recognize_segments
-from .clustering import cluster_results, find_gaps
+from .segmenter import segment_audio, segment_gaps, segment_verification
+from .recognition import recognize_segments as shazam_recognize_segments
+from .acrcloud import recognize_segments as acrcloud_recognize_segments
+from .clustering import cluster_results, find_gaps, find_single_segment_candidates
+from .trackid import lookup_by_url, submit_url
 
 logger = logging.getLogger(__name__)
 
 # Pipeline configuration
-SEGMENT_DURATION = 10   # seconds per segment (optimal for Shazam on mixed audio)
-SEGMENT_STEP = 15       # seconds between segment starts (~66% coverage)
+SEGMENT_DURATION = 5    # seconds per segment (ShazamIO optimal: 3-7s for mixed audio)
+SEGMENT_STEP = 10       # seconds between segment starts (50% coverage, same call count)
 GAP_THRESHOLD = 30      # min gap in seconds to trigger pass 2
-GAP_SEGMENT_DURATION = 12
-GAP_SEGMENT_STEP = 8
+GAP_SEGMENT_DURATION = 7
+GAP_SEGMENT_STEP = 5
 MAX_GAP_SEGMENTS = 100  # cap pass 2 to avoid excessive scanning of unrecognizable audio
 
 
@@ -38,10 +40,30 @@ def _recognize_worker(job_id):
     try:
         job = RecognizeJob.objects.get(pk=job_id)
 
-        # Step 1: Download audio
+        # Step 0: Check TrackID.net first (instant if mix already processed)
         job.status = 'downloading'
         job.save()
 
+        trackid_result = lookup_by_url(job.url)
+        if trackid_result and trackid_result.get('trackid_status') == 'completed' and trackid_result['tracklist']:
+            logger.info(f'TrackID.net hit for job {job_id}: {len(trackid_result["tracklist"])} tracks')
+            job.title = trackid_result.get('title', '')[:500]
+            job.duration_seconds = trackid_result.get('duration_seconds', 0)
+            job.tracklist = trackid_result['tracklist']
+            job.tracks_found = len(trackid_result['tracklist'])
+            job.engine = 'trackid'
+            job.status = 'completed'
+            job.save()
+            return
+
+        # If TrackID has the stream but it's still processing, submit and note it
+        if trackid_result and trackid_result.get('trackid_status') == 'processing':
+            logger.info(f'TrackID.net is processing {job.url}, falling through to Shazam')
+        elif not trackid_result:
+            # Not on TrackID — try to submit it for future use
+            submit_url(job.url)
+
+        # Step 1: Download audio
         output_dir = os.path.join(settings.MEDIA_ROOT, 'recognize', str(job_id))
         audio_path, info = download_audio(job.url, output_dir)
 
@@ -54,7 +76,7 @@ def _recognize_worker(job_id):
         job.description_tracks = description_tracks
         job.save()
 
-        # Step 3: Segment audio (pass 1: 10s segments every 15s)
+        # Step 3: Segment audio (pass 1: 5s segments every 10s)
         job.status = 'recognizing'
         segments = segment_audio(
             audio_path,
@@ -65,12 +87,36 @@ def _recognize_worker(job_id):
         job.segments_done = 0
         job.save()
 
-        # Step 4: Recognize pass 1 (concurrent ShazamIO)
+        # Determine recognition engines
+        use_acrcloud = _has_acrcloud_credentials()
+        engine_name = 'dual' if use_acrcloud else 'shazam'
+        logger.info(f'Job {job_id}: using {engine_name} engine(s) for recognition')
+
+        # Step 4: Recognize pass 1 — ACRCloud first (faster), then Shazam
         def on_progress_pass1(done, total):
             job.segments_done = done
             job.save(update_fields=['segments_done', 'updated'])
 
-        raw_results = recognize_segments(segments, on_progress=on_progress_pass1)
+        if use_acrcloud:
+            # Run ACRCloud (0.5s rate limit = ~4x faster than Shazam)
+            raw_results = acrcloud_recognize_segments(segments, on_progress=on_progress_pass1)
+
+            # Then run Shazam on the same segments (different database = different results)
+            job.segments_total = len(segments) * 2  # Double for dual-engine
+            job.save()
+
+            acr_done = len(segments)
+
+            def on_progress_shazam(done, total):
+                job.segments_done = acr_done + done
+                job.save(update_fields=['segments_done', 'updated'])
+
+            shazam_results = shazam_recognize_segments(segments, on_progress=on_progress_shazam)
+
+            # Merge: ACRCloud results take priority, Shazam fills gaps
+            raw_results = _merge_raw_results(raw_results, shazam_results)
+        else:
+            raw_results = shazam_recognize_segments(segments, on_progress=on_progress_pass1)
 
         # Step 5: Find gaps and do pass 2 with longer segments
         duration = job.duration_seconds or 0
@@ -82,7 +128,6 @@ def _recognize_worker(job_id):
                 segment_duration=GAP_SEGMENT_DURATION,
                 step=GAP_SEGMENT_STEP,
             )
-            # Cap gap segments to avoid spending ages on unrecognizable audio
             if gap_segs and len(gap_segs) > MAX_GAP_SEGMENTS:
                 logger.info(f'Capping gap segments from {len(gap_segs)} to {MAX_GAP_SEGMENTS}')
                 gap_segs = gap_segs[:MAX_GAP_SEGMENTS]
@@ -97,23 +142,62 @@ def _recognize_worker(job_id):
                     job.segments_done = pass1_done + done
                     job.save(update_fields=['segments_done', 'updated'])
 
-                # Pass 2 uses shorter timeout and single attempt — these are
-                # segments that already failed in pass 1, no point being patient
-                gap_results = recognize_segments(
-                    gap_segs,
-                    on_progress=on_progress_pass2,
-                    timeout=10,
-                    retries=1,
+                # Use Shazam for gap filling (ACRCloud rate limit budget saved for pass 1)
+                gap_results = shazam_recognize_segments(
+                    gap_segs, on_progress=on_progress_pass2, timeout=10, retries=1,
                 )
                 raw_results.extend(gap_results)
-                # Re-sort by start_sec
                 raw_results.sort(key=lambda r: r['start_sec'])
 
-        # Step 6: Store raw results for re-clustering
+        # Step 6: Verification pass — confirm single-segment results
+        candidates = find_single_segment_candidates(raw_results)
+        if candidates:
+            verify_segs = segment_verification(
+                audio_path, candidates,
+                segment_duration=SEGMENT_DURATION,
+            )
+            if verify_segs and len(verify_segs) > 50:
+                logger.info(f'Capping verify segments from {len(verify_segs)} to 50')
+                verify_segs = verify_segs[:50]
+
+            if verify_segs:
+                job.segments_total += len(verify_segs)
+                job.save()
+
+                verify_base = job.segments_done
+
+                def on_progress_verify(done, total):
+                    job.segments_done = verify_base + done
+                    job.save(update_fields=['segments_done', 'updated'])
+
+                verify_results = shazam_recognize_segments(
+                    verify_segs, on_progress=on_progress_verify, timeout=10, retries=1,
+                )
+                raw_results.extend(verify_results)
+                raw_results.sort(key=lambda r: r['start_sec'])
+
+        # Step 7: Store raw results for re-clustering
         job.raw_results = raw_results
 
-        # Step 7: Cluster results into tracklist
+        # Step 8: Cluster results into tracklist
         tracklist = cluster_results(raw_results, description_tracks)
+
+        # Step 8b: Merge TrackID.net results if available (fills gaps)
+        if trackid_result and trackid_result.get('tracklist'):
+            tracklist = _merge_trackid_results(tracklist, trackid_result['tracklist'])
+
+        # Set engine based on what was used
+        engines_used = set()
+        for t in tracklist:
+            engines_used.update(t.get('engines', []))
+        if len(engines_used) > 1:
+            job.engine = 'hybrid'
+        elif 'acrcloud' in engines_used:
+            job.engine = 'acrcloud'
+        elif 'trackid' in engines_used:
+            job.engine = 'trackid'
+        else:
+            job.engine = 'shazam'
 
         job.tracklist = tracklist
         job.tracks_found = len(tracklist)
@@ -121,7 +205,7 @@ def _recognize_worker(job_id):
         job.status = 'completed'
         job.save()
 
-        # Step 8: Clean up temp audio files
+        # Step 9: Clean up temp audio files
         try:
             shutil.rmtree(output_dir, ignore_errors=True)
         except Exception:
@@ -140,3 +224,98 @@ def _recognize_worker(job_id):
             pass
     finally:
         db.connections.close_all()
+
+
+def _merge_raw_results(acr_results, shazam_results):
+    """Merge raw results from ACRCloud and Shazam.
+
+    For each segment timestamp, keep whichever engine got a track hit.
+    If both identified a track, prefer ACRCloud (generally better metadata).
+    """
+    # Index ACRCloud results by start_sec
+    acr_by_sec = {r['start_sec']: r for r in acr_results}
+
+    merged = []
+    for sr in shazam_results:
+        sec = sr['start_sec']
+        ar = acr_by_sec.get(sec)
+
+        if ar and ar.get('track'):
+            # ACRCloud hit — use it
+            merged.append(ar)
+        elif sr.get('track'):
+            # Only Shazam hit — use that
+            merged.append(sr)
+        elif ar:
+            # Neither hit — use ACRCloud entry (keeps consistent engine field)
+            merged.append(ar)
+        else:
+            merged.append(sr)
+
+    # Add any ACRCloud results at timestamps not in Shazam
+    shazam_secs = {r['start_sec'] for r in shazam_results}
+    for ar in acr_results:
+        if ar['start_sec'] not in shazam_secs:
+            merged.append(ar)
+
+    merged.sort(key=lambda r: r['start_sec'])
+    return merged
+
+
+def _has_acrcloud_credentials():
+    """Check if ACRCloud credentials are configured."""
+    from core.views import get_config
+    return bool(get_config('ACRCLOUD_ACCESS_KEY') and get_config('ACRCLOUD_ACCESS_SECRET'))
+
+
+def _merge_trackid_results(shazam_tracklist, trackid_tracklist):
+    """Merge TrackID.net results into Shazam tracklist, filling gaps.
+
+    TrackID tracks are added if they don't overlap with existing Shazam tracks.
+    When both engines found the same track, prefer the existing Shazam entry
+    but mark it as cross-validated.
+    """
+    if not trackid_tracklist:
+        return shazam_tracklist
+
+    merged = list(shazam_tracklist)
+
+    # Build a set of covered time ranges from Shazam results
+    shazam_keys = set()
+    shazam_ranges = []
+    for t in merged:
+        key = f"{t['artist']}:{t['title']}".lower()
+        shazam_keys.add(key)
+        shazam_ranges.append((t['timestamp_start'], t['timestamp_end'], key))
+
+    added = 0
+    for tt in trackid_tracklist:
+        key = f"{tt['artist']}:{tt['title']}".lower()
+
+        # Check if Shazam already found this track
+        if key in shazam_keys:
+            # Cross-validate — boost confidence of existing entry
+            for t in merged:
+                existing_key = f"{t['artist']}:{t['title']}".lower()
+                if existing_key == key and 'trackid' not in t.get('engines', []):
+                    t['engines'].append('trackid')
+                    t['confidence'] = 'verified'
+                    break
+            continue
+
+        # Check if this time range is already covered by a Shazam track
+        overlaps = False
+        for s_start, s_end, _k in shazam_ranges:
+            if tt['timestamp_start'] < s_end and tt['timestamp_end'] > s_start:
+                overlaps = True
+                break
+
+        if not overlaps:
+            merged.append(tt)
+            added += 1
+
+    if added:
+        merged.sort(key=lambda t: t['timestamp_start'])
+        logger.info(f'Merged {added} TrackID.net tracks into tracklist')
+
+    return merged

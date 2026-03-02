@@ -5,7 +5,7 @@ import threading
 logger = logging.getLogger(__name__)
 
 # Recognition configuration
-RATE_LIMIT_SECONDS = 1.5   # Delay between Shazam requests
+RATE_LIMIT_SECONDS = 2.0   # Delay between Shazam requests (avoid rate limiting)
 REQUEST_TIMEOUT = 15       # Timeout per Shazam request (seconds)
 MAX_RETRIES = 2            # Retries per segment on failure
 
@@ -52,8 +52,7 @@ async def _recognize_all(segments, progress_counter, timeout=REQUEST_TIMEOUT, re
         if result and result.get('track'):
             track = result['track']
             matches = result.get('matches', [])
-            # Normalize confidence: more fingerprint matches = higher confidence
-            confidence_score = min(len(matches) / 5.0, 1.0) if matches else 0.5
+            confidence_score = _compute_match_confidence(matches)
 
             track_info = {
                 'title': track.get('title', ''),
@@ -127,6 +126,38 @@ def recognize_segments(segments, on_progress=None, timeout=REQUEST_TIMEOUT, retr
             progress_thread.join(timeout=5)
 
     return results
+
+
+def _compute_match_confidence(matches):
+    """Compute confidence score from Shazam matches array.
+
+    Uses match count as primary signal, weighted by timeskew and frequencyskew
+    quality. Values close to 0 indicate good temporal/frequency alignment.
+    """
+    if not matches:
+        return 0.3  # Track returned but no fingerprint matches — weak
+
+    match_count = len(matches)
+    # Base score from match count (primary confidence proxy)
+    count_score = min(match_count / 5.0, 1.0)
+
+    # Compute skew quality — lower absolute skew = better alignment
+    skew_penalties = []
+    for m in matches:
+        time_skew = abs(m.get('timeskew', 0))
+        freq_skew = abs(m.get('frequencyskew', 0))
+        # Penalize high skew — threshold at 0.01 for each
+        penalty = 1.0
+        if time_skew > 0.01:
+            penalty *= max(0.5, 1.0 - time_skew * 10)
+        if freq_skew > 0.01:
+            penalty *= max(0.5, 1.0 - freq_skew * 10)
+        skew_penalties.append(penalty)
+
+    avg_skew_quality = sum(skew_penalties) / len(skew_penalties)
+
+    # Final score: match count weighted by skew quality
+    return round(count_score * (0.6 + 0.4 * avg_skew_quality), 3)
 
 
 def _extract_apple_music_url(track):

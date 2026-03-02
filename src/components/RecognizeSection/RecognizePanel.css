@@ -409,6 +409,30 @@
   margin-bottom: 16px;
 }
 
+/* ── Engine Badges ── */
+.engine-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.engine-badge--trackid {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  color: var(--accent-blue);
+}
+
+.engine-badge--hybrid {
+  background: color-mix(in srgb, #a855f7 12%, transparent);
+  color: #a855f7;
+}
+
+.engine-badge--acrcloud {
+  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  color: var(--accent-green);
+}
+
 /* ── Empty ── */
 .recognize-empty {
   color: var(--text-muted);
