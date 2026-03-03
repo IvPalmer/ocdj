@@ -1,20 +1,45 @@
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 # Clustering configuration
-NONE_TOLERANCE = 2       # Max consecutive Nones before splitting a group
-DEDUP_WINDOW_SEC = 300   # Only dedup same track if within this many seconds (5 min — typical DJ track length)
-MIN_SEGMENT_HITS = 2     # Minimum segment hits to include in tracklist (filters false positives)
+PROXIMITY_WINDOW_SEC = 120  # Max gap between segments of the same track to merge them
+CONFLICT_WINDOW_SEC = 30    # If multiple different tracks hit within this window, keep only the best
+
+
+def _normalize_key(artist, title):
+    """Normalize track key for matching — strips 'The', punctuation, feat. tags, etc."""
+    artist = (artist or '').lower().strip()
+    title = (title or '').lower().strip()
+    # Strip leading "the " from artist
+    artist = re.sub(r'^the\s+', '', artist)
+    # Remove quotes and punctuation from artist (e.g., Kenny "Dope" → kenny dope)
+    artist = re.sub(r'["\'\u201c\u201d\u2018\u2019]', '', artist)
+    # Remove feat./ft. from artist name (e.g., "Tek 9 feat. X" → "tek 9")
+    artist = re.sub(r'\s*\b(?:feat\.?|featuring|ft\.)\s+.*$', '', artist)
+    # Normalize & / and
+    title = re.sub(r'\s*&\s*', ' and ', title)
+    # Remove feat./featuring/ft. tags and everything after in parentheses
+    # Word boundary \b prevents matching "ft" inside words like "soft"
+    title = re.sub(r'\s*[\(\[]?\s*\b(?:feat\.?|featuring|ft\.)\s+.*?[\)\]]?\s*$', '', title)
+    # Remove remix/dub/mix tags in parentheses for base matching
+    base_title = re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
+    # Use base title if non-empty, otherwise full title
+    title = base_title if base_title else title
+    # Collapse whitespace
+    artist = re.sub(r'\s+', ' ', artist).strip()
+    title = re.sub(r'\s+', ' ', title).strip()
+    return f'{artist}:{title}'
 
 
 def cluster_results(raw_results, description_tracks=None):
-    """Cluster consecutive recognition results into a tracklist.
+    """Cluster recognition results into a tracklist.
 
-    Groups consecutive segments that recognized the same track,
-    tolerating up to NONE_TOLERANCE consecutive None results within a group.
-    Uses position-aware deduplication (allows repeated tracks if far apart).
-    Assigns 5-tier confidence levels.
+    Groups all segments of the same track within PROXIMITY_WINDOW_SEC of each other.
+    Includes single-hit tracks but filters conflicting hits — when multiple different
+    tracks are identified at the same timestamp, keeps only the one with the most
+    segment hits (or highest confidence).
 
     Args:
         raw_results: List of {start_sec, track: {...} or None} sorted by start_sec
@@ -26,125 +51,120 @@ def cluster_results(raw_results, description_tracks=None):
     if not raw_results:
         return []
 
-    # Group consecutive segments with same track, tolerating Nones
-    groups = _group_segments(raw_results)
+    # Collect all hits grouped by normalized track key
+    track_hits = {}  # key -> list of result dicts
+    track_info = {}  # key -> first track metadata
 
-    # Build tracklist with position-aware dedup and 5-tier confidence
-    desc_set = _build_description_set(description_tracks)
-    tracklist = []
-    last_seen = {}  # key -> timestamp_end of last occurrence
-
-    key_to_idx = {}  # key -> index in tracklist (for merging duplicates)
-
-    for group in groups:
-        key = group['key']
-        segments = group['segments']
-        seg_count = len(segments)
-
-        timestamp_start = segments[0]['start_sec']
-        timestamp_end = segments[-1]['start_sec'] + 10  # approximate segment coverage
-
-        track = group['track']
-
-        # Filter single-segment results (almost always false positives in mix recognition)
-        if seg_count < MIN_SEGMENT_HITS:
-            logger.debug(f'Filtering single-segment track: {track.get("artist")} - {track.get("title")} '
-                         f'at {timestamp_start}s ({seg_count} hit)')
+    for result in raw_results:
+        track = result.get('track')
+        if not track:
             continue
+        key = _normalize_key(track.get('artist', ''), track.get('title', ''))
+        if key not in track_hits:
+            track_hits[key] = []
+            track_info[key] = track
+        track_hits[key].append(result)
 
-        # Position-aware dedup: merge if same track appeared within DEDUP_WINDOW_SEC
-        if key in last_seen:
-            prev_end = last_seen[key]
-            if timestamp_start - prev_end < DEDUP_WINDOW_SEC:
-                # Merge into existing entry — extend time range, add engines, boost confidence
-                existing = tracklist[key_to_idx[key]]
-                existing['timestamp_end'] = max(existing['timestamp_end'], timestamp_end)
-                existing['segment_count'] += seg_count
-                new_engines = set(s.get('engine', 'shazam') for s in segments if s.get('engine'))
-                existing['engines'] = list(set(existing['engines']) | new_engines)
-                # Recompute confidence with merged segment count
-                existing['confidence'] = _compute_confidence(
-                    existing['segment_count'],
-                    existing['confidence_score'],
-                    existing['in_description'],
-                )
-                last_seen[key] = max(last_seen[key], timestamp_end)
-                continue
+    # Build raw tracklist — merge nearby hits for the same track
+    desc_set = _build_description_set(description_tracks)
+    raw_tracklist = []
 
-        # Compute average confidence score from Shazam matches
-        scores = [s.get('confidence_score', 0) for s in segments if s.get('confidence_score')]
-        avg_score = sum(scores) / len(scores) if scores else 0
+    for key, hits in track_hits.items():
+        hits.sort(key=lambda r: r['start_sec'])
+        track = track_info[key]
 
-        # Cross-validate with description tracks
-        in_description = _check_description_match(track, desc_set)
+        # Split into proximity groups (hits within PROXIMITY_WINDOW_SEC of each other)
+        groups = []
+        current = [hits[0]]
+        for h in hits[1:]:
+            if h['start_sec'] - current[-1]['start_sec'] <= PROXIMITY_WINDOW_SEC:
+                current.append(h)
+            else:
+                groups.append(current)
+                current = [h]
+        groups.append(current)
 
-        # 5-tier confidence system
-        confidence = _compute_confidence(seg_count, avg_score, in_description)
+        for segments in groups:
+            seg_count = len(segments)
+            timestamp_start = segments[0]['start_sec']
+            timestamp_end = segments[-1]['start_sec'] + 10
 
-        key_to_idx[key] = len(tracklist)
-        tracklist.append({
-            'artist': track.get('artist', ''),
-            'title': track.get('title', ''),
-            'album': track.get('album', ''),
-            'label': track.get('label', ''),
-            'timestamp_start': timestamp_start,
-            'timestamp_end': timestamp_end,
-            'shazam_url': track.get('shazam_url', ''),
-            'apple_music_url': track.get('apple_music_url', ''),
-            'confidence': confidence,
-            'confidence_score': round(avg_score, 2),
-            'segment_count': seg_count,
-            'engines': list(set(
+            scores = [s.get('confidence_score', 0) for s in segments if s.get('confidence_score')]
+            avg_score = sum(scores) / len(scores) if scores else 0
+
+            in_description = _check_description_match(track, desc_set)
+            confidence = _compute_confidence(seg_count, avg_score, in_description)
+
+            engines = list(set(
                 s.get('engine', 'shazam') for s in segments if s.get('engine')
-            )),
-            'in_description': in_description,
-        })
+            ))
 
-        last_seen[key] = timestamp_end
+            raw_tracklist.append({
+                'artist': track.get('artist', ''),
+                'title': track.get('title', ''),
+                'album': track.get('album', ''),
+                'label': track.get('label', ''),
+                'timestamp_start': timestamp_start,
+                'timestamp_end': timestamp_end,
+                'shazam_url': track.get('shazam_url', ''),
+                'apple_music_url': track.get('apple_music_url', ''),
+                'confidence': confidence,
+                'confidence_score': round(avg_score, 2),
+                'segment_count': seg_count,
+                'engines': engines,
+                'in_description': in_description,
+            })
 
-    tracklist.sort(key=lambda t: t['timestamp_start'])
+    raw_tracklist.sort(key=lambda t: t['timestamp_start'])
+
+    # Resolve conflicts: when multiple single-hit tracks overlap within CONFLICT_WINDOW_SEC,
+    # keep only the one with highest segment_count, then highest confidence_score
+    tracklist = _resolve_conflicts(raw_tracklist)
+
     logger.info(f'Clustered {len(raw_results)} results into {len(tracklist)} tracks')
     return tracklist
 
 
-def _group_segments(raw_results):
-    """Group consecutive segments, tolerating up to NONE_TOLERANCE consecutive Nones."""
-    groups = []
-    current_group = None
-    none_count = 0
+def _resolve_conflicts(tracklist):
+    """Remove conflicting single-hit tracks that overlap in time.
 
-    for result in raw_results:
-        track = result.get('track')
+    When multiple different tracks are identified in the same narrow time window,
+    it's usually noise. Keep the strongest match and drop the rest.
+    Multi-hit tracks (2+ segments) are always kept.
+    """
+    if len(tracklist) <= 1:
+        return tracklist
 
-        if not track:
-            none_count += 1
-            if none_count > NONE_TOLERANCE and current_group:
-                groups.append(current_group)
-                current_group = None
+    # First pass: resolve single-hit conflicts within CONFLICT_WINDOW_SEC
+    result = []
+    i = 0
+    while i < len(tracklist):
+        t = tracklist[i]
+
+        # Multi-hit tracks always pass through
+        if t['segment_count'] > 1:
+            result.append(t)
+            i += 1
             continue
 
-        # Use normalized artist:title key so same track from different engines merges
-        track_key = f"{track.get('artist', '').lower().strip()}:{track.get('title', '').lower().strip()}"
+        # Collect all single-hit tracks in this time window
+        conflict_group = [t]
+        j = i + 1
+        while j < len(tracklist) and tracklist[j]['timestamp_start'] - t['timestamp_start'] <= CONFLICT_WINDOW_SEC:
+            if tracklist[j]['segment_count'] <= 1:
+                conflict_group.append(tracklist[j])
+            j += 1
 
-        if current_group and current_group['key'] == track_key:
-            # Same track — extend the group, reset None counter
-            current_group['segments'].append(result)
-            none_count = 0
+        if len(conflict_group) > 1:
+            # Multiple single-hit tracks in same window — pick the best one
+            best = max(conflict_group, key=lambda x: (x['confidence_score'], x['segment_count']))
+            result.append(best)
+            i = j
         else:
-            # Different track — save previous group and start new one
-            if current_group:
-                groups.append(current_group)
-            current_group = {
-                'key': track_key,
-                'track': track,
-                'segments': [result],
-            }
-            none_count = 0
+            result.append(t)
+            i += 1
 
-    if current_group:
-        groups.append(current_group)
-
-    return groups
+    return result
 
 
 def _compute_confidence(seg_count, avg_score, in_description):
@@ -172,15 +192,23 @@ def find_single_segment_candidates(raw_results):
         List of (start_sec, track_key) tuples for single-hit tracks
         that could be real tracks worth verifying.
     """
-    groups = _group_segments(raw_results)
-    candidates = []
+    # Count hits per normalized track key
+    track_hits = {}
+    for result in raw_results:
+        track = result.get('track')
+        if not track:
+            continue
+        key = _normalize_key(track.get('artist', ''), track.get('title', ''))
+        if key not in track_hits:
+            track_hits[key] = []
+        track_hits[key].append(result)
 
-    for group in groups:
-        if len(group['segments']) == 1:
-            seg = group['segments'][0]
-            # Only verify segments with decent confidence (skip very weak matches)
-            if seg.get('confidence_score', 0) > 0.3:
-                candidates.append((seg['start_sec'], group['key']))
+    candidates = []
+    for key, hits in track_hits.items():
+        if len(hits) == 1:
+            seg = hits[0]
+            if seg.get('confidence_score', 0) > 0.15:
+                candidates.append((seg['start_sec'], key))
 
     logger.info(f'Found {len(candidates)} single-segment candidates for verification')
     return candidates

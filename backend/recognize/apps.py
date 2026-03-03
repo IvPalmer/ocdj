@@ -12,10 +12,14 @@ class RecognizeConfig(AppConfig):
     name = 'recognize'
 
     def ready(self):
-        # Auto-resume stale jobs on startup — only in the reloader's child process
+        # Auto-resume stale jobs on startup
         if 'runserver' not in sys.argv:
             return
-        if not os.environ.get('RUN_MAIN'):
+        # With --noreload: RUN_MAIN isn't set, run directly
+        # With reloader: only run in the child process (RUN_MAIN=true)
+        is_reloader = os.environ.get('RUN_MAIN')
+        is_noreload = '--noreload' in sys.argv
+        if not is_noreload and not is_reloader:
             return
 
         import threading

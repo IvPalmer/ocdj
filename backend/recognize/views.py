@@ -139,6 +139,39 @@ def resume_job(request, pk):
     return Response({'message': f'Resuming job {job.id}'})
 
 
+@api_view(['POST'])
+def rerun_job(request, pk):
+    """Re-run recognition on a completed or failed job from scratch."""
+    try:
+        job = RecognizeJob.objects.get(pk=pk)
+    except RecognizeJob.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if job.status in ('downloading', 'recognizing'):
+        return Response(
+            {'error': f'Job is already running ({job.status})'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Reset job state for a fresh run
+    job.status = 'pending'
+    job.tracklist = []
+    job.raw_results = []
+    job.description_tracks = []
+    job.segments_total = 0
+    job.segments_done = 0
+    job.tracks_found = 0
+    job.acrcloud_calls = 0
+    job.error_message = ''
+    job.engine = 'shazam'
+    job.save()
+
+    run_recognize(job.id)
+
+    serializer = RecognizeJobSerializer(job)
+    return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
+
+
 @api_view(['DELETE'])
 def delete_job(request, pk):
     """Delete a recognition job."""
@@ -166,7 +199,26 @@ def recluster_job(request, pk):
         )
 
     from .services.clustering import cluster_results
+    from .services.pipeline import _merge_trackid_results
     tracklist = cluster_results(job.raw_results, job.description_tracks)
+
+    # Also merge TrackID.net results if available
+    try:
+        trackid_result = lookup_by_url(job.url)
+        if trackid_result and trackid_result.get('tracklist'):
+            tracklist = _merge_trackid_results(tracklist, trackid_result['tracklist'])
+    except Exception:
+        pass
+
+    # Update engine based on merged sources
+    engines_used = set()
+    for t in tracklist:
+        engines_used.update(t.get('engines', []))
+    if len(engines_used) > 1:
+        job.engine = 'hybrid'
+    elif 'trackid' in engines_used:
+        job.engine = 'trackid'
+
     job.tracklist = tracklist
     job.tracks_found = len(tracklist)
     job.save()
@@ -213,12 +265,16 @@ def acrcloud_usage(request):
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     # Local tracking (fallback when no bearer token)
+    # Filter by 'updated' not 'created' — a job created yesterday but processed
+    # today should count its ACRCloud calls against today's usage
     local_total = RecognizeJob.objects.aggregate(total=Sum('acrcloud_calls'))['total'] or 0
     local_today = RecognizeJob.objects.filter(
-        created__gte=today_start,
+        updated__gte=today_start,
+        acrcloud_calls__gt=0,
     ).aggregate(total=Sum('acrcloud_calls'))['total'] or 0
     local_month = RecognizeJob.objects.filter(
-        created__gte=month_start,
+        updated__gte=month_start,
+        acrcloud_calls__gt=0,
     ).aggregate(total=Sum('acrcloud_calls'))['total'] or 0
 
     result = {

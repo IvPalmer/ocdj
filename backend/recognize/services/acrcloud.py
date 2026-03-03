@@ -1,7 +1,7 @@
 """ACRCloud audio recognition engine.
 
-ACRCloud has 72M+ fingerprints in their music bucket — significantly better
-coverage than Shazam for underground/electronic music. Uses HMAC-SHA1 signed
+ACRCloud has 150M+ fingerprints in their shared music bucket (console API
+shows stale 72M count from 2020, but recognition queries the live database). Uses HMAC-SHA1 signed
 requests with audio samples sent as multipart/form-data.
 
 API docs: https://docs.acrcloud.com/reference/identification-api
@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 15
 RATE_LIMIT_SECONDS = 0.5  # ACRCloud is much more lenient than Shazam
+
+# ACRCloud error codes that mean credentials/config are wrong — no point retrying
+AUTH_ERROR_CODES = {3001, 3002, 3003, 3014, 3015}  # invalid key, limit exceeded, etc.
+
+
+class ACRCloudAuthError(Exception):
+    """Raised when ACRCloud returns an auth/config error — fail fast."""
+    pass
 
 
 def _get_credentials():
@@ -96,11 +104,16 @@ def recognize_file(file_path, access_key=None, access_secret=None, host=None):
         elif status_code == 1001:
             # No result found
             return None
+        elif status_code in AUTH_ERROR_CODES:
+            msg = result.get('status', {}).get('msg', 'Unknown error')
+            raise ACRCloudAuthError(f'ACRCloud config error {status_code}: {msg}')
         else:
             msg = result.get('status', {}).get('msg', 'Unknown error')
             logger.debug(f'ACRCloud status {status_code}: {msg} for {file_path}')
             return None
 
+    except ACRCloudAuthError:
+        raise  # Let auth errors propagate — caller should abort
     except Exception as e:
         logger.warning(f'ACRCloud recognition failed for {file_path}: {e}')
         return None
@@ -131,7 +144,20 @@ def recognize_segments(segments, on_progress=None, access_key=None, access_secre
     total = len(segments)
 
     for i, (seg_path, start_sec) in enumerate(segments):
-        track_info = recognize_file(seg_path, access_key, access_secret, host)
+        try:
+            track_info = recognize_file(seg_path, access_key, access_secret, host)
+        except ACRCloudAuthError as e:
+            # Auth/config error — abort immediately instead of wasting calls
+            logger.error(f'ACRCloud auth error on segment {i+1}/{total}, aborting: {e}')
+            results.append({
+                'start_sec': start_sec,
+                'track': None,
+                'engine': 'acrcloud',
+                'confidence_score': 0.0,
+            })
+            if on_progress:
+                on_progress(total, total)
+            break
 
         confidence_score = 0.0
         if track_info:

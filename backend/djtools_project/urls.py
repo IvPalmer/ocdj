@@ -11,6 +11,7 @@ urlpatterns = [
     path('api/core/', include('core.urls')),
     path('api/recognize/', include('recognize.urls')),
     path('api/organize/', include('organize.urls')),
+    path('api/dig/', include('dig.urls')),
 ]
 
 if settings.DEBUG:

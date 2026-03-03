@@ -142,16 +142,17 @@ def _compute_match_confidence(matches):
     count_score = min(match_count / 5.0, 1.0)
 
     # Compute skew quality — lower absolute skew = better alignment
+    # DJ mixes have higher skew due to pitch shifting (+/-2-6% for beatmatching)
+    # and tempo changes, so thresholds are relaxed vs clean audio
     skew_penalties = []
     for m in matches:
         time_skew = abs(m.get('timeskew', 0))
         freq_skew = abs(m.get('frequencyskew', 0))
-        # Penalize high skew — threshold at 0.01 for each
         penalty = 1.0
-        if time_skew > 0.01:
-            penalty *= max(0.5, 1.0 - time_skew * 10)
-        if freq_skew > 0.01:
-            penalty *= max(0.5, 1.0 - freq_skew * 10)
+        if time_skew > 0.02:
+            penalty *= max(0.5, 1.0 - time_skew * 5)
+        if freq_skew > 0.03:
+            penalty *= max(0.5, 1.0 - freq_skew * 5)
         skew_penalties.append(penalty)
 
     avg_skew_quality = sum(skew_penalties) / len(skew_penalties)

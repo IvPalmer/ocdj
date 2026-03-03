@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="popup-header">
+      <h1>OCDJ Dig</h1>
+      <button id="settings-btn" title="Settings">&#9881;</button>
+    </header>
+
+    <div id="status-bar" class="status-bar status-bar--disconnected">
+      <span class="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+    </div>
+
+    <section id="quick-add" class="section">
+      <h2>Quick Add</h2>
+      <form id="add-form">
+        <input type="text" id="input-artist" placeholder="Artist" autocomplete="off">
+        <input type="text" id="input-title" placeholder="Title" autocomplete="off">
+        <div class="form-row">
+          <input type="text" id="input-label" placeholder="Label" autocomplete="off">
+          <input type="text" id="input-catno" placeholder="Cat#" autocomplete="off">
+        </div>
+        <button type="submit" id="add-btn" class="primary-btn" disabled>Add to Wanted List</button>
+      </form>
+      <div id="add-result" class="result-msg" hidden></div>
+    </section>
+
+    <section id="recent-section" class="section">
+      <h2>Recent</h2>
+      <div id="recent-list" class="recent-list">
+        <p class="empty-msg">No recent activity</p>
+      </div>
+    </section>
+
+    <footer class="popup-footer">
+      <span id="wanted-count">--</span> items in Wanted List
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

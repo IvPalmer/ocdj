@@ -59,6 +59,9 @@ class WantedItemViewSet(viewsets.ModelViewSet):
             item = WantedItem.objects.create(
                 artist=item_data.get('artist', ''),
                 title=item_data.get('title', ''),
+                release_name=item_data.get('release_name', ''),
+                catalog_number=item_data.get('catalog_number', ''),
+                label=item_data.get('label', ''),
                 notes=item_data.get('notes', ''),
                 source_id=source_id,
             )

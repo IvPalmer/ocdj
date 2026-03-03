@@ -11,7 +11,7 @@ Auth:
 """
 import logging
 import time
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlunparse, parse_qs, urlencode
 
 import requests
 
@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = 'https://trackid.net/api'
 REQUEST_TIMEOUT = 15
+
+
+def _clean_url(url):
+    """Strip tracking/sharing query params, keeping only meaningful ones."""
+    parsed = urlparse(url)
+    # Keep only params that affect content (e.g. YouTube's 'v', 't')
+    keep_params = {'v', 't', 'list', 'start', 'end'}
+    qs = parse_qs(parsed.query)
+    clean_qs = {k: v for k, v in qs.items() if k in keep_params}
+    clean = parsed._replace(query=urlencode(clean_qs, doseq=True) if clean_qs else '')
+    return urlunparse(clean)
 
 
 def lookup_by_url(url):
@@ -30,10 +41,11 @@ def lookup_by_url(url):
     Returns:
         dict with {slug, title, tracklist, duration_seconds, status} or None
     """
+    clean = _clean_url(url)
     try:
         resp = requests.get(
             f'{BASE_URL}/public/audiostreams',
-            params={'url': url},
+            params={'url': clean},
             timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()

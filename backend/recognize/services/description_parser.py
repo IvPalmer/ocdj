@@ -97,9 +97,9 @@ def _parse_track_line(text):
         if artist and title:
             return {'artist': artist, 'title': title}
 
-    # If no separator, return as title only
+    # If no separator, return as title only — but reject time/date-like strings
     text = text.strip()
-    if text:
+    if text and not re.match(r'^\d{1,2}:\d{2}\s*(am|pm|AM|PM)?$', text):
         return {'artist': '', 'title': text}
 
     return None

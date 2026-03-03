@@ -5,6 +5,8 @@ import {
   useCreateRecognizeJob,
   useAddRecognizeToWanted,
   useResumeRecognizeJob,
+  useRerunRecognizeJob,
+  useReclusterRecognizeJob,
   useDeleteRecognizeJob,
   useACRCloudUsage,
 } from '../../api/hooks'
@@ -32,6 +34,59 @@ function timeAgo(isoStr) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
   return `${Math.floor(diff / 86400)}d ago`
+}
+
+function getPlatform(url) {
+  if (!url) return null
+  if (url.includes('soundcloud.com') || url.includes('on.soundcloud.com')) return { name: 'SoundCloud', icon: '\u2601', cls: 'platform--soundcloud' }
+  if (url.includes('youtube.com') || url.includes('youtu.be')) return { name: 'YouTube', icon: '\u25B6', cls: 'platform--youtube' }
+  if (url.includes('mixcloud.com')) return { name: 'Mixcloud', icon: '\u266B', cls: 'platform--mixcloud' }
+  if (url.includes('bandcamp.com')) return { name: 'Bandcamp', icon: '\u266A', cls: 'platform--bandcamp' }
+  return null
+}
+
+function shortenUrl(url) {
+  if (!url) return ''
+  try {
+    const u = new URL(url)
+    // e.g. "soundcloud.com/dsrptvrec/dsrptv-sou..."
+    const path = u.pathname.replace(/^\//, '')
+    const short = path.length > 40 ? path.slice(0, 40) + '\u2026' : path
+    return `${u.hostname}/${short}`
+  } catch {
+    return url.length > 60 ? url.slice(0, 60) + '\u2026' : url
+  }
+}
+
+function JobTitle({ title, url, size = 'normal' }) {
+  const platform = getPlatform(url)
+  const displayTitle = title || shortenUrl(url)
+  const showUrl = title && url
+
+  if (size === 'small') {
+    return (
+      <div className="recognize-job-title-wrap">
+        <div className="recognize-job-title">
+          {platform && <span className={`platform-icon ${platform.cls}`} title={platform.name}>{platform.icon}</span>}
+          {displayTitle}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="recognize-active-title-wrap">
+      <span className="recognize-active-title">
+        {platform && <span className={`platform-icon ${platform.cls}`} title={platform.name}>{platform.icon}</span>}
+        {displayTitle}
+      </span>
+      {showUrl && (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="recognize-active-url">
+          {shortenUrl(url)}
+        </a>
+      )}
+    </div>
+  )
 }
 
 function StatusBadge({ status }) {
@@ -223,10 +278,13 @@ function Tracklist({ job }) {
 function ActiveJob({ jobId }) {
   const { data: job } = useRecognizeJob(jobId)
   const resumeJob = useResumeRecognizeJob()
+  const rerunJob = useRerunRecognizeJob()
+  const reclusterJob = useReclusterRecognizeJob()
 
   if (!job) return null
 
   const isActive = job.status === 'downloading' || job.status === 'recognizing'
+  const canRerun = job.status === 'completed' || job.status === 'failed'
 
   // Detect stuck: active but hasn't updated in > 60s
   const updatedAgo = job.updated ? (Date.now() - new Date(job.updated).getTime()) / 1000 : 0
@@ -236,9 +294,7 @@ function ActiveJob({ jobId }) {
     <>
       <div className="recognize-active">
         <div className="recognize-active-header">
-          <span className="recognize-active-title">
-            {job.title || job.url}
-          </span>
+          <JobTitle title={job.title} url={job.url} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {isStuck && (
               <button
@@ -248,6 +304,26 @@ function ActiveJob({ jobId }) {
               >
                 {resumeJob.isPending ? 'Resuming...' : 'Resume'}
               </button>
+            )}
+            {canRerun && (
+              <>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => reclusterJob.mutate(job.id)}
+                  disabled={reclusterJob.isPending}
+                  title="Re-cluster existing results + merge TrackID.net"
+                >
+                  {reclusterJob.isPending ? 'Merging...' : 'Recluster'}
+                </button>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => rerunJob.mutate(job.id)}
+                  disabled={rerunJob.isPending}
+                  title="Re-download and re-recognize from scratch"
+                >
+                  {rerunJob.isPending ? 'Restarting...' : 'Rerun'}
+                </button>
+              </>
             )}
             <StatusBadge status={job.status} />
           </div>
@@ -299,7 +375,7 @@ function JobHistory({ jobs, activeJobId, onSelect, onDelete }) {
           onClick={() => onSelect(job.id)}
         >
           <div className="recognize-job-info">
-            <div className="recognize-job-title">{job.title || job.url}</div>
+            <JobTitle title={job.title} url={job.url} size="small" />
             <div className="recognize-job-meta">
               <StatusBadge status={job.status} />
               <EngineBadge engine={job.engine} />
@@ -327,10 +403,13 @@ function ACRCloudUsage() {
   if (!usage || !usage.configured) return null
 
   const plan = usage.plan
-  const today = plan?.calls_today ?? usage.local_calls_today
+  // Prefer Console API data, but fall back to local if Console reports 0
+  // and we have local tracking (Console API stats can lag behind)
+  const consoleToday = plan?.calls_today
+  const today = (consoleToday > 0 ? consoleToday : null) ?? usage.local_calls_today
   const dayLimit = plan?.day_limit
   const remaining = plan?.remaining_today
-  const validMonth = plan?.valid_month
+  const validMonth = (plan?.valid_month > 0 ? plan.valid_month : null) ?? usage.local_calls_month
   const estCost = plan?.est_cost_month
   const isTrial = plan?.is_trial
 
@@ -416,7 +495,8 @@ function ActiveJobs({ jobs, activeJobId, onSelect }) {
               onClick={() => onSelect(job.id)}
             >
               <span className="recognize-active-jobs__title">
-                {job.title || job.url}
+                {(() => { const p = getPlatform(job.url); return p ? <span className={`platform-icon ${p.cls}`}>{p.icon}</span> : null })()}
+                {job.title || shortenUrl(job.url)}
               </span>
               <span className="recognize-active-jobs__pct">
                 {job.status === 'downloading' ? 'DL' : `${pct}%`}

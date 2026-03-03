@@ -455,6 +455,28 @@ export function useDeleteRecognizeJob() {
   })
 }
 
+export function useRerunRecognizeJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/recognize/jobs/${id}/rerun/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
+      qc.invalidateQueries({ queryKey: ['recognize-job'] })
+    },
+  })
+}
+
+export function useReclusterRecognizeJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/recognize/jobs/${id}/recluster/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
+      qc.invalidateQueries({ queryKey: ['recognize-job'] })
+    },
+  })
+}
+
 export function useACRCloudUsage() {
   return useQuery({
     queryKey: ['acrcloud-usage'],

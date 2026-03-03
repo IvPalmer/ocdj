@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'traxdb',
     'recognize',
     'organize',
+    'dig',
 ]
 
 MIDDLEWARE = [

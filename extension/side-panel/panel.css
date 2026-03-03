@@ -1,0 +1,484 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #111;
+  color: #e5e5e5;
+  font-size: 13px;
+  overflow-x: hidden;
+}
+
+/* ── Player Section ─────────────────────────────────────── */
+
+#player-section {
+  border-bottom: 1px solid #333;
+}
+
+#player-container {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 default for YouTube */
+  background: #000;
+  transition: height 0.2s, padding-top 0.2s;
+}
+
+#player-container.platform-bandcamp {
+  padding-top: 0;
+  height: 350px;
+}
+
+#player-container.platform-soundcloud {
+  padding-top: 0;
+  height: 166px;
+}
+
+#player-container.platform-soundcloud-set {
+  padding-top: 0;
+  height: 400px;
+}
+
+#player-container.platform-spotify-track {
+  padding-top: 0;
+  height: 152px;
+}
+
+#player-container.platform-spotify-album {
+  padding-top: 0;
+  height: 352px;
+}
+
+#player-container.platform-external {
+  padding-top: 0;
+  height: 200px;
+}
+
+#player-container iframe,
+#player-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+#external-player {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #1a1a1a;
+  padding: 16px;
+}
+
+#external-player-art {
+  width: 80px;
+  height: 80px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+#external-player-info {
+  text-align: center;
+}
+
+#external-player-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #fff;
+}
+
+#external-player-artist {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+
+#external-player-link {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 20px;
+  background: #f50;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+#external-player-link:hover {
+  background: #ff6600;
+}
+
+#player-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
+}
+
+#now-playing {
+  padding: 8px 12px;
+  border-bottom: 1px solid #222;
+  min-height: 42px;
+}
+
+#now-playing-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+
+#now-playing-release {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* ── Transport Controls ─────────────────────────────────── */
+
+#transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+#transport button {
+  background: #222;
+  border: 1px solid #444;
+  color: #e5e5e5;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.15s;
+}
+
+#transport button svg {
+  display: block;
+}
+
+#transport button:hover {
+  background: #333;
+  border-color: #666;
+}
+
+#transport button:active {
+  transform: scale(0.93);
+}
+
+#btn-play-pause {
+  width: 42px !important;
+  height: 42px !important;
+  background: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+  color: #fff !important;
+}
+
+#btn-play-pause:hover {
+  background: #2563eb !important;
+}
+
+/* ── Queue Section ──────────────────────────────────────── */
+
+#queue-section {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #222;
+  position: sticky;
+  top: 0;
+  background: #111;
+  z-index: 10;
+}
+
+#queue-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#queue-count {
+  font-weight: 400;
+  color: #888;
+  font-size: 12px;
+}
+
+#btn-clear-queue {
+  background: none;
+  border: 1px solid #444;
+  color: #999;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#btn-clear-queue:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+#queue-empty {
+  display: none;
+  padding: 32px 16px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+#queue-empty.visible {
+  display: block;
+}
+
+/* ── Queue Item ─────────────────────────────────────────── */
+
+.queue-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1a1a1a;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.queue-item:hover {
+  background: #1a1a1a;
+}
+
+.queue-item.active {
+  background: #1c2333;
+  border-left: 3px solid #3b82f6;
+}
+
+.queue-item-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.queue-item-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #222;
+}
+
+.queue-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-item-artist {
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-item-title {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-item-meta {
+  font-size: 10px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.queue-item-platform {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #222;
+  color: #888;
+  margin-right: 4px;
+}
+
+.queue-item-platform.bandcamp { background: #1da0c3; color: #fff; }
+.queue-item-platform.soundcloud { background: #f50; color: #fff; }
+.queue-item-platform.spotify { background: #1db954; color: #fff; }
+.queue-item-platform.youtube { background: #ff0000; color: #fff; }
+.queue-item-platform.discogs { background: #333; color: #ccc; }
+
+.queue-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.queue-item-actions button {
+  background: #222;
+  border: 1px solid #444;
+  color: #e5e5e5;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  transition: all 0.1s;
+}
+
+.queue-item-actions button svg {
+  display: block;
+}
+
+.queue-item-actions button:hover {
+  background: #333;
+}
+
+.queue-item-actions .dig-btn {
+  background: #1e3a5f;
+  border-color: #3b82f6;
+  color: #60a5fa;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.queue-item-actions .dig-btn:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.queue-item-actions .dig-btn.added {
+  background: #166534;
+  border-color: #22c55e;
+  color: #4ade80;
+  pointer-events: none;
+}
+
+.queue-item-actions .remove-btn {
+  min-width: 24px;
+  padding: 0;
+}
+
+.queue-item-actions .remove-btn:hover {
+  background: #7f1d1d;
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+/* ── Track Sub-list ─────────────────────────────────────── */
+
+.queue-item-tracks {
+  margin-top: 6px;
+  padding-left: 48px;
+}
+
+.queue-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: #888;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.queue-track:hover {
+  color: #ccc;
+}
+
+.queue-track.playing {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.queue-track-index {
+  width: 16px;
+  text-align: right;
+  font-size: 10px;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.queue-track.playing .queue-track-index {
+  color: #3b82f6;
+}
+
+.queue-track-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-track-dig {
+  display: none;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid #3b82f6;
+  background: #1e3a5f;
+  color: #60a5fa;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: all 0.1s;
+}
+
+.queue-track:hover .queue-track-dig {
+  display: inline-flex;
+}
+
+.queue-track-dig:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.queue-track-dig.added {
+  display: inline-flex;
+  background: #166534;
+  border-color: #22c55e;
+  color: #4ade80;
+  pointer-events: none;
+}

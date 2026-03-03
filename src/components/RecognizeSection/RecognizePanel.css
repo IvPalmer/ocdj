@@ -44,7 +44,16 @@
   margin-bottom: 12px;
 }
 
+.recognize-active-title-wrap {
+  flex: 1;
+  min-width: 0;
+  margin-right: 12px;
+}
+
 .recognize-active-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
@@ -52,8 +61,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-  margin-right: 12px;
+}
+
+.recognize-active-url {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.recognize-active-url:hover {
+  color: var(--accent-blue);
+  text-decoration: underline;
 }
 
 .recognize-active-stats {
@@ -402,13 +425,53 @@
   min-width: 0;
 }
 
+.recognize-job-title-wrap {
+  min-width: 0;
+}
+
 .recognize-job-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Platform Icons ── */
+.platform-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-style: normal;
+}
+
+.platform--soundcloud {
+  background: color-mix(in srgb, #f50 12%, transparent);
+  color: #f50;
+}
+
+.platform--youtube {
+  background: color-mix(in srgb, #f00 10%, transparent);
+  color: #e00;
+}
+
+.platform--mixcloud {
+  background: color-mix(in srgb, #5000ff 10%, transparent);
+  color: #5000ff;
+}
+
+.platform--bandcamp {
+  background: color-mix(in srgb, #1da0c3 12%, transparent);
+  color: #1da0c3;
 }
 
 .recognize-job-meta {

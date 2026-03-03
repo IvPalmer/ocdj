@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 _active_jobs = set()
 _active_jobs_lock = threading.Lock()
 
-# Pipeline configuration
-SEGMENT_DURATION = 5    # seconds per segment (ShazamIO optimal: 3-7s for mixed audio)
-SEGMENT_STEP = 10       # seconds between segment starts (50% coverage, same call count)
-GAP_THRESHOLD = 30      # min gap in seconds to trigger gap-fill passes
-GAP_SEGMENT_DURATION = 7
-GAP_SEGMENT_STEP = 5
-MAX_GAP_SEGMENTS = 100  # cap pass 2 to avoid excessive scanning of unrecognizable audio
-ACRCLOUD_SEGMENT_STEP = 30  # ACRCloud only on gaps, one check per ~30s (tracks are 3-6min)
+# Pipeline configuration — maximum coverage mode for testing
+SEGMENT_DURATION = 12   # seconds per segment (ACRCloud optimal: 10-12s)
+SEGMENT_STEP = 10       # seconds between segment starts (2s overlap with 12s segments)
+GAP_THRESHOLD = 20      # lower threshold — catch smaller gaps too
+GAP_SEGMENT_DURATION = 15  # longer segments for harder-to-identify regions
+GAP_SEGMENT_STEP = 5       # dense Shazam gap fill — every 5 seconds
+MAX_GAP_SEGMENTS = 2000 # no practical cap — cover the entire mix
+ACRCLOUD_SEGMENT_STEP = 10  # maximum density — every 10s with 12s segments (2s overlap)
 
 
 def run_recognize(job_id):
@@ -108,19 +108,10 @@ def _recognize_worker(job_id):
 
             trackid_result = lookup_by_url(job.url)
             if trackid_result and trackid_result.get('trackid_status') == 'completed' and trackid_result['tracklist']:
-                logger.info(f'TrackID.net hit for job {job_id}: {len(trackid_result["tracklist"])} tracks')
-                job.title = trackid_result.get('title', '')[:500]
-                job.duration_seconds = trackid_result.get('duration_seconds', 0)
-                job.tracklist = trackid_result['tracklist']
-                job.tracks_found = len(trackid_result['tracklist'])
-                job.engine = 'trackid'
-                job.status = 'completed'
-                job.save()
-                return
+                # Don't short-circuit — always run full recognition so we can merge later
+                logger.info(f'TrackID.net has {len(trackid_result["tracklist"])} tracks for job {job_id}, will merge after recognition')
 
-            if trackid_result and trackid_result.get('trackid_status') == 'processing':
-                logger.info(f'TrackID.net is processing {job.url}, falling through to recognition')
-            elif not trackid_result:
+            if not trackid_result:
                 submit_url(job.url)
 
             # Step 1: Download audio
@@ -146,9 +137,26 @@ def _recognize_worker(job_id):
         use_acrcloud = _has_acrcloud_credentials()
         logger.info(f'Job {job_id}: acrcloud={use_acrcloud}')
 
-        acrcloud_calls = 0
-        if use_acrcloud:
-            # ACRCloud primary — wide step (30s), fast (0.5s rate limit)
+        # On resume, reuse existing primary results instead of re-running
+        has_existing_results = (
+            is_resume
+            and job.raw_results
+            and job.acrcloud_calls > 0
+            and any(r.get('engine') == 'acrcloud' for r in job.raw_results)
+        )
+
+        acrcloud_calls = job.acrcloud_calls or 0
+
+        if has_existing_results:
+            # Resume: skip primary pass, reuse saved ACRCloud results
+            raw_results = list(job.raw_results)
+            primary_step = ACRCLOUD_SEGMENT_STEP
+            job.segments_total = len(raw_results)
+            job.segments_done = len(raw_results)
+            job.save()
+            logger.info(f'Job {job_id}: resuming with {len(raw_results)} existing results ({acrcloud_calls} ACRCloud calls)')
+        elif use_acrcloud:
+            # ACRCloud primary — wide step, fast (0.5s rate limit)
             primary_step = ACRCLOUD_SEGMENT_STEP
             segments = segment_audio(
                 audio_path,
@@ -221,12 +229,17 @@ def _recognize_worker(job_id):
                 raw_results.extend(gap_results)
                 raw_results.sort(key=lambda r: r['start_sec'])
 
+                # Save after gap fill so results survive restarts
+                job.raw_results = raw_results
+                job.save(update_fields=['raw_results', 'updated'])
+
         # Step 5: Verification pass — confirm single-segment results (free, Shazam)
         candidates = find_single_segment_candidates(raw_results)
         if candidates:
             verify_segs = segment_verification(
                 audio_path, candidates,
                 segment_duration=SEGMENT_DURATION,
+                offsets=(-7, -3, 3, 7),
             )
             if verify_segs and len(verify_segs) > 50:
                 logger.info(f'Capping verify segments from {len(verify_segs)} to 50')
@@ -248,13 +261,22 @@ def _recognize_worker(job_id):
                 raw_results.extend(verify_results)
                 raw_results.sort(key=lambda r: r['start_sec'])
 
+                # Save after verification so results survive restarts
+                job.raw_results = raw_results
+                job.save(update_fields=['raw_results', 'updated'])
+
         # Step 6: Store raw results for re-clustering
         job.raw_results = raw_results
 
         # Step 7: Cluster results into tracklist
         tracklist = cluster_results(raw_results, description_tracks)
 
-        # Step 7b: Merge TrackID.net results if available (fills gaps)
+        # Step 7b: Re-fetch TrackID.net results (may have completed during recognition)
+        # and merge into tracklist to fill gaps
+        try:
+            trackid_result = lookup_by_url(job.url)
+        except Exception:
+            pass
         if trackid_result and trackid_result.get('tracklist'):
             tracklist = _merge_trackid_results(tracklist, trackid_result['tracklist'])
 
@@ -307,44 +329,55 @@ def _has_acrcloud_credentials():
 
 
 def _merge_trackid_results(shazam_tracklist, trackid_tracklist):
-    """Merge TrackID.net results into Shazam tracklist, filling gaps.
+    """Merge TrackID.net results into tracklist.
 
-    TrackID tracks are added if they don't overlap with existing Shazam tracks.
-    When both engines found the same track, prefer the existing Shazam entry
-    but mark it as cross-validated.
+    1. Cross-validates: if both engines found the same track, mark as verified
+    2. Adds TrackID tracks that don't overlap with strong (2+ segment) existing tracks
+    3. Removes weak single-hit results that fall within a TrackID track's time range
     """
     if not trackid_tracklist:
         return shazam_tracklist
 
+    from recognize.services.clustering import _normalize_key
+
     merged = list(shazam_tracklist)
 
-    # Build a set of covered time ranges from Shazam results
-    shazam_keys = set()
-    shazam_ranges = []
+    # Build lookup from our results
+    our_keys = set()
     for t in merged:
-        key = f"{t['artist']}:{t['title']}".lower()
-        shazam_keys.add(key)
-        shazam_ranges.append((t['timestamp_start'], t['timestamp_end'], key))
+        our_keys.add(_normalize_key(t['artist'], t['title']))
 
+    # Build time ranges from strong results (2+ segments)
+    strong_ranges = []
+    for t in merged:
+        if t.get('segment_count', 0) >= 2:
+            strong_ranges.append((t['timestamp_start'], t['timestamp_end']))
+
+    # Step 1: Add TrackID tracks and cross-validate
+    trackid_ranges = []  # time ranges of all TrackID tracks (for filtering our weak results)
     added = 0
     for tt in trackid_tracklist:
-        key = f"{tt['artist']}:{tt['title']}".lower()
+        tt_key = _normalize_key(tt['artist'], tt['title'])
+        trackid_ranges.append((tt['timestamp_start'], tt['timestamp_end']))
 
-        # Check if Shazam already found this track
-        if key in shazam_keys:
-            # Cross-validate — boost confidence of existing entry
+        # Check if we already found this track
+        if tt_key in our_keys:
             for t in merged:
-                existing_key = f"{t['artist']}:{t['title']}".lower()
-                if existing_key == key and 'trackid' not in t.get('engines', []):
+                if _normalize_key(t['artist'], t['title']) == tt_key and 'trackid' not in t.get('engines', []):
                     t['engines'].append('trackid')
                     t['confidence'] = 'verified'
                     break
             continue
 
-        # Check if this time range is already covered by a Shazam track
+        # Check overlap with our strong results
+        # Only skip if >50% of the TrackID track is covered (DJ mixes have natural overlaps)
+        tt_duration = max(tt['timestamp_end'] - tt['timestamp_start'], 1)
         overlaps = False
-        for s_start, s_end, _k in shazam_ranges:
-            if tt['timestamp_start'] < s_end and tt['timestamp_end'] > s_start:
+        for s_start, s_end in strong_ranges:
+            overlap_start = max(tt['timestamp_start'], s_start)
+            overlap_end = min(tt['timestamp_end'], s_end)
+            overlap = max(0, overlap_end - overlap_start)
+            if overlap > tt_duration * 0.5:
                 overlaps = True
                 break
 
@@ -352,8 +385,29 @@ def _merge_trackid_results(shazam_tracklist, trackid_tracklist):
             merged.append(tt)
             added += 1
 
+    # Step 2: Remove our weak single-hit results that fall within a TrackID track's range
+    # These are likely misidentifications of the track that TrackID correctly identified
+    if trackid_ranges:
+        filtered = []
+        removed = 0
+        for t in merged:
+            if t.get('segment_count', 0) <= 1 and 'trackid' not in t.get('engines', []):
+                # Check if this weak result falls within any TrackID track's range
+                t_mid = (t['timestamp_start'] + t['timestamp_end']) / 2
+                inside_trackid = any(
+                    tr_start <= t_mid <= tr_end
+                    for tr_start, tr_end in trackid_ranges
+                )
+                if inside_trackid:
+                    removed += 1
+                    continue
+            filtered.append(t)
+        merged = filtered
+        if removed:
+            logger.info(f'Removed {removed} weak results overlapping with TrackID tracks')
+
     if added:
-        merged.sort(key=lambda t: t['timestamp_start'])
         logger.info(f'Merged {added} TrackID.net tracks into tracklist')
 
+    merged.sort(key=lambda t: t['timestamp_start'])
     return merged
