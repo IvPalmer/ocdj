@@ -4,7 +4,7 @@ logger = logging.getLogger(__name__)
 
 # Clustering configuration
 NONE_TOLERANCE = 2       # Max consecutive Nones before splitting a group
-DEDUP_WINDOW_SEC = 60    # Only dedup same track if within this many seconds
+DEDUP_WINDOW_SEC = 300   # Only dedup same track if within this many seconds (5 min — typical DJ track length)
 MIN_SEGMENT_HITS = 2     # Minimum segment hits to include in tracklist (filters false positives)
 
 
@@ -34,6 +34,8 @@ def cluster_results(raw_results, description_tracks=None):
     tracklist = []
     last_seen = {}  # key -> timestamp_end of last occurrence
 
+    key_to_idx = {}  # key -> index in tracklist (for merging duplicates)
+
     for group in groups:
         key = group['key']
         segments = group['segments']
@@ -50,10 +52,23 @@ def cluster_results(raw_results, description_tracks=None):
                          f'at {timestamp_start}s ({seg_count} hit)')
             continue
 
-        # Position-aware dedup: only skip if same track appeared within DEDUP_WINDOW_SEC
+        # Position-aware dedup: merge if same track appeared within DEDUP_WINDOW_SEC
         if key in last_seen:
             prev_end = last_seen[key]
             if timestamp_start - prev_end < DEDUP_WINDOW_SEC:
+                # Merge into existing entry — extend time range, add engines, boost confidence
+                existing = tracklist[key_to_idx[key]]
+                existing['timestamp_end'] = max(existing['timestamp_end'], timestamp_end)
+                existing['segment_count'] += seg_count
+                new_engines = set(s.get('engine', 'shazam') for s in segments if s.get('engine'))
+                existing['engines'] = list(set(existing['engines']) | new_engines)
+                # Recompute confidence with merged segment count
+                existing['confidence'] = _compute_confidence(
+                    existing['segment_count'],
+                    existing['confidence_score'],
+                    existing['in_description'],
+                )
+                last_seen[key] = max(last_seen[key], timestamp_end)
                 continue
 
         # Compute average confidence score from Shazam matches
@@ -66,6 +81,7 @@ def cluster_results(raw_results, description_tracks=None):
         # 5-tier confidence system
         confidence = _compute_confidence(seg_count, avg_score, in_description)
 
+        key_to_idx[key] = len(tracklist)
         tracklist.append({
             'artist': track.get('artist', ''),
             'title': track.get('title', ''),
@@ -107,7 +123,8 @@ def _group_segments(raw_results):
                 current_group = None
             continue
 
-        track_key = track.get('key') or f"{track['artist']}:{track['title']}"
+        # Use normalized artist:title key so same track from different engines merges
+        track_key = f"{track.get('artist', '').lower().strip()}:{track.get('title', '').lower().strip()}"
 
         if current_group and current_group['key'] == track_key:
             # Same track — extend the group, reset None counter

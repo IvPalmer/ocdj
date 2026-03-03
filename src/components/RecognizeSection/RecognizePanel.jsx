@@ -4,6 +4,9 @@ import {
   useRecognizeJob,
   useCreateRecognizeJob,
   useAddRecognizeToWanted,
+  useResumeRecognizeJob,
+  useDeleteRecognizeJob,
+  useACRCloudUsage,
 } from '../../api/hooks'
 import './RecognizePanel.css'
 
@@ -219,10 +222,15 @@ function Tracklist({ job }) {
 
 function ActiveJob({ jobId }) {
   const { data: job } = useRecognizeJob(jobId)
+  const resumeJob = useResumeRecognizeJob()
 
   if (!job) return null
 
   const isActive = job.status === 'downloading' || job.status === 'recognizing'
+
+  // Detect stuck: active but hasn't updated in > 60s
+  const updatedAgo = job.updated ? (Date.now() - new Date(job.updated).getTime()) / 1000 : 0
+  const isStuck = isActive && updatedAgo > 60
 
   return (
     <>
@@ -231,8 +239,26 @@ function ActiveJob({ jobId }) {
           <span className="recognize-active-title">
             {job.title || job.url}
           </span>
-          <StatusBadge status={job.status} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isStuck && (
+              <button
+                className="btn btn-sm"
+                onClick={() => resumeJob.mutate(job.id)}
+                disabled={resumeJob.isPending}
+              >
+                {resumeJob.isPending ? 'Resuming...' : 'Resume'}
+              </button>
+            )}
+            <StatusBadge status={job.status} />
+          </div>
         </div>
+
+        {isStuck && (
+          <div className="recognize-warning">
+            Job appears stuck — last updated {Math.floor(updatedAgo / 60)}m ago.
+            Click Resume to restart from where it left off.
+          </div>
+        )}
 
         {job.status === 'failed' && (
           <div className="recognize-error">{job.error_message || 'Recognition failed'}</div>
@@ -243,6 +269,7 @@ function ActiveJob({ jobId }) {
         <div className="recognize-active-stats">
           {job.duration_seconds > 0 && <span>Duration: {formatDuration(job.duration_seconds)}</span>}
           {job.tracks_found > 0 && <span>Tracks: {job.tracks_found}</span>}
+          {job.acrcloud_calls > 0 && <span>ACRCloud: {job.acrcloud_calls} calls</span>}
           {isActive && job.status === 'downloading' && <span>Downloading audio...</span>}
         </div>
       </div>
@@ -257,7 +284,7 @@ function ActiveJob({ jobId }) {
   )
 }
 
-function JobHistory({ jobs, activeJobId, onSelect }) {
+function JobHistory({ jobs, activeJobId, onSelect, onDelete }) {
   if (!jobs || jobs.length === 0) return null
 
   return (
@@ -281,8 +308,123 @@ function JobHistory({ jobs, activeJobId, onSelect }) {
               <span>{timeAgo(job.created)}</span>
             </div>
           </div>
+          <button
+            className="recognize-job-delete"
+            title="Delete job"
+            onClick={(e) => { e.stopPropagation(); onDelete(job.id) }}
+          >
+            &times;
+          </button>
         </div>
       ))}
+    </div>
+  )
+}
+
+function ACRCloudUsage() {
+  const { data: usage } = useACRCloudUsage()
+
+  if (!usage || !usage.configured) return null
+
+  const plan = usage.plan
+  const today = plan?.calls_today ?? usage.local_calls_today
+  const dayLimit = plan?.day_limit
+  const remaining = plan?.remaining_today
+  const validMonth = plan?.valid_month
+  const estCost = plan?.est_cost_month
+  const isTrial = plan?.is_trial
+
+  // Usage percentage for the day (only when there's a limit)
+  const dayPct = dayLimit > 0 ? Math.min(100, Math.round((today / dayLimit) * 100)) : null
+  const isLow = dayPct != null && dayPct >= 80
+
+  return (
+    <div className="acrcloud-usage">
+      <div className="acrcloud-usage__header">
+        <span className="acrcloud-usage__title">Powered by ACRCloud</span>
+        {isTrial && <span className="acrcloud-usage__trial">Trial</span>}
+      </div>
+      <div className="acrcloud-usage__stats">
+        {dayLimit > 0 ? (
+          <>
+            <div className="acrcloud-usage__stat">
+              <span className={`acrcloud-usage__value ${isLow ? 'acrcloud-usage__value--warn' : ''}`}>
+                {remaining != null ? remaining.toLocaleString() : '?'}
+              </span>
+              <span className="acrcloud-usage__label">left today</span>
+            </div>
+            <div className="acrcloud-usage__bar-wrap">
+              <div className="acrcloud-usage__bar">
+                <div
+                  className={`acrcloud-usage__bar-fill ${isLow ? 'acrcloud-usage__bar-fill--warn' : ''}`}
+                  style={{ width: `${dayPct}%` }}
+                />
+              </div>
+              <span className="acrcloud-usage__bar-label">
+                {today.toLocaleString()} / {dayLimit.toLocaleString()}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div className="acrcloud-usage__stat">
+            <span className="acrcloud-usage__value">{today.toLocaleString()}</span>
+            <span className="acrcloud-usage__label">today</span>
+          </div>
+        )}
+        {validMonth != null && (
+          <div className="acrcloud-usage__stat">
+            <span className="acrcloud-usage__value">{Math.round(validMonth).toLocaleString()}</span>
+            <span className="acrcloud-usage__label">billable</span>
+          </div>
+        )}
+        {estCost != null && estCost > 0 && (
+          <div className="acrcloud-usage__stat">
+            <span className="acrcloud-usage__value">${estCost.toFixed(2)}</span>
+            <span className="acrcloud-usage__label">est. cost</span>
+          </div>
+        )}
+      </div>
+      {!usage.has_console_api && (
+        <span className="acrcloud-usage__hint" title="Add ACRCLOUD_BEARER_TOKEN in Settings to see plan limits and real usage">
+          ?
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ActiveJobs({ jobs, activeJobId, onSelect }) {
+  const activeJobs = jobs.filter(j => j.status === 'downloading' || j.status === 'recognizing')
+
+  if (activeJobs.length <= 1) return null
+
+  return (
+    <div className="recognize-active-jobs">
+      <div className="recognize-active-jobs__header">
+        <span className="recognize-spinner" />
+        {activeJobs.length} jobs running
+      </div>
+      <div className="recognize-active-jobs__list">
+        {activeJobs.map(job => {
+          const pct = job.segments_total > 0
+            ? Math.round((job.segments_done / job.segments_total) * 100)
+            : 0
+          return (
+            <button
+              key={job.id}
+              className={`recognize-active-jobs__item ${job.id === activeJobId ? 'recognize-active-jobs__item--selected' : ''}`}
+              onClick={() => onSelect(job.id)}
+            >
+              <span className="recognize-active-jobs__title">
+                {job.title || job.url}
+              </span>
+              <span className="recognize-active-jobs__pct">
+                {job.status === 'downloading' ? 'DL' : `${pct}%`}
+              </span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -293,6 +435,7 @@ function RecognizePanel() {
 
   const { data: jobsData } = useRecognizeJobs()
   const createJob = useCreateRecognizeJob()
+  const deleteJob = useDeleteRecognizeJob()
 
   const jobs = jobsData?.results || []
 
@@ -315,10 +458,16 @@ function RecognizePanel() {
     )
   }
 
+  function handleDelete(id) {
+    if (id === currentJobId) setActiveJobId(null)
+    deleteJob.mutate(id)
+  }
+
   return (
     <div className="recognize-panel">
       <div className="recognize-header">
         <h1 className="page-title">Recognize</h1>
+        <ACRCloudUsage />
       </div>
 
       <form className="recognize-input-row" onSubmit={handleSubmit}>
@@ -344,12 +493,15 @@ function RecognizePanel() {
         </div>
       )}
 
+      <ActiveJobs jobs={jobs} activeJobId={currentJobId} onSelect={setActiveJobId} />
+
       {currentJobId && <ActiveJob jobId={currentJobId} />}
 
       <JobHistory
         jobs={jobs}
         activeJobId={currentJobId}
         onSelect={setActiveJobId}
+        onDelete={handleDelete}
       />
     </div>
   )

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
   useProcessSingle, useRetryItem, useSkipStage, useScanDownloads,
+  useUpdatePipelineItem, useRetagItem,
 } from '../../api/hooks'
 import './OrganizePanel.css'
 
@@ -13,6 +14,17 @@ const STAGES = [
   { key: 'renamed', label: 'Renamed', color: 'var(--accent-green)' },
   { key: 'ready', label: 'Ready', color: 'var(--accent-green)' },
   { key: 'failed', label: 'Failed', color: 'var(--accent-red)' },
+]
+
+const EDITABLE_FIELDS = [
+  { key: 'artist', label: 'Artist' },
+  { key: 'title', label: 'Title' },
+  { key: 'album', label: 'Album' },
+  { key: 'label', label: 'Label' },
+  { key: 'catalog_number', label: 'Catalog #' },
+  { key: 'genre', label: 'Genre' },
+  { key: 'year', label: 'Year' },
+  { key: 'track_number', label: 'Track #' },
 ]
 
 function StageCard({ stage, count, isActive, onClick }) {
@@ -56,8 +68,80 @@ function StagePill({ stage }) {
   )
 }
 
+function EditModal({ item, onClose }) {
+  const [form, setForm] = useState(() => {
+    const init = {}
+    EDITABLE_FIELDS.forEach(f => { init[f.key] = item[f.key] || '' })
+    return init
+  })
+  const updateItem = useUpdatePipelineItem()
+  const retagItem = useRetagItem()
+
+  const handleSave = () => {
+    updateItem.mutate({ id: item.id, ...form }, {
+      onSuccess: () => onClose(),
+    })
+  }
+
+  const handleSaveAndRetag = () => {
+    updateItem.mutate({ id: item.id, ...form }, {
+      onSuccess: () => {
+        retagItem.mutate(item.id, {
+          onSuccess: () => onClose(),
+        })
+      },
+    })
+  }
+
+  const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }))
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal edit-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Edit Metadata</h3>
+          <button className="btn-close" onClick={onClose} />
+        </div>
+        <div className="edit-modal__body">
+          <div className="edit-modal__filename">{item.original_filename}</div>
+          <div className="edit-modal__fields">
+            {EDITABLE_FIELDS.map(f => (
+              <div key={f.key} className="form-group">
+                <label>{f.label}</label>
+                <input
+                  value={form[f.key]}
+                  onChange={e => set(f.key, e.target.value)}
+                  placeholder={f.label}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="edit-modal__footer">
+          <button className="btn btn-sm" onClick={onClose}>Cancel</button>
+          <button
+            className="btn btn-sm"
+            onClick={handleSave}
+            disabled={updateItem.isPending}
+          >
+            Save
+          </button>
+          <button
+            className="btn btn-sm btn-accent"
+            onClick={handleSaveAndRetag}
+            disabled={updateItem.isPending || retagItem.isPending}
+          >
+            {retagItem.isPending ? 'Applying...' : 'Save & Apply Tags'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function OrganizePanel() {
   const [stageFilter, setStageFilter] = useState(null)
+  const [editingItem, setEditingItem] = useState(null)
 
   const { data: stats } = usePipelineStats()
   const { data: itemsData } = usePipelineItems({ stage: stageFilter })
@@ -149,6 +233,12 @@ function OrganizePanel() {
                   {item.metadata_source || '—'}
                 </span>
                 <span className="col-actions">
+                  <button
+                    className="btn btn-xs"
+                    onClick={() => setEditingItem(item)}
+                  >
+                    Edit
+                  </button>
                   {item.stage === 'downloaded' && (
                     <button
                       className="btn btn-xs"
@@ -182,6 +272,10 @@ function OrganizePanel() {
           </div>
         )}
       </div>
+
+      {editingItem && (
+        <EditModal item={editingItem} onClose={() => setEditingItem(null)} />
+      )}
 
       {processPipeline.data?.message && (
         <div className="organize-toast">{processPipeline.data.message}</div>

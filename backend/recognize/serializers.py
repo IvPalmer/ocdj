@@ -9,8 +9,8 @@ class RecognizeJobSerializer(serializers.ModelSerializer):
             'id', 'url', 'title', 'status',
             'segments_total', 'segments_done', 'tracks_found',
             'tracklist', 'raw_results', 'description_tracks',
-            'duration_seconds', 'engine', 'error_message',
-            'created', 'updated',
+            'duration_seconds', 'engine', 'acrcloud_calls',
+            'error_message', 'created', 'updated',
         ]
         read_only_fields = ['created', 'updated']
 
@@ -21,8 +21,8 @@ class RecognizeJobListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'url', 'title', 'status',
             'segments_total', 'segments_done', 'tracks_found',
-            'duration_seconds', 'engine', 'error_message',
-            'created', 'updated',
+            'duration_seconds', 'engine', 'acrcloud_calls',
+            'error_message', 'created', 'updated',
         ]
         read_only_fields = ['created', 'updated']
 

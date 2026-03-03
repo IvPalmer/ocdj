@@ -1,5 +1,4 @@
 .wanted-list {
-  max-width: 1100px;
 }
 
 .wanted-header {
@@ -18,12 +17,13 @@
 
 .search-input {
   flex: 1;
-  background: var(--bg-raised);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 7px 12px;
   color: var(--text);
   font-size: 13px;
+  box-shadow: var(--shadow-sm);
 }
 
 .search-input::placeholder {
@@ -32,22 +32,25 @@
 
 .search-input:focus {
   outline: none;
-  border-color: var(--text-muted);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 10%, transparent);
 }
 
 .filter-select {
-  background: var(--bg-raised);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 7px 12px;
   color: var(--text-secondary);
   font-size: 13px;
   min-width: 130px;
+  box-shadow: var(--shadow-sm);
 }
 
 .filter-select:focus {
   outline: none;
-  border-color: var(--text-muted);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 10%, transparent);
 }
 
 /* ── Bulk Actions ── */
@@ -81,7 +84,7 @@
   text-align: left;
   padding: 8px 12px;
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -103,7 +106,7 @@
 }
 
 .row-selected {
-  background: var(--bg-surface) !important;
+  background: color-mix(in srgb, var(--accent-blue) 5%, transparent) !important;
 }
 
 .th-check {
@@ -162,7 +165,7 @@
 .status-badge-sm {
   display: inline-block;
   padding: 2px 7px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -188,7 +191,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -197,12 +200,12 @@
 }
 
 .modal {
-  background: var(--bg-raised);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   width: 520px;
   max-width: 90vw;
-  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .modal-header {
@@ -215,7 +218,7 @@
 
 .modal-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text);
 }
@@ -228,12 +231,12 @@
   border-radius: 4px;
   cursor: pointer;
   position: relative;
-  opacity: 0.4;
+  opacity: 0.35;
   transition: opacity 0.15s;
 }
 
 .btn-close:hover {
-  opacity: 0.8;
+  opacity: 0.7;
 }
 
 .btn-close::before,
@@ -293,7 +296,7 @@
   color: var(--text);
   font-size: 13px;
   font-family: inherit;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .form-group input::placeholder,
@@ -305,7 +308,8 @@
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: var(--text-muted);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 10%, transparent);
 }
 
 .form-actions {
@@ -320,12 +324,13 @@
   padding: 7px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-surface);
+  background: var(--bg);
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 450;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.12s;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn:hover {
@@ -337,8 +342,9 @@
 .btn-primary {
   background: var(--text);
   border-color: var(--text);
-  color: var(--bg);
-  font-weight: 500;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover {
@@ -351,15 +357,14 @@
 }
 
 .btn-accent {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
-  border-color: color-mix(in srgb, var(--accent-blue) 25%, transparent);
-  color: var(--accent-blue);
-  font-weight: 500;
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+  font-weight: 600;
 }
 
 .btn-accent:hover {
-  background: color-mix(in srgb, var(--accent-blue) 20%, transparent);
-  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 85%, black);
 }
 
 .btn-danger {
@@ -367,7 +372,7 @@
 }
 
 .btn-danger:hover {
-  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 8%, transparent);
   border-color: color-mix(in srgb, var(--accent-red) 30%, transparent);
 }
 
@@ -380,17 +385,19 @@
   padding: 3px 8px;
   font-size: 11px;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--bg);
   color: var(--text-muted);
-  border-radius: 4px;
-  font-weight: 500;
+  border-radius: 5px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  box-shadow: none;
 }
 
 .btn-xs:hover {
   color: var(--text);
   border-color: var(--text-muted);
+  background: var(--bg-raised);
 }
 
 .btn-xs--active {

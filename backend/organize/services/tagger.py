@@ -7,9 +7,60 @@ from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.aiff import AIFF
 
+import re
+
 from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
+
+
+# Parenthetical suffixes that are NOT musical (safe to strip)
+_NOISE_PARENS = re.compile(
+    r'\s*[\(\[]\s*(?:'
+    r'official\s+(?:video|audio|music\s+video|lyric\s+video|visualizer|clip)'
+    r'|HQ|HD|4K|1080p|720p|lyrics?'
+    r'|full\s+(?:album|EP)'
+    r'|out\s+now|free\s+download|premiere'
+    r')\s*[\)\]]',
+    re.IGNORECASE,
+)
+
+
+def _clean_year(value):
+    """Extract a 4-digit year from a date string like '17-10-2009', '2009-10-17', '2009'."""
+    if not value:
+        return ''
+    # Try to find a 4-digit year
+    m = re.search(r'\b((?:19|20)\d{2})\b', value)
+    return m.group(1) if m else value.strip()
+
+
+def _clean_catalog_number(value):
+    """Strip common suffixes from catalog numbers like 'Promo', 'Ltd', 'Deluxe'."""
+    if not value:
+        return ''
+    # Remove trailing noise words
+    cleaned = re.sub(
+        r'\s+(?:Promo|promo|PROMO|Ltd|LTD|Limited|Deluxe|Repress|Reissue|Test\s*Press)\s*$',
+        '', value.strip()
+    )
+    return cleaned.strip()
+
+
+def _parse_title_from_filename(filename):
+    """Extract artist and title from a Soulseek-style filename, preserving mix info."""
+    name = os.path.splitext(filename)[0]
+    # Strip leading track numbers: "01.", "34 - ", etc.
+    name = re.sub(r'^\d{1,3}\s*[\.\)\-]\s*', '', name)
+    # Strip only noise parens, keep musical ones like (NJ Mix), (Dub)
+    name = _NOISE_PARENS.sub('', name)
+    name = name.strip()
+
+    for sep in [' - ', ' -- ', ' — ']:
+        if sep in name:
+            parts = name.split(sep, 1)
+            return parts[0].strip(), parts[1].strip()
+    return '', name
 
 
 def read_existing_tags(filepath):
@@ -258,11 +309,28 @@ def tag_file(pipeline_item):
         metadata['track_number'] = existing['tracknumber']
     metadata['has_artwork'] = existing.get('has_artwork', False)
 
-    # Override with WantedItem / pipeline item data (more authoritative)
+    # Parse the original filename — it often has mix/version info the WantedItem lacks
+    fn_artist, fn_title = _parse_title_from_filename(pipeline_item.original_filename)
+
+    # Override with WantedItem / pipeline item data (more authoritative for base info)
     if pipeline_item.artist:
         metadata['artist'] = pipeline_item.artist
     if pipeline_item.title:
-        metadata['title'] = pipeline_item.title
+        # If the filename title contains extra info (e.g. a mix name) that the
+        # WantedItem title doesn't, prefer the richer filename version.
+        wi_title = pipeline_item.title.strip()
+        if fn_title and wi_title and fn_title.lower() != wi_title.lower():
+            # Check if filename title starts with the wanted title (i.e. it's a superset)
+            if fn_title.lower().startswith(wi_title.lower()):
+                metadata['title'] = fn_title
+            else:
+                metadata['title'] = wi_title
+        else:
+            metadata['title'] = wi_title
+    elif fn_title:
+        metadata['title'] = fn_title
+    if not metadata.get('artist') and fn_artist:
+        metadata['artist'] = fn_artist
     if pipeline_item.album:
         metadata['album'] = pipeline_item.album
     if pipeline_item.label:
@@ -302,6 +370,12 @@ def tag_file(pipeline_item):
                 metadata['has_artwork'] = True
         except Exception as e:
             logger.warning(f"Artwork fetch/embed failed: {e}")
+
+    # Clean up year and catalog number
+    if metadata.get('year'):
+        metadata['year'] = _clean_year(metadata['year'])
+    if metadata.get('catalog_number'):
+        metadata['catalog_number'] = _clean_catalog_number(metadata['catalog_number'])
 
     # Write tags to file
     write_tags(filepath, metadata)

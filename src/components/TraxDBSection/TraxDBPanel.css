@@ -1,5 +1,4 @@
 .traxdb-panel {
-  max-width: 1100px;
 }
 
 /* ── Header ── */
@@ -12,8 +11,8 @@
 
 .traxdb-header .page-title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--text);
 }
 
@@ -46,9 +45,10 @@
 
 .traxdb-section {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .traxdb-section-header {
@@ -76,7 +76,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--accent-blue) 15%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
   font-size: 11px;
   font-weight: 600;
@@ -141,7 +141,7 @@
 
 .traxdb-stat {
   background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 10px 12px;
   text-align: center;
@@ -163,7 +163,7 @@
 }
 
 .traxdb-stat--accent {
-  border-color: color-mix(in srgb, var(--accent-green) 30%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--accent-green) 30%, var(--border));
   background: color-mix(in srgb, var(--accent-green) 4%, var(--bg-surface));
 }
 
@@ -181,7 +181,7 @@
   background: var(--bg-surface);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
 }
 
 .traxdb-progress-fill {
@@ -217,7 +217,7 @@
 /* ── Error message ── */
 .traxdb-error {
   padding: 10px 14px;
-  background: color-mix(in srgb, var(--accent-red) 6%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-red) 15%, transparent);
   border-radius: var(--radius);
   color: var(--accent-red);
@@ -250,17 +250,17 @@
 /* ── Detail expandable sections ── */
 .traxdb-detail {
   margin-top: 12px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
 .traxdb-detail--new {
-  border-color: color-mix(in srgb, var(--accent-green) 30%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--accent-green) 30%, var(--border));
 }
 
 .traxdb-detail--errors {
-  border-color: color-mix(in srgb, var(--accent-red) 30%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--accent-red) 30%, var(--border));
 }
 
 .traxdb-detail-header {
@@ -306,7 +306,7 @@
 .traxdb-link-table th {
   text-align: left;
   padding: 6px 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
   font-size: 10px;
   text-transform: uppercase;
@@ -377,23 +377,23 @@
 .audit-badge {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   font-weight: 500;
 }
 
 .audit-badge--ok {
-  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
   color: var(--accent-green);
 }
 
 .audit-badge--missing {
-  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
   color: var(--accent-red);
 }
 
 .audit-badge--mismatch {
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
   color: var(--accent-amber);
 }
 
@@ -560,9 +560,10 @@
 /* ── Operations history ── */
 .traxdb-history {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .traxdb-history-header {
@@ -604,7 +605,7 @@
 .traxdb-history-table th {
   text-align: left;
   padding: 8px 16px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
   font-size: 11px;
   text-transform: uppercase;
@@ -637,17 +638,17 @@
 }
 
 .op-type-badge--sync {
-  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
   color: var(--accent-blue);
 }
 
 .op-type-badge--download {
-  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 8%, transparent);
   color: var(--accent-green);
 }
 
 .op-type-badge--audit {
-  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 8%, transparent);
   color: var(--accent-violet);
 }
 

@@ -1,5 +1,4 @@
 .recognize-panel {
-  max-width: 1100px;
 }
 
 /* ── Header ── */
@@ -12,8 +11,8 @@
 
 .recognize-header .page-title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--text);
 }
 
@@ -31,10 +30,11 @@
 /* ── Active Job Card ── */
 .recognize-active {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
   margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
 }
 
 .recognize-active-header {
@@ -105,7 +105,7 @@
   background: var(--bg-surface);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
 }
 
 .recognize-progress-fill {
@@ -128,10 +128,11 @@
 /* ── Tracklist Table ── */
 .recognize-tracklist {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
 }
 
 .recognize-tracklist-header {
@@ -158,7 +159,7 @@
 .recognize-table th {
   text-align: left;
   padding: 8px 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
   font-size: 10px;
   text-transform: uppercase;
@@ -215,34 +216,34 @@
 .confidence-badge {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   font-weight: 500;
   text-transform: capitalize;
 }
 
 .confidence-badge--verified {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
 }
 
 .confidence-badge--high {
-  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
   color: var(--accent-green);
 }
 
 .confidence-badge--medium {
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
   color: var(--accent-amber);
 }
 
 .confidence-badge--low {
-  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
   color: var(--accent-red);
 }
 
 .confidence-badge--uncertain {
-  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
   color: var(--text-muted);
 }
 
@@ -264,7 +265,7 @@
 /* ── Description Tracks ── */
 .recognize-description {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   margin-bottom: 24px;
@@ -327,9 +328,10 @@
 /* ── Past Jobs List ── */
 .recognize-history {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .recognize-history-header {
@@ -364,6 +366,32 @@
   background: var(--bg-surface);
 }
 
+.recognize-job-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.recognize-job-card:hover .recognize-job-delete {
+  opacity: 1;
+}
+
+.recognize-job-delete:hover {
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 8%, transparent);
+}
+
 .recognize-job-card--active {
   background: color-mix(in srgb, var(--accent-blue) 4%, transparent);
   border-left: 3px solid var(--accent-blue);
@@ -395,10 +423,21 @@
   font-family: var(--mono);
 }
 
+/* ── Warning (stuck) ── */
+.recognize-warning {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent-amber) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 18%, transparent);
+  border-radius: var(--radius);
+  color: var(--accent-amber);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
 /* ── Error ── */
 .recognize-error {
   padding: 10px 14px;
-  background: color-mix(in srgb, var(--accent-red) 6%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-red) 15%, transparent);
   border-radius: var(--radius);
   color: var(--accent-red);
@@ -413,24 +452,198 @@
 .engine-badge {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   font-weight: 500;
 }
 
 .engine-badge--trackid {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
 }
 
 .engine-badge--hybrid {
-  background: color-mix(in srgb, #a855f7 12%, transparent);
-  color: #a855f7;
+  background: color-mix(in srgb, #7c3aed 10%, transparent);
+  color: #7c3aed;
 }
 
 .engine-badge--acrcloud {
-  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
   color: var(--accent-green);
+}
+
+/* ── ACRCloud Usage ── */
+.acrcloud-usage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.acrcloud-usage__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acrcloud-usage__title {
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.acrcloud-usage__trial {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  color: var(--accent-amber);
+}
+
+.acrcloud-usage__stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.acrcloud-usage__stat {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.acrcloud-usage__value {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.acrcloud-usage__value--warn {
+  color: var(--accent-red);
+}
+
+.acrcloud-usage__label {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.acrcloud-usage__bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acrcloud-usage__bar {
+  width: 60px;
+  height: 6px;
+  background: var(--bg-surface);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.acrcloud-usage__bar-fill {
+  height: 100%;
+  background: var(--accent-green);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.acrcloud-usage__bar-fill--warn {
+  background: var(--accent-red);
+}
+
+.acrcloud-usage__bar-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.acrcloud-usage__hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+/* ── Active Jobs Bar (parallel) ── */
+.recognize-active-jobs {
+  background: var(--bg-raised);
+  border: 1px solid var(--accent-amber);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.recognize-active-jobs__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-amber);
+  margin-bottom: 8px;
+}
+
+.recognize-active-jobs__list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.recognize-active-jobs__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.recognize-active-jobs__item:hover {
+  border-color: var(--accent-blue);
+}
+
+.recognize-active-jobs__item--selected {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 5%, var(--bg));
+}
+
+.recognize-active-jobs__title {
+  color: var(--text);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recognize-active-jobs__pct {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--accent-amber);
+  font-size: 11px;
 }
 
 /* ── Empty ── */
@@ -445,7 +658,7 @@
 /* ── Success message ── */
 .recognize-success {
   padding: 10px 14px;
-  background: color-mix(in srgb, var(--accent-green) 6%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-green) 15%, transparent);
   border-radius: var(--radius);
   color: var(--accent-green);

@@ -10,4 +10,5 @@ urlpatterns = [
     path('pipeline/<int:pk>/process/', views.pipeline_process_single, name='pipeline-process-single'),
     path('pipeline/<int:pk>/retry/', views.pipeline_retry, name='pipeline-retry'),
     path('pipeline/<int:pk>/skip/', views.pipeline_skip, name='pipeline-skip'),
+    path('pipeline/<int:pk>/retag/', views.pipeline_retag, name='pipeline-retag'),
 ]

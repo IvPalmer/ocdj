@@ -1,5 +1,4 @@
 .organize-panel {
-  max-width: 1100px;
 }
 
 /* ── Header ── */
@@ -42,9 +41,10 @@
   gap: 4px;
   padding: 16px;
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow-x: auto;
+  box-shadow: var(--shadow-sm);
 }
 
 .pipeline-flow__step {
@@ -65,9 +65,9 @@
   align-items: center;
   gap: 4px;
   padding: 10px 14px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-surface);
+  background: var(--bg);
   cursor: pointer;
   transition: all 0.15s ease;
   min-width: 80px;
@@ -75,12 +75,12 @@
 
 .stage-card:hover {
   border-color: var(--stage-color);
-  background: color-mix(in srgb, var(--stage-color) 5%, var(--bg-surface));
+  background: color-mix(in srgb, var(--stage-color) 4%, var(--bg));
 }
 
 .stage-card--active {
   border-color: var(--stage-color);
-  background: color-mix(in srgb, var(--stage-color) 10%, var(--bg-surface));
+  background: color-mix(in srgb, var(--stage-color) 6%, var(--bg));
   box-shadow: 0 0 0 1px var(--stage-color);
 }
 
@@ -95,7 +95,7 @@
 
 .stage-card__count {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--stage-color);
   line-height: 1;
 }
@@ -121,17 +121,18 @@
   border-radius: 10px;
   font-size: 11px;
   font-weight: 500;
-  background: color-mix(in srgb, var(--pill-color) 12%, transparent);
+  background: color-mix(in srgb, var(--pill-color) 10%, transparent);
   color: var(--pill-color);
-  border: 1px solid color-mix(in srgb, var(--pill-color) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pill-color) 18%, transparent);
 }
 
 /* ── Pipeline Table ── */
 .pipeline-table {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .pipeline-table__header {
@@ -170,7 +171,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .col-meta {
@@ -195,8 +196,8 @@
   padding: 3px 8px;
   font-size: 11px;
   border-radius: var(--radius);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  background: var(--bg);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -219,8 +220,48 @@
   color: var(--text-muted);
   font-size: 14px;
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+/* ── Edit Modal ── */
+.edit-modal {
+  width: 560px;
+}
+
+.edit-modal__body {
+  padding: 20px;
+}
+
+.edit-modal__filename {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-modal__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+.edit-modal__fields .form-group {
+  margin-bottom: 0;
+}
+
+.edit-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* ── Toast ── */
@@ -229,13 +270,14 @@
   bottom: 20px;
   right: 20px;
   padding: 10px 16px;
-  background: var(--bg-raised);
+  background: var(--bg);
   border: 1px solid var(--accent-green);
   border-radius: var(--radius);
   font-size: 13px;
   color: var(--accent-green);
   animation: fadeInUp 0.3s ease;
   z-index: 100;
+  box-shadow: var(--shadow-md);
 }
 
 @keyframes fadeInUp {

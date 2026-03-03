@@ -1,5 +1,4 @@
 .soulseek-panel {
-  max-width: 1100px;
 }
 
 /* ── Header ── */
@@ -77,9 +76,10 @@
 .free-results {
   margin-bottom: 24px;
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .free-results-header {
@@ -103,7 +103,7 @@
 }
 
 .free-results-list {
-  max-height: 320px;
+  max-height: 50vh;
   overflow-y: auto;
 }
 
@@ -242,7 +242,7 @@
   text-align: left;
   padding: 8px 12px;
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -332,52 +332,52 @@
 }
 
 .status-pill--pending {
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
   color: var(--accent-amber);
 }
 
 .status-pill--identified {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
 }
 
 .status-pill--searching {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
 }
 
 .status-pill--found {
-  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
   color: var(--accent-green);
 }
 
 .status-pill--downloading {
-  background: color-mix(in srgb, #34d399 12%, transparent);
-  color: #34d399;
+  background: color-mix(in srgb, #059669 10%, transparent);
+  color: #059669;
 }
 
 .status-pill--downloaded {
-  background: color-mix(in srgb, #10b981 12%, transparent);
-  color: #10b981;
+  background: color-mix(in srgb, #047857 10%, transparent);
+  color: #047857;
 }
 
 .status-pill--tagged {
-  background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: var(--accent-violet);
 }
 
 .status-pill--organized {
-  background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: var(--accent-violet);
 }
 
 .status-pill--not_found {
-  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
   color: var(--accent-red);
 }
 
 .status-pill--failed {
-  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
   color: var(--accent-red);
 }
 
@@ -400,7 +400,7 @@
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid color-mix(in srgb, var(--accent-blue) 25%, transparent);
+  border: 2px solid color-mix(in srgb, var(--accent-blue) 20%, transparent);
   border-top-color: var(--accent-blue);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -410,7 +410,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border: 1.5px solid color-mix(in srgb, var(--accent-blue) 25%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent-blue) 20%, transparent);
   border-top-color: var(--accent-blue);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -504,7 +504,7 @@
   font-size: 13px;
   text-align: center;
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -522,13 +522,13 @@
 }
 
 .dl-badge--completed {
-  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
   color: var(--accent-green);
 }
 
 .dl-badge--downloading,
 .dl-badge--queued {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
 }
 
@@ -584,15 +584,16 @@
 /* ── Download Rows ── */
 .dl-row {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   margin-bottom: 4px;
   font-size: 13px;
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .dl-row--active {
-  border-color: color-mix(in srgb, var(--accent-blue) 25%, var(--border-subtle));
+  border-color: color-mix(in srgb, var(--accent-blue) 30%, var(--border));
 }
 
 .dl-row--completed {
@@ -668,7 +669,7 @@
   border-radius: 6px;
   font-size: 10px;
   font-weight: 500;
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
   color: var(--accent-amber);
 }
 
@@ -748,7 +749,7 @@
 }
 
 .btn-danger:hover {
-  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 8%, transparent);
   border-color: var(--accent-red);
 }
 
@@ -765,7 +766,7 @@
   font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
   text-transform: none;
   letter-spacing: 0;
@@ -805,7 +806,7 @@
 .queue-remove-btn:hover {
   opacity: 1 !important;
   color: var(--accent-red);
-  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-red) 8%, transparent);
 }
 
 /* ── Wanted Link Badge ── */
@@ -819,7 +820,7 @@
   border-radius: 4px;
   font-size: 9px;
   font-weight: 700;
-  background: color-mix(in srgb, var(--accent-violet) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-violet) 10%, transparent);
   color: var(--accent-violet);
   vertical-align: middle;
   letter-spacing: 0;

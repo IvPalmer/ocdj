@@ -17,17 +17,28 @@ from .trackid import lookup_by_url, submit_url
 
 logger = logging.getLogger(__name__)
 
+# Guard against duplicate workers for the same job
+_active_jobs = set()
+_active_jobs_lock = threading.Lock()
+
 # Pipeline configuration
 SEGMENT_DURATION = 5    # seconds per segment (ShazamIO optimal: 3-7s for mixed audio)
 SEGMENT_STEP = 10       # seconds between segment starts (50% coverage, same call count)
-GAP_THRESHOLD = 30      # min gap in seconds to trigger pass 2
+GAP_THRESHOLD = 30      # min gap in seconds to trigger gap-fill passes
 GAP_SEGMENT_DURATION = 7
 GAP_SEGMENT_STEP = 5
 MAX_GAP_SEGMENTS = 100  # cap pass 2 to avoid excessive scanning of unrecognizable audio
+ACRCLOUD_SEGMENT_STEP = 30  # ACRCloud only on gaps, one check per ~30s (tracks are 3-6min)
 
 
 def run_recognize(job_id):
     """Launch the recognition pipeline in a background thread."""
+    with _active_jobs_lock:
+        if job_id in _active_jobs:
+            logger.info(f'Job {job_id}: already has an active worker, skipping')
+            return
+        _active_jobs.add(job_id)
+
     thread = threading.Thread(
         target=_recognize_worker,
         args=(job_id,),
@@ -36,91 +47,153 @@ def run_recognize(job_id):
     thread.start()
 
 
+def resume_stale_jobs():
+    """Resume jobs that were interrupted by a restart. Called on backend startup."""
+    stale = RecognizeJob.objects.filter(status__in=['downloading', 'recognizing'])
+    if not stale.exists():
+        return
+
+    count = stale.count()
+    print(f'[recognize] Resuming {count} stale job(s)...')
+    for job in stale:
+        print(f'[recognize]   Job {job.id}: {job.status} — {job.title or job.url}')
+        run_recognize(job.id)
+
+
+def _find_existing_audio(output_dir):
+    """Find an already-downloaded audio file in the output directory."""
+    if not os.path.exists(output_dir):
+        return None
+    for f in os.listdir(output_dir):
+        if f.endswith('.mp3') and not f.startswith('seg_') and not f.startswith('gap_'):
+            return os.path.join(output_dir, f)
+    return None
+
+
+def _find_existing_segments(output_dir, step):
+    """Find existing segment files that match the expected step pattern."""
+    seg_dir = os.path.join(output_dir, 'segments')
+    if not os.path.exists(seg_dir):
+        return []
+    segments = []
+    for f in sorted(os.listdir(seg_dir)):
+        if f.startswith('seg_') and f.endswith('.mp3'):
+            start_sec = int(f.replace('seg_', '').replace('.mp3', ''))
+            segments.append((os.path.join(seg_dir, f), start_sec))
+    return segments
+
+
 def _recognize_worker(job_id):
     try:
         job = RecognizeJob.objects.get(pk=job_id)
-
-        # Step 0: Check TrackID.net first (instant if mix already processed)
-        job.status = 'downloading'
-        job.save()
-
-        trackid_result = lookup_by_url(job.url)
-        if trackid_result and trackid_result.get('trackid_status') == 'completed' and trackid_result['tracklist']:
-            logger.info(f'TrackID.net hit for job {job_id}: {len(trackid_result["tracklist"])} tracks')
-            job.title = trackid_result.get('title', '')[:500]
-            job.duration_seconds = trackid_result.get('duration_seconds', 0)
-            job.tracklist = trackid_result['tracklist']
-            job.tracks_found = len(trackid_result['tracklist'])
-            job.engine = 'trackid'
-            job.status = 'completed'
-            job.save()
-            return
-
-        # If TrackID has the stream but it's still processing, submit and note it
-        if trackid_result and trackid_result.get('trackid_status') == 'processing':
-            logger.info(f'TrackID.net is processing {job.url}, falling through to Shazam')
-        elif not trackid_result:
-            # Not on TrackID — try to submit it for future use
-            submit_url(job.url)
-
-        # Step 1: Download audio
         output_dir = os.path.join(settings.MEDIA_ROOT, 'recognize', str(job_id))
-        audio_path, info = download_audio(job.url, output_dir)
 
-        job.title = info.get('title', '')[:500]
-        job.duration_seconds = int(info.get('duration') or 0)
-        job.save()
+        # Check if audio already exists (resume after restart)
+        existing_audio = _find_existing_audio(output_dir)
+        is_resume = existing_audio is not None
 
-        # Step 2: Parse description for free tracklist
-        description_tracks = parse_tracklist_from_description(info)
-        job.description_tracks = description_tracks
-        job.save()
-
-        # Step 3: Segment audio (pass 1: 5s segments every 10s)
-        job.status = 'recognizing'
-        segments = segment_audio(
-            audio_path,
-            segment_duration=SEGMENT_DURATION,
-            step=SEGMENT_STEP,
-        )
-        job.segments_total = len(segments)
-        job.segments_done = 0
-        job.save()
-
-        # Determine recognition engines
-        use_acrcloud = _has_acrcloud_credentials()
-        engine_name = 'dual' if use_acrcloud else 'shazam'
-        logger.info(f'Job {job_id}: using {engine_name} engine(s) for recognition')
-
-        # Step 4: Recognize pass 1 — ACRCloud first (faster), then Shazam
-        def on_progress_pass1(done, total):
-            job.segments_done = done
-            job.save(update_fields=['segments_done', 'updated'])
-
-        if use_acrcloud:
-            # Run ACRCloud (0.5s rate limit = ~4x faster than Shazam)
-            raw_results = acrcloud_recognize_segments(segments, on_progress=on_progress_pass1)
-
-            # Then run Shazam on the same segments (different database = different results)
-            job.segments_total = len(segments) * 2  # Double for dual-engine
+        if is_resume:
+            logger.info(f'Job {job_id}: resuming — found existing audio at {existing_audio}')
+            audio_path = existing_audio
+            # Get duration from the audio file if not already set
+            if not job.duration_seconds:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_file(audio_path)
+                job.duration_seconds = int(len(audio) / 1000)
+                job.save()
+        else:
+            # Step 0: Check TrackID.net first (instant if mix already processed)
+            job.status = 'downloading'
             job.save()
 
-            acr_done = len(segments)
+            trackid_result = lookup_by_url(job.url)
+            if trackid_result and trackid_result.get('trackid_status') == 'completed' and trackid_result['tracklist']:
+                logger.info(f'TrackID.net hit for job {job_id}: {len(trackid_result["tracklist"])} tracks')
+                job.title = trackid_result.get('title', '')[:500]
+                job.duration_seconds = trackid_result.get('duration_seconds', 0)
+                job.tracklist = trackid_result['tracklist']
+                job.tracks_found = len(trackid_result['tracklist'])
+                job.engine = 'trackid'
+                job.status = 'completed'
+                job.save()
+                return
 
-            def on_progress_shazam(done, total):
-                job.segments_done = acr_done + done
+            if trackid_result and trackid_result.get('trackid_status') == 'processing':
+                logger.info(f'TrackID.net is processing {job.url}, falling through to recognition')
+            elif not trackid_result:
+                submit_url(job.url)
+
+            # Step 1: Download audio
+            audio_path, info = download_audio(job.url, output_dir)
+
+            job.title = info.get('title', '')[:500]
+            job.duration_seconds = int(info.get('duration') or 0)
+            job.save()
+
+        # Step 2: Parse description (skip on resume if already have them)
+        trackid_result = None if is_resume else trackid_result
+        if not is_resume:
+            description_tracks = parse_tracklist_from_description(info)
+            job.description_tracks = description_tracks
+            job.save()
+        else:
+            description_tracks = job.description_tracks or []
+            # Re-check TrackID on resume
+            trackid_result = lookup_by_url(job.url)
+
+        # Step 3: Segment + recognize
+        job.status = 'recognizing'
+        use_acrcloud = _has_acrcloud_credentials()
+        logger.info(f'Job {job_id}: acrcloud={use_acrcloud}')
+
+        acrcloud_calls = 0
+        if use_acrcloud:
+            # ACRCloud primary — wide step (30s), fast (0.5s rate limit)
+            primary_step = ACRCLOUD_SEGMENT_STEP
+            segments = segment_audio(
+                audio_path,
+                segment_duration=SEGMENT_DURATION,
+                step=primary_step,
+            )
+            job.segments_total = len(segments)
+            job.segments_done = 0
+            job.save()
+
+            def on_progress_acr(done, total):
+                job.segments_done = done
                 job.save(update_fields=['segments_done', 'updated'])
 
-            shazam_results = shazam_recognize_segments(segments, on_progress=on_progress_shazam)
+            raw_results = acrcloud_recognize_segments(segments, on_progress=on_progress_acr)
+            acrcloud_calls = len(segments)
+            logger.info(f'Job {job_id}: ACRCloud primary — {acrcloud_calls} calls at {primary_step}s step')
 
-            # Merge: ACRCloud results take priority, Shazam fills gaps
-            raw_results = _merge_raw_results(raw_results, shazam_results)
+            # Save after primary pass so results survive crashes
+            job.raw_results = raw_results
+            job.acrcloud_calls = acrcloud_calls
+            job.save(update_fields=['raw_results', 'acrcloud_calls', 'updated'])
         else:
-            raw_results = shazam_recognize_segments(segments, on_progress=on_progress_pass1)
+            # Shazam fallback when ACRCloud not configured
+            primary_step = SEGMENT_STEP
+            segments = segment_audio(
+                audio_path,
+                segment_duration=SEGMENT_DURATION,
+                step=primary_step,
+            )
+            job.segments_total = len(segments)
+            job.segments_done = 0
+            job.save()
 
-        # Step 5: Find gaps and do pass 2 with longer segments
+            def on_progress_shazam(done, total):
+                job.segments_done = done
+                job.save(update_fields=['segments_done', 'updated'])
+
+            raw_results = shazam_recognize_segments(segments, on_progress=on_progress_shazam)
+
+        job.acrcloud_calls = acrcloud_calls
+
+        # Step 4: Shazam gap fill (free) — covers what ACRCloud missed at finer intervals
         duration = job.duration_seconds or 0
-        gaps = find_gaps(raw_results, duration, min_gap=GAP_THRESHOLD, step=SEGMENT_STEP)
+        gaps = find_gaps(raw_results, duration, min_gap=GAP_THRESHOLD, step=primary_step)
 
         if gaps:
             gap_segs = segment_gaps(
@@ -136,20 +209,19 @@ def _recognize_worker(job_id):
                 job.segments_total += len(gap_segs)
                 job.save()
 
-                pass1_done = job.segments_done
+                pass2_done = job.segments_done
 
                 def on_progress_pass2(done, total):
-                    job.segments_done = pass1_done + done
+                    job.segments_done = pass2_done + done
                     job.save(update_fields=['segments_done', 'updated'])
 
-                # Use Shazam for gap filling (ACRCloud rate limit budget saved for pass 1)
                 gap_results = shazam_recognize_segments(
                     gap_segs, on_progress=on_progress_pass2, timeout=10, retries=1,
                 )
                 raw_results.extend(gap_results)
                 raw_results.sort(key=lambda r: r['start_sec'])
 
-        # Step 6: Verification pass — confirm single-segment results
+        # Step 5: Verification pass — confirm single-segment results (free, Shazam)
         candidates = find_single_segment_candidates(raw_results)
         if candidates:
             verify_segs = segment_verification(
@@ -176,13 +248,13 @@ def _recognize_worker(job_id):
                 raw_results.extend(verify_results)
                 raw_results.sort(key=lambda r: r['start_sec'])
 
-        # Step 7: Store raw results for re-clustering
+        # Step 6: Store raw results for re-clustering
         job.raw_results = raw_results
 
-        # Step 8: Cluster results into tracklist
+        # Step 7: Cluster results into tracklist
         tracklist = cluster_results(raw_results, description_tracks)
 
-        # Step 8b: Merge TrackID.net results if available (fills gaps)
+        # Step 7b: Merge TrackID.net results if available (fills gaps)
         if trackid_result and trackid_result.get('tracklist'):
             tracklist = _merge_trackid_results(tracklist, trackid_result['tracklist'])
 
@@ -205,7 +277,7 @@ def _recognize_worker(job_id):
         job.status = 'completed'
         job.save()
 
-        # Step 9: Clean up temp audio files
+        # Step 8: Clean up temp audio files
         try:
             shutil.rmtree(output_dir, ignore_errors=True)
         except Exception:
@@ -223,43 +295,9 @@ def _recognize_worker(job_id):
         except Exception:
             pass
     finally:
+        with _active_jobs_lock:
+            _active_jobs.discard(job_id)
         db.connections.close_all()
-
-
-def _merge_raw_results(acr_results, shazam_results):
-    """Merge raw results from ACRCloud and Shazam.
-
-    For each segment timestamp, keep whichever engine got a track hit.
-    If both identified a track, prefer ACRCloud (generally better metadata).
-    """
-    # Index ACRCloud results by start_sec
-    acr_by_sec = {r['start_sec']: r for r in acr_results}
-
-    merged = []
-    for sr in shazam_results:
-        sec = sr['start_sec']
-        ar = acr_by_sec.get(sec)
-
-        if ar and ar.get('track'):
-            # ACRCloud hit — use it
-            merged.append(ar)
-        elif sr.get('track'):
-            # Only Shazam hit — use that
-            merged.append(sr)
-        elif ar:
-            # Neither hit — use ACRCloud entry (keeps consistent engine field)
-            merged.append(ar)
-        else:
-            merged.append(sr)
-
-    # Add any ACRCloud results at timestamps not in Shazam
-    shazam_secs = {r['start_sec'] for r in shazam_results}
-    for ar in acr_results:
-        if ar['start_sec'] not in shazam_secs:
-            merged.append(ar)
-
-    merged.sort(key=lambda r: r['start_sec'])
-    return merged
 
 
 def _has_acrcloud_credentials():

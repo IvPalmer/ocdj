@@ -1,5 +1,5 @@
 .settings-panel {
-  max-width: 700px;
+  max-width: 900px;
 }
 
 .settings-section {
@@ -18,7 +18,7 @@
   align-items: center;
   padding: 10px 14px;
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -51,9 +51,10 @@
 
 .config-section {
   background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
 }
 
 .config-section__header {
@@ -77,7 +78,7 @@
 
 .config-badge {
   padding: 2px 7px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -85,17 +86,17 @@
 }
 
 .config-badge--set {
-  background: color-mix(in srgb, var(--accent-green) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
   color: var(--accent-green);
 }
 
 .config-badge--unset {
-  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
   color: var(--text-muted);
 }
 
 .config-badge--connected {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
   color: var(--accent-blue);
 }
 
@@ -157,8 +158,9 @@
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 13px;
-  font-weight: 450;
+  font-weight: 500;
   transition: all 0.12s;
+  box-shadow: var(--shadow-sm);
 }
 
 .quick-link:hover {

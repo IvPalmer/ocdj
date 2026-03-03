@@ -5,7 +5,7 @@ logger = logging.getLogger(__name__)
 
 
 def segment_audio(audio_path, segment_duration=5, step=10):
-    """Split audio into segments for recognition.
+    """Split audio into segments for recognition. Reuses existing segments if present.
 
     Args:
         audio_path: Path to the audio file
@@ -24,6 +24,26 @@ def segment_audio(audio_path, segment_duration=5, step=10):
     output_dir = os.path.join(os.path.dirname(audio_path), 'segments')
     os.makedirs(output_dir, exist_ok=True)
 
+    # Check for existing segments matching this step pattern
+    expected_starts = []
+    start_ms = 0
+    while start_ms < total_ms:
+        expected_starts.append(start_ms // 1000)
+        start_ms += step * 1000
+
+    existing = {}
+    for f in os.listdir(output_dir):
+        if f.startswith('seg_') and f.endswith('.mp3'):
+            sec = int(f.replace('seg_', '').replace('.mp3', ''))
+            existing[sec] = os.path.join(output_dir, f)
+
+    # If all expected segments exist, reuse them
+    if all(s in existing for s in expected_starts):
+        segments = [(existing[s], s) for s in expected_starts]
+        logger.info(f'Reusing {len(segments)} existing segments ({segment_duration}s every {step}s)')
+        return segments
+
+    # Otherwise, create all segments fresh
     segments = []
     start_ms = 0
 

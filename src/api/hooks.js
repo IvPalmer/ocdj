@@ -439,6 +439,34 @@ export function useCreateRecognizeJob() {
   })
 }
 
+export function useResumeRecognizeJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/recognize/jobs/${id}/resume/`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recognize-jobs'] }),
+  })
+}
+
+export function useDeleteRecognizeJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.delete(`/recognize/jobs/${id}/delete/`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recognize-jobs'] }),
+  })
+}
+
+export function useACRCloudUsage() {
+  return useQuery({
+    queryKey: ['acrcloud-usage'],
+    queryFn: () => api.get('/recognize/acrcloud-usage/'),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.active_jobs?.length > 0) return 10000
+      return 60000
+    },
+  })
+}
+
 export function useAddRecognizeToWanted() {
   const qc = useQueryClient()
   return useMutation({
@@ -528,6 +556,28 @@ export function useSkipStage() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.post(`/organize/pipeline/${id}/skip/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+export function useUpdatePipelineItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }) => api.patch(`/organize/pipeline/${id}/`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+export function useRetagItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/organize/pipeline/${id}/retag/`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
       qc.invalidateQueries({ queryKey: ['pipeline-items'] })

@@ -26,13 +26,27 @@ def pipeline_list(request):
     return paginator.get_paginated_response(serializer.data)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 def pipeline_detail(request, pk):
-    """Get a single pipeline item."""
+    """Get or update a single pipeline item."""
     try:
         item = PipelineItem.objects.get(pk=pk)
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'PATCH':
+        editable = ['artist', 'title', 'album', 'label', 'catalog_number', 'genre', 'year', 'track_number']
+        updated = []
+        for field in editable:
+            if field in request.data:
+                setattr(item, field, request.data[field])
+                updated.append(field)
+        if updated:
+            item.metadata_source = 'manual'
+            updated.append('metadata_source')
+            item.save(update_fields=updated)
+        return Response(PipelineItemSerializer(item).data)
+
     return Response(PipelineItemSerializer(item).data)
 
 
@@ -120,6 +134,30 @@ def pipeline_skip(request, pk):
             return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
 
     return Response({'error': 'Cannot skip from this stage'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+def pipeline_retag(request, pk):
+    """Re-write audio tags from current metadata (after manual edit)."""
+    try:
+        item = PipelineItem.objects.get(pk=pk)
+    except PipelineItem.DoesNotExist:
+        return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    from .services.tagger import write_tags
+    from .services.renamer import rename_file
+
+    metadata = {
+        'artist': item.artist, 'title': item.title, 'album': item.album,
+        'label': item.label, 'catalog_number': item.catalog_number,
+        'genre': item.genre, 'year': item.year, 'track_number': item.track_number,
+    }
+    try:
+        write_tags(item.current_path, metadata)
+        rename_file(item)
+        return Response(PipelineItemSerializer(item).data)
+    except Exception as e:
+        return Response({'error': str(e)}, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['POST'])
