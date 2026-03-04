@@ -35,6 +35,7 @@ const SOURCE_CARDS = [
   { type: 'soundcloud', label: 'SoundCloud', needsUrl: true },
   { type: 'spotify', label: 'Spotify', needsUrl: true },
   { type: 'discogs', label: 'Discogs', desc: 'Import your wantlist', needsUrl: false },
+  { type: 'bandcamp', label: 'Bandcamp', needsUrl: true },
 ]
 
 function ImportPanel({ onClose }) {

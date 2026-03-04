@@ -106,6 +106,7 @@ class ImportOperation(models.Model):
         ('soundcloud', 'SoundCloud'),
         ('spotify', 'Spotify'),
         ('discogs', 'Discogs'),
+        ('bandcamp', 'Bandcamp'),
     ]
 
     STATUS_CHOICES = [

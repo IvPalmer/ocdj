@@ -17,7 +17,7 @@ from .serializers import (
 from .services import (
     run_youtube_import, run_soundcloud_import,
     run_spotify_import, get_spotify_auth_url, handle_spotify_callback, check_spotify_status,
-    run_discogs_import,
+    run_discogs_import, run_bandcamp_import,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,6 +172,7 @@ def trigger_import(request):
         'soundcloud': run_soundcloud_import,
         'spotify': run_spotify_import,
         'discogs': run_discogs_import,
+        'bandcamp': run_bandcamp_import,
     }
     runner = runners[import_type]
     runner(op.id)
@@ -305,5 +306,8 @@ def import_config_status(request):
         },
         'discogs': {
             'available': bool(discogs_token and discogs_user),
+        },
+        'bandcamp': {
+            'available': True,
         },
     })

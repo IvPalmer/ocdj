@@ -77,13 +77,13 @@ class ImportOperationListSerializer(serializers.ModelSerializer):
 
 
 class TriggerImportSerializer(serializers.Serializer):
-    import_type = serializers.ChoiceField(choices=['youtube', 'soundcloud', 'spotify', 'discogs'])
+    import_type = serializers.ChoiceField(choices=['youtube', 'soundcloud', 'spotify', 'discogs', 'bandcamp'])
     url = serializers.URLField(required=False, allow_blank=True)
 
     def validate(self, data):
         import_type = data.get('import_type')
         url = data.get('url', '')
-        if import_type in ('youtube', 'soundcloud', 'spotify') and not url:
+        if import_type in ('youtube', 'soundcloud', 'spotify', 'bandcamp') and not url:
             raise serializers.ValidationError({'url': 'URL is required for this import type.'})
         return data
 
