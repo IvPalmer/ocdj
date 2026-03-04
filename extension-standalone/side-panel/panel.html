@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCDJ Player</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <!-- Player -->
+  <div id="player-section">
+    <div id="player-container">
+      <div id="player-placeholder">
+        <span>Queue a release to start listening</span>
+      </div>
+      <iframe
+        id="embed-player"
+        src=""
+        allow="autoplay; encrypted-media"
+        allowfullscreen
+        style="display:none"
+      ></iframe>
+      <div id="embed-fallback" style="display:none">
+        <p>This video can't be embedded</p>
+        <a id="embed-fallback-link" href="#" target="_blank" rel="noopener">Open on YouTube</a>
+      </div>
+    </div>
+    <div id="now-playing">
+      <div id="now-playing-title">Nothing playing</div>
+      <div id="now-playing-release"></div>
+    </div>
+    <div id="transport">
+      <button id="btn-prev" title="Previous"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="2" height="10"/><polygon points="13,2 5,7 13,12"/></svg></button>
+      <button id="btn-next" title="Next track"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><polygon points="1,2 9,7 1,12"/><rect x="11" y="2" width="2" height="10"/></svg></button>
+      <button id="btn-next-release" title="Next release"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><polygon points="1,2 6,7 1,12"/><polygon points="7,2 12,7 7,12"/><rect x="12" y="2" width="1.5" height="10"/></svg></button>
+    </div>
+  </div>
+
+  <!-- Queue -->
+  <div id="queue-section">
+    <div id="queue-header">
+      <h3>Queue <span id="queue-count"></span></h3>
+      <button id="btn-clear-queue" title="Clear queue">Clear</button>
+    </div>
+    <div id="queue-list"></div>
+    <div id="queue-empty">Queue is empty. Click Queue on any release to start.</div>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>

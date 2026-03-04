@@ -1,0 +1,80 @@
+{
+  "manifest_version": 3,
+  "name": "OCDJ Standalone",
+  "version": "1.0.0",
+  "description": "Save tracks to your wantlist and queue music from Discogs, Bandcamp, YouTube, SoundCloud, and Spotify",
+  "permissions": ["storage", "activeTab", "sidePanel", "declarativeNetRequestWithHostAccess", "scripting"],
+  "host_permissions": [
+    "https://api.discogs.com/*",
+    "https://soundcloud.com/*",
+    "https://w.soundcloud.com/*",
+    "https://api-v2.soundcloud.com/*",
+    "https://www.youtube.com/*",
+    "https://www.youtube-nocookie.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "side_panel": {
+    "default_path": "side-panel/panel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://bandcamp.com https://w.soundcloud.com https://open.spotify.com"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.discogs.com/*"],
+      "js": ["content/shared.js", "content/discogs.js"],
+      "css": ["styles/injected.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.bandcamp.com/*"],
+      "js": ["content/shared.js", "content/bandcamp.js"],
+      "css": ["styles/injected.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content/shared.js", "content/youtube.js"],
+      "css": ["styles/injected.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.soundcloud.com/*"],
+      "js": ["content/shared.js", "content/soundcloud.js"],
+      "css": ["styles/injected.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://open.spotify.com/*"],
+      "js": ["content/shared.js", "content/spotify.js"],
+      "css": ["styles/injected.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://w.soundcloud.com/*"],
+      "js": ["content/sc-widget-fix.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": false
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
