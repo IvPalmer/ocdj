@@ -21,14 +21,24 @@ logger = logging.getLogger(__name__)
 _active_jobs = set()
 _active_jobs_lock = threading.Lock()
 
-# Pipeline configuration — maximum coverage mode for testing
-SEGMENT_DURATION = 12   # seconds per segment (ACRCloud optimal: 10-12s)
-SEGMENT_STEP = 10       # seconds between segment starts (2s overlap with 12s segments)
-GAP_THRESHOLD = 20      # lower threshold — catch smaller gaps too
-GAP_SEGMENT_DURATION = 15  # longer segments for harder-to-identify regions
-GAP_SEGMENT_STEP = 5       # dense Shazam gap fill — every 5 seconds
-MAX_GAP_SEGMENTS = 2000 # no practical cap — cover the entire mix
-ACRCLOUD_SEGMENT_STEP = 10  # maximum density — every 10s with 12s segments (2s overlap)
+# Pipeline configuration — optimized based on testing (March 2026)
+#
+# Findings from max-coverage tests (10s ACR step, 5s Shazam step):
+#   - ACRCloud hit rate: 7.5% (27/361). Denser scanning mostly adds false positives.
+#   - Shazam hit rate: 1.7% (11/662). Even worse — 5s step not worth the time.
+#   - Zero overlap between engines — they cover completely different catalogs.
+#   - 10s vs 20s ACR step: more raw hits (27 vs 11) but same ~2 real unique tracks.
+#   - TrackID.net found 10 tracks neither engine could detect at any density.
+#   - Bottleneck is database coverage (underground music), not scan density.
+#
+# Optimal balance: 20s ACR step + 8s Shazam gap fill + TrackID merge.
+SEGMENT_DURATION = 12       # seconds per segment (ACRCloud optimal: 10-12s)
+SEGMENT_STEP = 10           # seconds between segment starts (Shazam-only fallback)
+GAP_THRESHOLD = 20          # minimum unidentified gap to trigger Shazam fill
+GAP_SEGMENT_DURATION = 15   # longer segments for harder-to-identify regions
+GAP_SEGMENT_STEP = 8        # Shazam gap fill interval (free, but slow — 2s rate limit)
+MAX_GAP_SEGMENTS = 500      # practical cap (~17 min of Shazam processing)
+ACRCLOUD_SEGMENT_STEP = 20  # 20s step — denser adds noise, not real tracks
 
 
 def run_recognize(job_id):
