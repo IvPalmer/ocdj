@@ -1,4 +1,4 @@
-import { useStats, useHealth, useSlskdHealth } from '../../api/hooks'
+import { useStats, useHealth, useSlskdHealth, useAutomationStatus } from '../../api/hooks'
 import './Dashboard.css'
 
 function StatCard({ label, value, color }) {
@@ -19,12 +19,55 @@ function StatusBadge({ connected, label }) {
   )
 }
 
+const PIPELINE_STAGES = [
+  { key: 'wanted_pending', label: 'Wanted', color: '#fbbf24' },
+  { key: 'searching', label: 'Searching', color: '#a78bfa' },
+  { key: 'found', label: 'Found', color: '#60a5fa' },
+  { key: 'downloading', label: 'Downloading', color: '#2dd4bf' },
+  { key: 'downloaded', label: 'Downloaded', color: '#34d399' },
+  { key: 'organizing', label: 'Organizing', color: '#818cf8' },
+  { key: 'ready', label: 'Ready', color: '#10b981' },
+]
+
+function PipelineFlow({ pipeline }) {
+  if (!pipeline) return null
+
+  return (
+    <div className="pipeline-flow">
+      {PIPELINE_STAGES.map((stage, i) => {
+        const count = pipeline[stage.key] || 0
+        return (
+          <div key={stage.key} className="pipeline-flow-stage">
+            <div className="pipeline-flow-count" style={{ color: count > 0 ? stage.color : 'var(--text-muted)' }}>
+              {count}
+            </div>
+            <div className="pipeline-flow-label">{stage.label}</div>
+            {i < PIPELINE_STAGES.length - 1 && (
+              <div className="pipeline-flow-arrow" />
+            )}
+          </div>
+        )
+      })}
+      {(pipeline.failed || 0) > 0 && (
+        <div className="pipeline-flow-stage">
+          <div className="pipeline-flow-count" style={{ color: '#f87171' }}>
+            {pipeline.failed}
+          </div>
+          <div className="pipeline-flow-label">Failed</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useStats()
   const { data: health } = useHealth()
   const { data: slskdHealth } = useSlskdHealth()
+  const { data: automationStatus } = useAutomationStatus()
 
   const wanted = stats?.wanted || {}
+  const pipeline = automationStatus?.pipeline
 
   return (
     <div className="dashboard">
@@ -35,6 +78,10 @@ function Dashboard() {
         <StatusBadge connected={!!health} label="Backend" />
         <StatusBadge connected={slskdHealth?.status === 'connected'} label="slskd" />
       </div>
+
+      {/* Pipeline Flow */}
+      <h3 className="section-title">Pipeline</h3>
+      <PipelineFlow pipeline={pipeline} />
 
       {/* Wanted Stats */}
       <h3 className="section-title">Wanted List</h3>

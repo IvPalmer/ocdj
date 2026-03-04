@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/traxdb', label: 'TraxDB' },
   { to: '/recognize', label: 'Recognize' },
   { to: '/organize', label: 'Organize' },
+  { to: '/library', label: 'Library' },
   { to: '/settings', label: 'Settings' },
 ]
 

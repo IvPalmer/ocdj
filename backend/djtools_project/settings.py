@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'recognize',
     'organize',
     'dig',
+    'library',
 ]
 
 MIDDLEWARE = [

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import {
   useHealth, useSlskdHealth, useConfig, useUpdateConfig,
   useImportConfigStatus, useSpotifyStatus,
+  useAutomationConfig, useUpdateAutomationConfig, useRunAutomation,
+  useAutomationStatus,
 } from '../../api/hooks'
 import './SettingsPanel.css'
 
@@ -149,6 +151,151 @@ function ConfigSection({ section, configData, onSave, importStatus, spotifyStatu
   )
 }
 
+function AutomationSection() {
+  const { data: config, isLoading } = useAutomationConfig()
+  const { data: status } = useAutomationStatus()
+  const updateConfig = useUpdateAutomationConfig()
+  const runAutomation = useRunAutomation()
+
+  if (isLoading) return null
+
+  const toggle = (key) => {
+    updateConfig.mutate({ [key]: !config?.[key] })
+  }
+
+  const setThreshold = (value) => {
+    updateConfig.mutate({ AUTOMATION_CONFIDENCE_THRESHOLD: parseInt(value) })
+  }
+
+  const pipeline = status?.pipeline || {}
+  const preview = status?.preview?.steps || {}
+
+  return (
+    <div className="automation-section">
+      <div className="automation-toggle-row">
+        <div className="automation-toggle-info">
+          <span className="automation-toggle-label">Enable Automation</span>
+          <span className="automation-toggle-desc">Master switch for all auto-advance steps</span>
+        </div>
+        <label className="toggle-switch">
+          <input
+            type="checkbox"
+            checked={!!config?.AUTOMATION_ENABLED}
+            onChange={() => toggle('AUTOMATION_ENABLED')}
+          />
+          <span className="toggle-slider" />
+        </label>
+      </div>
+
+      <div className={`automation-steps ${!config?.AUTOMATION_ENABLED ? 'automation-steps--disabled' : ''}`}>
+        <div className="automation-toggle-row">
+          <div className="automation-toggle-info">
+            <span className="automation-toggle-label">Auto Search</span>
+            <span className="automation-toggle-desc">Queue Soulseek searches for pending wanted items</span>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={!!config?.AUTOMATION_AUTO_SEARCH}
+              onChange={() => toggle('AUTOMATION_AUTO_SEARCH')}
+              disabled={!config?.AUTOMATION_ENABLED}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="automation-toggle-row">
+          <div className="automation-toggle-info">
+            <span className="automation-toggle-label">Auto Download</span>
+            <span className="automation-toggle-desc">Download best match above confidence threshold</span>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={!!config?.AUTOMATION_AUTO_DOWNLOAD}
+              onChange={() => toggle('AUTOMATION_AUTO_DOWNLOAD')}
+              disabled={!config?.AUTOMATION_ENABLED}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="automation-threshold-row">
+          <span className="automation-toggle-label">Confidence Threshold</span>
+          <div className="automation-threshold-control">
+            <input
+              type="range"
+              min="50"
+              max="100"
+              value={config?.AUTOMATION_CONFIDENCE_THRESHOLD || 85}
+              onChange={e => setThreshold(e.target.value)}
+              disabled={!config?.AUTOMATION_ENABLED}
+            />
+            <span className="automation-threshold-value">
+              {config?.AUTOMATION_CONFIDENCE_THRESHOLD || 85}%
+            </span>
+          </div>
+        </div>
+
+        <div className="automation-toggle-row">
+          <div className="automation-toggle-info">
+            <span className="automation-toggle-label">Auto Organize</span>
+            <span className="automation-toggle-desc">Process downloads through tag/rename pipeline</span>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={!!config?.AUTOMATION_AUTO_ORGANIZE}
+              onChange={() => toggle('AUTOMATION_AUTO_ORGANIZE')}
+              disabled={!config?.AUTOMATION_ENABLED}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+      </div>
+
+      <div className="automation-actions">
+        <button
+          className="btn btn-sm btn-primary"
+          onClick={() => runAutomation.mutate({})}
+          disabled={runAutomation.isPending || !config?.AUTOMATION_ENABLED}
+        >
+          {runAutomation.isPending ? 'Running...' : 'Run Now'}
+        </button>
+        <button
+          className="btn btn-sm"
+          onClick={() => runAutomation.mutate({ dry_run: true })}
+          disabled={runAutomation.isPending}
+        >
+          Dry Run
+        </button>
+      </div>
+
+      {runAutomation.data && (
+        <div className="automation-results">
+          <div className="automation-result-title">
+            {runAutomation.data.dry_run ? 'Dry Run Results' : 'Last Run Results'}
+          </div>
+          {Object.entries(runAutomation.data.steps || {}).map(([step, data]) => (
+            <div key={step} className="automation-result-step">
+              <span className="automation-result-step-name">{step}</span>
+              {data.skipped ? (
+                <span className="automation-result-skipped">{data.reason}</span>
+              ) : (
+                <span className="automation-result-counts">
+                  {step === 'search' && `${data.queued} queued, ${data.already_queued} skipped`}
+                  {step === 'download' && `${data.downloaded} started, ${data.below_threshold} below ${data.threshold}%`}
+                  {step === 'organize' && `${data.ingested} ingested, ${data.failed} failed`}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SettingsPanel() {
   const { data: health } = useHealth()
   const { data: slskdHealth } = useSlskdHealth()
@@ -193,6 +340,11 @@ function SettingsPanel() {
             </>
           )}
         </div>
+      </div>
+
+      <div className="settings-section">
+        <h3 className="section-title">Automation</h3>
+        <AutomationSection />
       </div>
 
       <div className="settings-section">
