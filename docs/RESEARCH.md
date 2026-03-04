@@ -1,4 +1,10 @@
-# DJ Tools Research Report v2
+# OCDJ Research Notes
+
+Early-stage research that informed architecture decisions. See PLAN.md for current project status.
+
+**What was adopted**: ACRCloud (primary) + Shazam (gap-fill) + TrackID.net (merge) for recognition. SoulSync-inspired matching patterns for Soulseek. Mutagen for tagging (not Beets). Tubifarry's conversion DSL concept noted but not yet built.
+
+---
 
 ## 1. Track ID — The Real Options for Underground Electronic
 
