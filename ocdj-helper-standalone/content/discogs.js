@@ -172,7 +172,7 @@
     }
   }
 
-  // ── Tracklist Buttons (Wantlist only — no per-track queue without backend) ──
+  // ── Tracklist Buttons (Queue via YouTube search + Wantlist) ──
 
   function injectTracklistButtons(meta) {
     let rows = document.querySelectorAll('table[class*="tracklist"] tr[data-track-position]');
@@ -213,8 +213,25 @@
 
       const target = titleCell || row.querySelector('td[class*="trackTitle"]') || row;
 
-      // Wantlist only (no per-track queue — would need YouTube search backend)
-      const btn = OCDJ.createDigButton({
+      const buttons = [];
+
+      // Queue single track (searches YouTube for artist + title)
+      buttons.push(OCDJ.createPlayButton({
+        size: 'small',
+        tooltip: `Queue "${trackArtist} - ${trackTitle}"`,
+        onClick: () => {
+          const query = `${trackArtist} ${trackTitle}`.trim();
+          const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+          OCDJ.sendToBackground('dig:queue-yt', {
+            url: ytUrl,
+            artist: trackArtist,
+            title: trackTitle,
+            source_url: meta.source_url,
+          });
+        },
+      }));
+
+      buttons.push(OCDJ.createDigButton({
         size: 'small',
         tooltip: `Add "${trackArtist} - ${trackTitle}"`,
         onClick: () => OCDJ.sendToBackground('dig:add', {
@@ -226,9 +243,9 @@
           source_url: meta.source_url,
           source_site: 'discogs',
         }),
-      });
+      }));
 
-      const group = OCDJ.createButtonGroup(btn);
+      const group = OCDJ.createButtonGroup(...buttons);
       target.appendChild(group);
     });
   }
