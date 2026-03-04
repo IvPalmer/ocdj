@@ -87,53 +87,51 @@ ocdj/
 
 ---
 
-## Remaining Work (ordered easy → hard)
+## Recently Completed
 
-### Phase A: Management Commands (easy)
-Add Django management commands for cron automation. Each wraps existing service logic.
-- `check_downloads` — poll slskd for completed downloads, update statuses, ingest into organize pipeline
-- `process_wanted` — auto-queue pending wanted items for Soulseek search
-- `scrape_traxdb` — trigger TraxDB blog scrape for new Pixeldrain lists
-- Crontab example in docs
+### Phase A: Management Commands
+- `check_downloads` — polls slskd, updates Download/WantedItem statuses
+- `process_wanted` — auto-queues pending wanted items for Soulseek search
+- `scrape_traxdb` — triggers blog scrape for cron use
+- All support `--dry-run` and `--limit`
 
-### Phase B: Format Conversion (easy-medium)
-Add a conversion step to the organize pipeline between "renamed" and "ready".
-- Conversion rules config (Tubifarry DSL style): `wav → aiff`, `flac → aiff`, `mp3>=320k → keep`
-- FFmpeg subprocess for actual conversion
-- Preserve metadata through conversion (mutagen re-tag after convert)
-- Settings UI for conversion rules
-- New pipeline stage: `downloaded → tagged → renamed → converted → ready`
+### Phase B: Format Conversion
+- Conversion stage added to organize pipeline (converting → converted)
+- DSL rule parser: `wav -> aiff`, `flac -> aiff`, `mp3>=320k -> keep`, etc.
+- FFmpeg conversion with tag + artwork preservation via mutagen
+- Conversion rules editor in frontend
+- Pipeline stages now: downloaded → tagged → renamed → converted → ready
 
-### Phase C: Bandcamp Import (medium)
-Add Bandcamp as a wanted list import source, matching existing Spotify/YouTube/SoundCloud/Discogs pattern.
-- Bandcamp collection/wishlist scraping (yt-dlp or direct scrape)
-- Label page parsing (all releases from a label)
-- Import preview + confirmation flow (same pattern as other connectors)
-- Frontend: add Bandcamp option to ImportPanel
+### Phase C: Bandcamp Import
+- Bandcamp scraper (requests + BeautifulSoup, TrAlbum JSON extraction)
+- Supports album, track, artist/label, and wishlist/collection URLs
+- Full import preview + confirmation flow matching other connectors
+- Added to ImportPanel in frontend
 
-### Phase D: End-to-End Pipeline Automation (medium)
-Connect the manual steps into an optional auto-pipeline flow.
-- Wanted item status machine: `pending → searching → found → downloading → downloaded → tagged → renamed → ready`
-- Auto-advance: when download completes → trigger organize processing
-- Auto-advance: when search finds high-confidence match → auto-download (configurable threshold)
-- Pipeline status view showing items across all stages
-- Manual override at any step
+### Phase D: End-to-End Pipeline Automation
+- `AutoPipeline` orchestrator with `run_automation_cycle()`
+- 5 independently toggleable config keys (all opt-in, disabled by default)
+- Auto-search, auto-download (configurable confidence threshold), auto-organize
+- Management command `run_automation` for cron
+- Settings UI with toggles + confidence slider + run/dry-run buttons
+- Dashboard pipeline flow visualization (Wanted → Searching → ... → Ready)
 
-### Phase E: Library Section (medium-hard)
-Add a library browser for files that have passed through the organize pipeline.
-- Browse `04_ready/` directory tree
+### Phase E: Library Section
+- `LibraryTrack` model with full metadata + technical info
+- Incremental scan of `05_ready/` directory (skips matching mtime)
 - Search/filter by artist, title, label, genre, format
-- Metadata viewer + editor
-- File stats (format, bitrate, duration, size)
-- Frontend: new Library section in sidebar
+- Metadata editing that writes to file via mutagen
+- Library stats (counts by format, top genres, total size)
+- New `/library` route + sidebar nav item
 
-### Phase F: TraxDB Native Rewrite (hard)
-Migrate TraxDB from external CLI tool to native Django services.
+### Phase F: TraxDB Native Rewrite
 - `ScrapedFolder` + `ScrapedTrack` Django models
-- Native Pixeldrain client (replace external `pixeldrain.py`)
-- Incremental scraping with proper ORM state tracking
-- Per-file download status tracking
-- Remove dependency on `tools/traxdb_sync/`
+- Native blog scraper (requests + BeautifulSoup, cookie auth, incremental)
+- Native Pixeldrain client (download with retry/resume/range support)
+- Batch downloader with dedup + progress tracking
+- File audit with size verification
+- Browsable scraped archive in frontend
+- `tools/traxdb_sync/` preserved but no longer called from Django
 
 ---
 
