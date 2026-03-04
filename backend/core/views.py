@@ -30,6 +30,12 @@ ALLOWED_CONFIG_KEYS = [
     'ACRCLOUD_ACCESS_SECRET',
     'ACRCLOUD_HOST',
     'ACRCLOUD_BEARER_TOKEN',
+    'ORGANIZE_CONVERSION_RULES',
+    'AUTOMATION_ENABLED',
+    'AUTOMATION_AUTO_SEARCH',
+    'AUTOMATION_AUTO_DOWNLOAD',
+    'AUTOMATION_CONFIDENCE_THRESHOLD',
+    'AUTOMATION_AUTO_ORGANIZE',
 ]
 
 
@@ -52,6 +58,12 @@ NON_SECRET_KEYS = {
     'SPOTIFY_REDIRECT_URI',
     'DISCOGS_USERNAME',
     'ORGANIZE_RENAME_TEMPLATE',
+    'ORGANIZE_CONVERSION_RULES',
+    'AUTOMATION_ENABLED',
+    'AUTOMATION_AUTO_SEARCH',
+    'AUTOMATION_AUTO_DOWNLOAD',
+    'AUTOMATION_CONFIDENCE_THRESHOLD',
+    'AUTOMATION_AUTO_ORGANIZE',
 }
 
 
@@ -206,4 +218,48 @@ def stats(request):
             'ready': pipeline_counts.get('ready', 0),
             'failed': pipeline_counts.get('failed', 0),
         },
+    })
+
+
+# ── Automation ────────────────────────────────────────────────
+
+@api_view(['POST'])
+def automation_run(request):
+    """Trigger one automation cycle."""
+    from .services.automation import run_automation_cycle
+    dry_run = request.data.get('dry_run', False)
+    report = run_automation_cycle(dry_run=dry_run)
+    return Response(report)
+
+
+@api_view(['GET', 'POST'])
+def automation_config(request):
+    """Get or update automation settings."""
+    from .services.automation import get_automation_config, set_automation_config
+
+    if request.method == 'GET':
+        return Response(get_automation_config())
+
+    updated = set_automation_config(request.data)
+    if not updated:
+        return Response(
+            {'error': 'No valid keys provided'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    return Response({'updated': updated, 'config': get_automation_config()})
+
+
+@api_view(['GET'])
+def automation_status(request):
+    """Show pipeline status and what would happen on next cycle (dry run)."""
+    from .services.automation import run_automation_cycle, get_automation_config, get_pipeline_status
+
+    config = get_automation_config()
+    pipeline = get_pipeline_status()
+    preview = run_automation_cycle(dry_run=True)
+
+    return Response({
+        'config': config,
+        'pipeline': pipeline,
+        'preview': preview,
     })

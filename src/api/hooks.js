@@ -517,7 +517,7 @@ export function usePipelineStats() {
     queryFn: () => api.get('/organize/pipeline/stats/'),
     refetchInterval: (query) => {
       const data = query.state.data
-      if (data?.tagging > 0 || data?.renaming > 0) return 3000
+      if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return 3000
       return 30000
     },
   })
@@ -535,7 +535,7 @@ export function usePipelineItems(params = {}) {
     refetchInterval: (query) => {
       const data = query.state.data
       const items = data?.results || []
-      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming')) return 3000
+      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return 3000
       return false
     },
   })
@@ -614,6 +614,112 @@ export function useScanDownloads() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
       qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
+// ── Conversion Rules ────────────────────────────────────────
+
+export function useConversionRules() {
+  return useQuery({
+    queryKey: ['conversion-rules'],
+    queryFn: () => api.get('/organize/conversion-rules/'),
+  })
+}
+
+export function useUpdateConversionRules() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (rules) => api.post('/organize/conversion-rules/', { rules }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['conversion-rules'] }),
+  })
+}
+
+// ── Automation ──────────────────────────────────────────────
+
+export function useAutomationConfig() {
+  return useQuery({
+    queryKey: ['automation-config'],
+    queryFn: () => api.get('/core/automation/config/'),
+  })
+}
+
+export function useUpdateAutomationConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data) => api.post('/core/automation/config/', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['automation-config'] })
+      qc.invalidateQueries({ queryKey: ['automation-status'] })
+    },
+  })
+}
+
+export function useAutomationStatus() {
+  return useQuery({
+    queryKey: ['automation-status'],
+    queryFn: () => api.get('/core/automation/status/'),
+    refetchInterval: 30000,
+  })
+}
+
+export function useRunAutomation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data = {}) => api.post('/core/automation/run/', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['automation-status'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['wanted-items'] })
+      qc.invalidateQueries({ queryKey: ['search-queue'] })
+      qc.invalidateQueries({ queryKey: ['downloads'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+    },
+  })
+}
+
+// ── Library ──────────────────────────────────────────────────
+
+export function useLibraryTracks(params = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.format) searchParams.set('format', params.format)
+  if (params.genre) searchParams.set('genre', params.genre)
+  if (params.search) searchParams.set('search', params.search)
+  if (params.page) searchParams.set('page', params.page)
+  if (params.ordering) searchParams.set('ordering', params.ordering)
+
+  const qs = searchParams.toString()
+  return useQuery({
+    queryKey: ['library-tracks', params],
+    queryFn: () => api.get(`/library/tracks/${qs ? '?' + qs : ''}`),
+  })
+}
+
+export function useLibraryStats() {
+  return useQuery({
+    queryKey: ['library-stats'],
+    queryFn: () => api.get('/library/stats/'),
+    staleTime: 30000,
+  })
+}
+
+export function useScanLibrary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post('/library/scan/sync/'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['library-tracks'] })
+      qc.invalidateQueries({ queryKey: ['library-stats'] })
+    },
+  })
+}
+
+export function useUpdateLibraryTrack() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }) => api.patch(`/library/tracks/${id}/update/`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['library-tracks'] })
     },
   })
 }

@@ -3,6 +3,7 @@ import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
   useProcessSingle, useRetryItem, useSkipStage, useScanDownloads,
   useUpdatePipelineItem, useRetagItem,
+  useConversionRules, useUpdateConversionRules,
 } from '../../api/hooks'
 import './OrganizePanel.css'
 
@@ -12,6 +13,8 @@ const STAGES = [
   { key: 'tagged', label: 'Tagged', color: 'var(--accent-green)' },
   { key: 'renaming', label: 'Renaming', color: 'var(--accent-amber)' },
   { key: 'renamed', label: 'Renamed', color: 'var(--accent-green)' },
+  { key: 'converting', label: 'Converting', color: 'var(--accent-amber)' },
+  { key: 'converted', label: 'Converted', color: 'var(--accent-green)' },
   { key: 'ready', label: 'Ready', color: 'var(--accent-green)' },
   { key: 'failed', label: 'Failed', color: 'var(--accent-red)' },
 ]
@@ -28,7 +31,7 @@ const EDITABLE_FIELDS = [
 ]
 
 function StageCard({ stage, count, isActive, onClick }) {
-  const isProcessing = stage.key === 'tagging' || stage.key === 'renaming'
+  const isProcessing = stage.key === 'tagging' || stage.key === 'renaming' || stage.key === 'converting'
   return (
     <button
       className={`stage-card ${isActive ? 'stage-card--active' : ''} ${isProcessing && count > 0 ? 'stage-card--processing' : ''}`}
@@ -139,6 +142,56 @@ function EditModal({ item, onClose }) {
   )
 }
 
+function ConversionRules() {
+  const { data } = useConversionRules()
+  const updateRules = useUpdateConversionRules()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const startEdit = () => {
+    setDraft(data?.rules || '')
+    setEditing(true)
+  }
+
+  const save = () => {
+    updateRules.mutate(draft, { onSuccess: () => setEditing(false) })
+  }
+
+  return (
+    <div className="organize-section">
+      <div className="section-header">
+        <h3 className="section-title">Conversion Rules</h3>
+        {!editing && (
+          <button className="btn btn-sm" onClick={startEdit}>Edit</button>
+        )}
+      </div>
+      {editing ? (
+        <div className="conversion-rules-editor">
+          <textarea
+            className="conversion-rules-textarea"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            rows={8}
+            placeholder="wav -> aiff&#10;flac -> aiff&#10;mp3>=320k -> keep&#10;mp3<320k -> skip"
+          />
+          <div className="conversion-rules-actions">
+            <button className="btn btn-sm" onClick={() => setEditing(false)}>Cancel</button>
+            <button
+              className="btn btn-sm btn-accent"
+              onClick={save}
+              disabled={updateRules.isPending}
+            >
+              {updateRules.isPending ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <pre className="conversion-rules-display">{data?.rules || 'Loading...'}</pre>
+      )}
+    </div>
+  )
+}
+
 function OrganizePanel() {
   const [stageFilter, setStageFilter] = useState(null)
   const [editingItem, setEditingItem] = useState(null)
@@ -188,6 +241,8 @@ function OrganizePanel() {
           </div>
         )}
       </div>
+
+      <ConversionRules />
 
       <div className="organize-section">
         <div className="section-header">

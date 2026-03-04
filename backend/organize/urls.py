@@ -11,4 +11,5 @@ urlpatterns = [
     path('pipeline/<int:pk>/retry/', views.pipeline_retry, name='pipeline-retry'),
     path('pipeline/<int:pk>/skip/', views.pipeline_skip, name='pipeline-skip'),
     path('pipeline/<int:pk>/retag/', views.pipeline_retag, name='pipeline-retag'),
+    path('conversion-rules/', views.conversion_rules, name='conversion-rules'),
 ]

@@ -12,7 +12,8 @@ STAGE_FOLDERS = {
     'downloaded': '01_downloaded',
     'tagged': '02_tagged',
     'renamed': '03_renamed',
-    'ready': '04_ready',
+    'converted': '04_converted',
+    'ready': '05_ready',
 }
 
 
@@ -210,8 +211,28 @@ def process_pipeline_item(item_id):
                 item.save(update_fields=['stage', 'error_message'])
                 return
 
-        # Stage 3: Move to ready
+        # Stage 3: Convert
         if item.stage == 'renamed':
+            item.stage = 'converting'
+            item.save(update_fields=['stage'])
+
+            try:
+                from .converter import convert_pipeline_item
+                convert_pipeline_item(item)
+                item.refresh_from_db()
+                new_path = _move_to_stage(item.current_path, 'converted')
+                item.current_path = new_path
+                item.stage = 'converted'
+                item.save(update_fields=['current_path', 'stage'])
+            except Exception as e:
+                logger.error(f"Conversion failed for item {item_id}: {e}")
+                item.stage = 'failed'
+                item.error_message = f"Conversion failed: {e}"
+                item.save(update_fields=['stage', 'error_message'])
+                return
+
+        # Stage 4: Move to ready
+        if item.stage == 'converted':
             new_path = _move_to_stage(item.current_path, 'ready')
             item.current_path = new_path
             item.stage = 'ready'

@@ -264,6 +264,46 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+/* ── Conversion Rules ── */
+.conversion-rules-display {
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.conversion-rules-textarea {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.conversion-rules-textarea:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.conversion-rules-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* ── Toast ── */
 .organize-toast {
   position: fixed;

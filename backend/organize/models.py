@@ -12,6 +12,8 @@ class PipelineItem(models.Model):
         ('tagged', 'Tagged'),
         ('renaming', 'Renaming'),
         ('renamed', 'Renamed'),
+        ('converting', 'Converting'),
+        ('converted', 'Converted'),
         ('ready', 'Ready'),
         ('failed', 'Failed'),
     ]

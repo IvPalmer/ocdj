@@ -22,6 +22,8 @@ class PipelineStatsSerializer(serializers.Serializer):
     tagged = serializers.IntegerField()
     renaming = serializers.IntegerField()
     renamed = serializers.IntegerField()
+    converting = serializers.IntegerField()
+    converted = serializers.IntegerField()
     ready = serializers.IntegerField()
     failed = serializers.IntegerField()
     total = serializers.IntegerField()

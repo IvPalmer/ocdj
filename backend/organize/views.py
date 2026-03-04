@@ -64,6 +64,8 @@ def pipeline_stats(request):
         'tagged': counts.get('tagged', 0),
         'renaming': counts.get('renaming', 0),
         'renamed': counts.get('renamed', 0),
+        'converting': counts.get('converting', 0),
+        'converted': counts.get('converted', 0),
         'ready': counts.get('ready', 0),
         'failed': counts.get('failed', 0),
         'total': sum(counts.values()),
@@ -124,7 +126,7 @@ def pipeline_skip(request, pk):
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
-    STAGE_ORDER = ['downloaded', 'tagged', 'renamed', 'ready']
+    STAGE_ORDER = ['downloaded', 'tagged', 'renamed', 'converted', 'ready']
     current_base = item.stage.replace('ing', 'ed') if item.stage.endswith('ing') else item.stage
     if current_base in STAGE_ORDER:
         idx = STAGE_ORDER.index(current_base)
@@ -166,3 +168,31 @@ def pipeline_scan(request):
     from .services.pipeline import scan_completed_downloads
     created = scan_completed_downloads()
     return Response({'message': f'Created {created} new pipeline items', 'created': created})
+
+
+@api_view(['GET', 'POST'])
+def conversion_rules(request):
+    """Get or update format conversion rules."""
+    from core.views import get_config
+    from core.models import Config
+    from .services.converter import DEFAULT_RULES, parse_rules
+
+    if request.method == 'POST':
+        rules_text = request.data.get('rules', '')
+        # Validate rules parse correctly
+        parsed = parse_rules(rules_text)
+        if not parsed and rules_text.strip():
+            return Response(
+                {'error': 'No valid rules could be parsed'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        Config.objects.update_or_create(
+            key='ORGANIZE_CONVERSION_RULES',
+            defaults={'value': rules_text},
+        )
+        return Response({'rules': rules_text, 'parsed_count': len(parsed)})
+
+    # GET
+    rules_text = get_config('ORGANIZE_CONVERSION_RULES') or DEFAULT_RULES
+    parsed = parse_rules(rules_text)
+    return Response({'rules': rules_text, 'parsed_count': len(parsed)})
