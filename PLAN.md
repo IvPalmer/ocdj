@@ -87,20 +87,63 @@ ocdj/
 
 ---
 
-## What's Not Built
+## Remaining Work (ordered easy → hard)
 
-### Not started
-- **Telegram import** — env vars configured, no service implementation
-- **Bandcamp full import** — stream extraction only, no playlist import
-- **Beets integration** — not wired in (mutagen handles tagging directly)
-- **Format conversion pipeline** — no wav→aiff/flac conversion rules (Tubifarry DSL idea from research)
-- **Niche blog scrapers** — Dr Banana, Velvet Velour, Alec Falconer (Phase 6 in original plan)
-- **Django management commands** — no `process_wanted`, `scrape_traxdb`, `check_downloads` for cron
-- **Download verification** — AcoustID post-download file verification
+### Phase A: Management Commands (easy)
+Add Django management commands for cron automation. Each wraps existing service logic.
+- `check_downloads` — poll slskd for completed downloads, update statuses, ingest into organize pipeline
+- `process_wanted` — auto-queue pending wanted items for Soulseek search
+- `scrape_traxdb` — trigger TraxDB blog scrape for new Pixeldrain lists
+- Crontab example in docs
 
-### Partially done
-- **MusicBrainz** — library imported in organize, used for metadata lookup, but not deeply integrated
-- **TraxDB** — works but delegates to external CLI tool rather than native Django services
+### Phase B: Format Conversion (easy-medium)
+Add a conversion step to the organize pipeline between "renamed" and "ready".
+- Conversion rules config (Tubifarry DSL style): `wav → aiff`, `flac → aiff`, `mp3>=320k → keep`
+- FFmpeg subprocess for actual conversion
+- Preserve metadata through conversion (mutagen re-tag after convert)
+- Settings UI for conversion rules
+- New pipeline stage: `downloaded → tagged → renamed → converted → ready`
+
+### Phase C: Bandcamp Import (medium)
+Add Bandcamp as a wanted list import source, matching existing Spotify/YouTube/SoundCloud/Discogs pattern.
+- Bandcamp collection/wishlist scraping (yt-dlp or direct scrape)
+- Label page parsing (all releases from a label)
+- Import preview + confirmation flow (same pattern as other connectors)
+- Frontend: add Bandcamp option to ImportPanel
+
+### Phase D: End-to-End Pipeline Automation (medium)
+Connect the manual steps into an optional auto-pipeline flow.
+- Wanted item status machine: `pending → searching → found → downloading → downloaded → tagged → renamed → ready`
+- Auto-advance: when download completes → trigger organize processing
+- Auto-advance: when search finds high-confidence match → auto-download (configurable threshold)
+- Pipeline status view showing items across all stages
+- Manual override at any step
+
+### Phase E: Library Section (medium-hard)
+Add a library browser for files that have passed through the organize pipeline.
+- Browse `04_ready/` directory tree
+- Search/filter by artist, title, label, genre, format
+- Metadata viewer + editor
+- File stats (format, bitrate, duration, size)
+- Frontend: new Library section in sidebar
+
+### Phase F: TraxDB Native Rewrite (hard)
+Migrate TraxDB from external CLI tool to native Django services.
+- `ScrapedFolder` + `ScrapedTrack` Django models
+- Native Pixeldrain client (replace external `pixeldrain.py`)
+- Incremental scraping with proper ORM state tracking
+- Per-file download status tracking
+- Remove dependency on `tools/traxdb_sync/`
+
+---
+
+## Dropped (not planned)
+
+- Telegram import — not needed
+- Download verification (AcoustID post-download) — not worth the complexity
+- Niche blog scrapers (Dr Banana, Velvet Velour, etc.) — not needed
+- Spotify playlist output from Recognize — not needed
+- Beets integration — mutagen handles tagging well enough
 
 ---
 
