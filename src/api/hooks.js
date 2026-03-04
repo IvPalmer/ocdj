@@ -509,6 +509,36 @@ export function useCancelTraxDBDownload() {
   })
 }
 
+export function useTraxDBFolders(params = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.download_status) searchParams.set('download_status', params.download_status)
+  if (params.search) searchParams.set('search', params.search)
+  if (params.limit) searchParams.set('limit', params.limit)
+  if (params.offset) searchParams.set('offset', params.offset)
+
+  const qs = searchParams.toString()
+  return useQuery({
+    queryKey: ['traxdb-folders', params],
+    queryFn: () => api.get(`/traxdb/folders/${qs ? '?' + qs : ''}`),
+  })
+}
+
+export function useTraxDBFolderDetail(id) {
+  return useQuery({
+    queryKey: ['traxdb-folder', id],
+    queryFn: () => api.get(`/traxdb/folders/${id}/`),
+    enabled: !!id,
+  })
+}
+
+export function useTraxDBFolderTracks(id) {
+  return useQuery({
+    queryKey: ['traxdb-folder-tracks', id],
+    queryFn: () => api.get(`/traxdb/folders/${id}/tracks/`),
+    enabled: !!id,
+  })
+}
+
 // ── Organize Pipeline ────────────────────────────────────────
 
 export function usePipelineStats() {

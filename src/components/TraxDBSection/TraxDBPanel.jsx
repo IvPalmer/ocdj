@@ -7,6 +7,7 @@ import {
   useTriggerAudit,
   useTraxDBDownloadProgress,
   useCancelTraxDBDownload,
+  useTraxDBFolders,
 } from '../../api/hooks'
 import './TraxDBPanel.css'
 
@@ -675,6 +676,95 @@ function OperationsHistory({ operations }) {
   )
 }
 
+/* ── Scraped Folders ── */
+
+function FoldersSection() {
+  const [statusFilter, setStatusFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const { data: foldersData } = useTraxDBFolders({
+    download_status: statusFilter || undefined,
+    search: search || undefined,
+    limit: 50,
+  })
+
+  const folders = foldersData?.results || []
+  const total = foldersData?.total || 0
+
+  return (
+    <div className="traxdb-section">
+      <div className="traxdb-section-header">
+        <h3>Scraped Archive ({total})</h3>
+        <div className="traxdb-actions">
+          <select
+            className="traxdb-filter-select"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="downloaded">Downloaded</option>
+            <option value="failed">Failed</option>
+          </select>
+          <input
+            className="traxdb-search-input"
+            type="text"
+            placeholder="Search folders..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="traxdb-section-body">
+        {folders.length === 0 ? (
+          <p className="traxdb-empty">
+            {total === 0 ? 'No scraped folders yet. Run a sync to discover content.' : 'No folders match your filters.'}
+          </p>
+        ) : (
+          <table className="traxdb-link-table">
+            <thead>
+              <tr>
+                <th>List ID</th>
+                <th>Date</th>
+                <th>Tracks</th>
+                <th>Status</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {folders.map(f => (
+                <tr key={f.id}>
+                  <td className="mono">{f.folder_id}</td>
+                  <td>{f.inferred_date || '\u2014'}</td>
+                  <td className="mono">
+                    {f.tracks_downloaded}/{f.tracks_count}
+                  </td>
+                  <td>
+                    <span className={`status-badge status-badge--${f.download_status}`}>
+                      {f.download_status}
+                    </span>
+                  </td>
+                  <td>
+                    {f.pixeldrain_url ? (
+                      <a
+                        href={f.pixeldrain_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="traxdb-link"
+                      >
+                        pixeldrain &#8599;
+                      </a>
+                    ) : '\u2014'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ── Main panel ── */
 
 function TraxDBPanel() {
@@ -730,6 +820,8 @@ function TraxDBPanel() {
           isPending={triggerAudit.isPending}
         />
       </div>
+
+      <FoldersSection />
 
       <OperationsHistory operations={ops} />
     </div>

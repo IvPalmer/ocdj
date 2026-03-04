@@ -4,16 +4,20 @@ import os
 import re
 import threading
 
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .models import TraxDBOperation
+from .models import TraxDBOperation, ScrapedFolder, ScrapedTrack
 from .serializers import (
     TraxDBOperationSerializer,
     TriggerSyncSerializer,
     TriggerDownloadSerializer,
     TriggerAuditSerializer,
+    ScrapedFolderSerializer,
+    ScrapedFolderDetailSerializer,
+    ScrapedTrackSerializer,
 )
 from .services import run_sync, run_download, run_audit
 
@@ -61,6 +65,10 @@ def inventory(request):
 
     date_dirs.sort()
 
+    # Include DB folder counts
+    db_folders_total = ScrapedFolder.objects.count()
+    db_folders_downloaded = ScrapedFolder.objects.filter(download_status='downloaded').count()
+
     return Response({
         'date_dirs_count': len(date_dirs),
         'latest_date': date_dirs[-1] if date_dirs else None,
@@ -68,6 +76,8 @@ def inventory(request):
         'known_lists_count': len(seen_ids),
         'file_count': file_count,
         'total_bytes': total_bytes,
+        'db_folders_total': db_folders_total,
+        'db_folders_downloaded': db_folders_downloaded,
     })
 
 
@@ -86,7 +96,6 @@ def operations(request):
     if op_status:
         qs = qs.filter(status=op_status)
 
-    # Simple limit (no DRF pagination for now, matches soulseek pattern)
     limit = int(request.query_params.get('limit', 50))
     qs = qs[:limit]
 
@@ -121,7 +130,6 @@ def _get_latest_sync_report():
 @api_view(['POST'])
 def trigger_sync(request):
     """Trigger a blog sync operation."""
-    # Check for already-running sync
     if TraxDBOperation.objects.filter(op_type='sync', status='running').exists():
         return Response(
             {'error': 'A sync is already running'},
@@ -150,8 +158,7 @@ def trigger_sync(request):
 
 @api_view(['POST'])
 def trigger_download(request):
-    """Trigger a download operation from a sync report."""
-    # Check for already-running download
+    """Trigger a download operation."""
     if TraxDBOperation.objects.filter(op_type='download', status='running').exists():
         return Response(
             {'error': 'A download is already running'},
@@ -165,10 +172,11 @@ def trigger_download(request):
 
     # Determine which sync report to use
     sync_op_id = ser.validated_data.get('sync_operation_id')
+    sync_report_path = None
     if sync_op_id:
         try:
             sync_op = TraxDBOperation.objects.get(id=sync_op_id, op_type='sync', status='completed')
-            sync_report_path = sync_op.report_path
+            sync_report_path = sync_op.report_path if sync_op.report_path else None
         except TraxDBOperation.DoesNotExist:
             return Response(
                 {'error': f'Sync operation {sync_op_id} not found or not completed'},
@@ -177,18 +185,25 @@ def trigger_download(request):
     else:
         sync_report_path = _get_latest_sync_report()
 
-    if not sync_report_path:
-        return Response(
-            {'error': 'No completed sync report available. Run a sync first.'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    # Native mode: we can work without a report file if we have DB data
+    latest_sync = TraxDBOperation.objects.filter(
+        op_type='sync', status='completed'
+    ).first()
+
+    if not sync_report_path and not (latest_sync and latest_sync.summary.get('links_new')):
+        # Check if we have pending folders in DB
+        if not ScrapedFolder.objects.filter(download_status='pending').exists():
+            return Response(
+                {'error': 'No completed sync report or pending folders available. Run a sync first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     op = TraxDBOperation.objects.create(op_type='download')
 
     thread = threading.Thread(
         target=run_download,
-        args=(op.id, sync_report_path),
-        kwargs={'links_key': links_key},
+        args=(op.id,),
+        kwargs={'sync_report_path': sync_report_path, 'links_key': links_key},
         daemon=True,
     )
     thread.start()
@@ -201,8 +216,7 @@ def trigger_download(request):
 
 @api_view(['POST'])
 def trigger_audit(request):
-    """Trigger an audit operation against a sync report."""
-    # Check for already-running audit
+    """Trigger an audit operation."""
     if TraxDBOperation.objects.filter(op_type='audit', status='running').exists():
         return Response(
             {'error': 'An audit is already running'},
@@ -212,12 +226,12 @@ def trigger_audit(request):
     ser = TriggerAuditSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
-    # Determine which sync report to use
     sync_op_id = ser.validated_data.get('sync_operation_id')
+    sync_report_path = None
     if sync_op_id:
         try:
             sync_op = TraxDBOperation.objects.get(id=sync_op_id, op_type='sync', status='completed')
-            sync_report_path = sync_op.report_path
+            sync_report_path = sync_op.report_path if sync_op.report_path else None
         except TraxDBOperation.DoesNotExist:
             return Response(
                 {'error': f'Sync operation {sync_op_id} not found or not completed'},
@@ -226,9 +240,10 @@ def trigger_audit(request):
     else:
         sync_report_path = _get_latest_sync_report()
 
-    if not sync_report_path:
+    # Native mode can work without a report if we have DB data
+    if not sync_report_path and not ScrapedFolder.objects.filter(download_status='downloaded').exists():
         return Response(
-            {'error': 'No completed sync report available. Run a sync first.'},
+            {'error': 'No completed sync report or downloaded folders available. Run a sync first.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -236,7 +251,8 @@ def trigger_audit(request):
 
     thread = threading.Thread(
         target=run_audit,
-        args=(op.id, sync_report_path),
+        args=(op.id,),
+        kwargs={'sync_report_path': sync_report_path},
         daemon=True,
     )
     thread.start()
@@ -277,7 +293,7 @@ def download_progress(request, pk):
 
 @api_view(['POST'])
 def cancel_download(request, pk):
-    """Cancel a running download by removing the lock file."""
+    """Cancel a running download."""
     try:
         op = TraxDBOperation.objects.get(pk=pk, op_type='download')
     except TraxDBOperation.DoesNotExist:
@@ -289,7 +305,7 @@ def cancel_download(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Remove lock file to signal the CLI tool to stop
+    # Remove lock file to signal stop
     traxdb_root = os.environ.get('TRAXDB_ROOT', '/music/Electronic/ID3/traxdb')
     lock_path = os.path.join(traxdb_root, '.download_from_report.lock')
     try:
@@ -303,3 +319,67 @@ def cancel_download(request, pk):
     op.save()
 
     return Response(TraxDBOperationSerializer(op).data)
+
+
+# ── Scraped folders/tracks browsing ───────────────────────────
+
+@api_view(['GET'])
+def folders_list(request):
+    """List scraped folders with filtering."""
+    qs = ScrapedFolder.objects.all()
+
+    # Filter by download status
+    dl_status = request.query_params.get('download_status')
+    if dl_status:
+        qs = qs.filter(download_status=dl_status)
+
+    # Filter by date range
+    date_from = request.query_params.get('date_from')
+    if date_from:
+        qs = qs.filter(inferred_date__gte=date_from)
+    date_to = request.query_params.get('date_to')
+    if date_to:
+        qs = qs.filter(inferred_date__lte=date_to)
+
+    # Search by folder_id or title
+    search = request.query_params.get('search')
+    if search:
+        qs = qs.filter(Q(folder_id__icontains=search) | Q(title__icontains=search))
+
+    limit = int(request.query_params.get('limit', 100))
+    offset = int(request.query_params.get('offset', 0))
+    total = qs.count()
+    qs = qs[offset:offset + limit]
+
+    serializer = ScrapedFolderSerializer(qs, many=True)
+    return Response({
+        'results': serializer.data,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+    })
+
+
+@api_view(['GET'])
+def folder_detail(request, pk):
+    """Get a single folder with its tracks."""
+    try:
+        folder = ScrapedFolder.objects.get(pk=pk)
+    except ScrapedFolder.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = ScrapedFolderDetailSerializer(folder)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def folder_tracks(request, pk):
+    """List tracks in a folder."""
+    try:
+        folder = ScrapedFolder.objects.get(pk=pk)
+    except ScrapedFolder.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    tracks = folder.tracks.all()
+    serializer = ScrapedTrackSerializer(tracks, many=True)
+    return Response({'results': serializer.data})

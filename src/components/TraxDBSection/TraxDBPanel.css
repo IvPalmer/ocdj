@@ -675,3 +675,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── Folders filter/search ── */
+.traxdb-filter-select {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.traxdb-search-input {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text);
+  width: 160px;
+}
+
+.traxdb-search-input::placeholder {
+  color: var(--text-muted);
+}

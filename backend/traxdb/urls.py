@@ -10,4 +10,8 @@ urlpatterns = [
     path('download/<int:pk>/progress/', views.download_progress),
     path('download/<int:pk>/cancel/', views.cancel_download),
     path('audit/', views.trigger_audit),
+    # Scraped folders/tracks browsing
+    path('folders/', views.folders_list),
+    path('folders/<int:pk>/', views.folder_detail),
+    path('folders/<int:pk>/tracks/', views.folder_tracks),
 ]
