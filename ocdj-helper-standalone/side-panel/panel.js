@@ -478,7 +478,7 @@
     }
 
     await saveState();
-    chrome.runtime.sendMessage({ type: 'dig:removeFromQueue', data: { index } });
+    chrome.runtime.sendMessage({ type: 'dig:removeFromQueue', data: { index } }).catch(() => {});
     renderQueue();
     updateNowPlaying();
   }
@@ -495,7 +495,7 @@
     clearFallbackTimer();
 
     await saveState();
-    chrome.runtime.sendMessage({ type: 'dig:clearQueue' });
+    chrome.runtime.sendMessage({ type: 'dig:clearQueue' }).catch(() => {});
     renderQueue();
     updateNowPlaying();
   }
@@ -606,7 +606,7 @@
 
   // YouTube posts messages when embeds fail (Error 150/153)
   window.addEventListener('message', (event) => {
-    if (!event.origin.includes('youtube')) return;
+    if (event.origin !== 'https://www.youtube.com' && event.origin !== 'https://www.youtube-nocookie.com') return;
     try {
       const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
       // YouTube IFrame API error codes: 150 = blocked by owner, 101 = same, 2 = invalid ID

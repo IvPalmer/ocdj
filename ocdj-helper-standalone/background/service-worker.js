@@ -313,6 +313,68 @@ const messageHandlers = {
     return { queued: true, item: queueItem };
   },
 
+  'dig:queue-track': async (data, sender) => {
+    const { releaseId, trackTitle, artist, source_url } = data;
+    if (!releaseId || !trackTitle) return { error: 'Missing releaseId or trackTitle' };
+
+    // Fetch videos from Discogs API for this release
+    const releaseData = await fetchDiscogsVideos(releaseId);
+    if (!releaseData.videos || releaseData.videos.length === 0) {
+      return { error: 'No YouTube videos found for this release' };
+    }
+
+    // Match the track by title — Discogs video titles often contain the track name
+    const needle = trackTitle.toLowerCase();
+    let matched = releaseData.videos.find(v =>
+      v.title.toLowerCase().includes(needle)
+    );
+
+    // Fallback: check if track title words appear in video title
+    if (!matched) {
+      const words = needle.split(/\s+/).filter(w => w.length > 2);
+      matched = releaseData.videos.find(v => {
+        const vt = v.title.toLowerCase();
+        return words.filter(w => vt.includes(w)).length >= Math.ceil(words.length / 2);
+      });
+    }
+
+    // Last resort: if only one video, use it; otherwise fail
+    if (!matched) {
+      if (releaseData.videos.length === 1) {
+        matched = releaseData.videos[0];
+      } else {
+        return { error: `Could not match "${trackTitle}" to any video` };
+      }
+    }
+
+    const queueItem = {
+      releaseId,
+      artist: artist || releaseData.artist || '',
+      title: trackTitle,
+      thumb: releaseData.thumb || '',
+      year: releaseData.year || '',
+      source_url: source_url || `https://www.discogs.com/release/${releaseId}`,
+      videos: [matched],
+    };
+
+    const { playerQueue = [] } = await chrome.storage.local.get('playerQueue');
+    if (playerQueue.some(item =>
+      item.releaseId === releaseId && item.videos?.some(v => v.videoId === matched.videoId)
+    )) {
+      return { queued: true, duplicate: true };
+    }
+
+    playerQueue.push(queueItem);
+    await chrome.storage.local.set({ playerQueue });
+    notifySidePanel();
+
+    if (sender?.tab) {
+      try { await chrome.sidePanel.open({ tabId: sender.tab.id }); } catch (e) {}
+    }
+
+    return { queued: true, item: queueItem };
+  },
+
   'dig:queue-embed': async (data, sender) => {
     let { platform, artist, title, embedUrl, thumb, source_url, tracks } = data;
     if (!embedUrl) return { error: 'No embed URL' };

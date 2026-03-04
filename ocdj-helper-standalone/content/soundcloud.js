@@ -61,6 +61,25 @@
     return { artist, title, uploaderName, thumb };
   }
 
+  // Extract SoundCloud track/playlist API URL from page metadata
+  function extractApiUrl() {
+    // Pages contain soundcloud://sounds:{ID} or soundcloud://playlists:{ID}
+    const html = document.documentElement.innerHTML;
+    const soundMatch = html.match(/soundcloud:\/\/sounds:(\d+)/);
+    if (soundMatch) {
+      return `https://api.soundcloud.com/tracks/${soundMatch[1]}`;
+    }
+    const playlistMatch = html.match(/soundcloud:\/\/playlists:(\d+)/);
+    if (playlistMatch) {
+      return `https://api.soundcloud.com/playlists/${playlistMatch[1]}`;
+    }
+    return null;
+  }
+
+  function buildEmbedUrl(apiUrlOrPageUrl) {
+    return `https://w.soundcloud.com/player/?url=${encodeURIComponent(apiUrlOrPageUrl)}&color=%230d9488&auto_play=true&show_artwork=true`;
+  }
+
   // ── Track Page ────────────────────────────────────────────
 
   function injectTrackPage() {
@@ -72,8 +91,10 @@
 
     const { artist, title } = extractMeta();
     const pageUrl = window.location.href;
-    const cleanUrl = pageUrl.split('?')[0];
-    const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(cleanUrl)}&color=%230d9488&auto_play=true&show_artwork=true`;
+    const apiUrl = extractApiUrl();
+    const embedUrl = buildEmbedUrl(apiUrl || pageUrl.split('?')[0]);
+    const thumb = document.querySelector('meta[property="og:image"]')?.content ||
+                  document.querySelector('.sc-artwork img, img.sc-artwork')?.src || '';
 
     const queueBtn = OCDJ.createPlayButton({
       size: 'medium',
@@ -83,8 +104,7 @@
         artist,
         title,
         embedUrl,
-        thumb: document.querySelector('meta[property="og:image"]')?.content ||
-               document.querySelector('.sc-artwork img, img.sc-artwork')?.src || '',
+        thumb,
         source_url: pageUrl,
       }),
     });
@@ -160,7 +180,10 @@
     if (header && !OCDJ.isInjected(header)) {
       const { artist, title, uploaderName } = extractMeta();
       const pageUrl = window.location.href;
-      const embedUrl = `https://w.soundcloud.com/player/?url=${encodeURIComponent(pageUrl)}&color=%230d9488&auto_play=true&show_artwork=true`;
+      const apiUrl = extractApiUrl();
+      const embedUrl = buildEmbedUrl(apiUrl || pageUrl.split('?')[0]);
+      const thumb = document.querySelector('meta[property="og:image"]')?.content ||
+                    document.querySelector('.sc-artwork img, img.sc-artwork')?.src || '';
 
       const queueBtn = OCDJ.createPlayButton({
         size: 'medium',
@@ -170,8 +193,7 @@
           artist: uploaderName,
           title,
           embedUrl,
-          thumb: document.querySelector('meta[property="og:image"]')?.content ||
-                 document.querySelector('.sc-artwork img, img.sc-artwork')?.src || '',
+          thumb,
           tracks: extractSetTracks(),
           source_url: pageUrl,
         }),

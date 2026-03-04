@@ -124,7 +124,7 @@
     const releaseId = extractReleaseId();
 
     injectReleaseHeader(meta, releaseId);
-    injectTracklistButtons(meta);
+    injectTracklistButtons(meta, releaseId);
   }
 
   function injectReleaseHeader(meta, releaseId) {
@@ -174,7 +174,7 @@
 
   // ── Tracklist Buttons (Queue via YouTube search + Wantlist) ──
 
-  function injectTracklistButtons(meta) {
+  function injectTracklistButtons(meta, releaseId) {
     let rows = document.querySelectorAll('table[class*="tracklist"] tr[data-track-position]');
     if (rows.length === 0) rows = document.querySelectorAll('tr[data-track-position]');
     if (rows.length === 0) {
@@ -215,21 +215,19 @@
 
       const buttons = [];
 
-      // Queue single track (searches YouTube for artist + title)
-      buttons.push(OCDJ.createPlayButton({
-        size: 'small',
-        tooltip: `Queue "${trackArtist} - ${trackTitle}"`,
-        onClick: () => {
-          const query = `${trackArtist} ${trackTitle}`.trim();
-          const ytUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-          OCDJ.sendToBackground('dig:queue-yt', {
-            url: ytUrl,
+      // Queue single track (fetches Discogs videos, matches by track title)
+      if (releaseId) {
+        buttons.push(OCDJ.createPlayButton({
+          size: 'small',
+          tooltip: `Queue "${trackArtist} - ${trackTitle}"`,
+          onClick: () => OCDJ.sendToBackground('dig:queue-track', {
+            releaseId,
+            trackTitle,
             artist: trackArtist,
-            title: trackTitle,
             source_url: meta.source_url,
-          });
-        },
-      }));
+          }),
+        }));
+      }
 
       buttons.push(OCDJ.createDigButton({
         size: 'small',

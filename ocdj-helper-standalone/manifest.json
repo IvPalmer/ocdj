@@ -19,7 +19,7 @@
     "default_path": "side-panel/panel.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://bandcamp.com https://w.soundcloud.com https://open.spotify.com"
+    "extension_pages": "script-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://bandcamp.com https://*.bandcamp.com https://w.soundcloud.com https://open.spotify.com"
   },
   "content_scripts": [
     {
@@ -51,13 +51,6 @@
       "js": ["content/shared.js", "content/spotify.js"],
       "css": ["styles/injected.css"],
       "run_at": "document_idle"
-    },
-    {
-      "matches": ["*://w.soundcloud.com/*"],
-      "js": ["content/sc-widget-fix.js"],
-      "run_at": "document_start",
-      "all_frames": true,
-      "world": "MAIN"
     }
   ],
   "action": {
