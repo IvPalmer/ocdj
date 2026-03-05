@@ -1,11 +1,21 @@
 import logging
 import re
 
+try:
+    from rapidfuzz import fuzz
+except ImportError:
+    fuzz = None
+
 logger = logging.getLogger(__name__)
 
 # Clustering configuration
 PROXIMITY_WINDOW_SEC = 120  # Max gap between segments of the same track to merge them
 CONFLICT_WINDOW_SEC = 30    # If multiple different tracks hit within this window, keep only the best
+
+# Multi-segment ACRCloud low-score acceptance — tested March 2026:
+# MADVILLA - Down 4 Me hit 31 times at score 25-34 across all segment durations.
+# A single hit at score 25 is noise, but 3+ hits of the same track is real signal.
+ACR_LOW_SCORE_MIN_SEGMENTS = 3  # Accept score 25+ if this many segments match
 
 
 def _normalize_key(artist, title):
@@ -31,6 +41,92 @@ def _normalize_key(artist, title):
     artist = re.sub(r'\s+', ' ', artist).strip()
     title = re.sub(r'\s+', ' ', title).strip()
     return f'{artist}:{title}'
+
+
+def _extract_title_core(title):
+    """Extract the core title words, stripping all parenthetical/remix info.
+
+    Used for fuzzy matching covers/remixes/samples — e.g., all these share 'o superman':
+      - 'O Superman (For Massenet) (Remastered)'
+      - 'O Superman (Disco Spacer Mix)'
+      - 'O Superman (M.A.N.D.Y. vs. Booka Shade vs. Laurie Anderson)'
+    """
+    t = (title or '').lower().strip()
+    t = re.sub(r'\s*[\(\[].*', '', t).strip()  # Strip everything from first ( or [
+    t = re.sub(r'\s*-\s*(original|extended|club|radio|dub|vocal|instrumental|remix).*$', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def _group_by_title_similarity(track_hits, track_info):
+    """Merge track_hits entries that share the same core title (covers/remixes/samples).
+
+    Tested March 2026: Laurie Anderson - O Superman was detected by Shazam as:
+      - Marcello Giordani - O Superman (Disco Spacer Mix)
+      - Mandy & Booka Shade - O Superman (M.A.N.D.Y. vs. Booka Shade vs. Laurie Anderson)
+    And by ACRCloud as:
+      - Age Of Luv - O Superman
+    All share title core "o superman" — grouping them produces a strong multi-segment hit.
+    """
+    # Build core title -> list of keys mapping
+    core_groups = {}  # core_title -> [key1, key2, ...]
+    key_cores = {}    # key -> core_title
+
+    for key in track_hits:
+        info = track_info[key]
+        core = _extract_title_core(info.get('title', ''))
+        if len(core) < 3:
+            continue
+        key_cores[key] = core
+        if core not in core_groups:
+            core_groups[core] = []
+        core_groups[core].append(key)
+
+    # Only merge groups with 2+ different keys AND the core is at least 2 words
+    # (to avoid merging generic single-word titles like "love" or "deep")
+    merged_keys = {}  # old_key -> canonical_key
+    for core, keys in core_groups.items():
+        if len(keys) < 2 or len(core.split()) < 2:
+            continue
+
+        # Check total combined segments — only merge if the group is meaningful
+        total_segs = sum(len(track_hits[k]) for k in keys)
+        if total_segs < 2:
+            continue
+
+        # Pick the canonical key: prefer the one with more segments, then by artist name length
+        # (shorter artist = more likely the original, e.g., "Laurie Anderson" vs "Mandy & Booka Shade")
+        canonical = max(keys, key=lambda k: (
+            len(track_hits[k]),
+            -len(track_info[k].get('artist', '')),
+        ))
+        for k in keys:
+            if k != canonical:
+                merged_keys[k] = canonical
+
+    if not merged_keys:
+        return track_hits, track_info
+
+    # Merge hits into canonical keys
+    new_hits = {}
+    new_info = {}
+    for key in track_hits:
+        canonical = merged_keys.get(key, key)
+        if canonical not in new_hits:
+            new_hits[canonical] = []
+            new_info[canonical] = track_info[canonical]
+        new_hits[canonical].extend(track_hits[key])
+        # If merged key has richer metadata (label, album), keep it
+        merged_track = track_info[key]
+        canonical_track = new_info[canonical]
+        if merged_track.get('label') and not canonical_track.get('label'):
+            new_info[canonical] = {**canonical_track, 'label': merged_track['label']}
+
+    merged_count = len(merged_keys)
+    if merged_count:
+        logger.info(f'Title similarity grouping: merged {merged_count} keys into existing groups')
+
+    return new_hits, new_info
 
 
 def cluster_results(raw_results, description_tracks=None):
@@ -64,6 +160,10 @@ def cluster_results(raw_results, description_tracks=None):
             track_hits[key] = []
             track_info[key] = track
         track_hits[key].append(result)
+
+    # Group covers/remixes/samples by title similarity before clustering
+    # e.g., "Marcello Giordani - O Superman" + "Age Of Luv - O Superman" → merged group
+    track_hits, track_info = _group_by_title_similarity(track_hits, track_info)
 
     # Build raw tracklist — merge nearby hits for the same track
     desc_set = _build_description_set(description_tracks)
@@ -131,9 +231,32 @@ def _resolve_conflicts(tracklist):
     When multiple different tracks are identified in the same narrow time window,
     it's usually noise. Keep the strongest match and drop the rest.
     Multi-hit tracks (2+ segments) are always kept.
+
+    Also filters ACRCloud noise: single-hit ACR results with score < 40 are dropped
+    unless they have ACR_LOW_SCORE_MIN_SEGMENTS or more segments (multi-segment
+    consistency overrides low individual scores — tested March 2026).
     """
     if len(tracklist) <= 1:
         return tracklist
+
+    # Pre-filter: drop single-hit ACRCloud noise (score < 40 and only 1 segment)
+    # Multi-segment low-score hits are kept — they represent real signal
+    pre_filtered = []
+    acr_noise_dropped = 0
+    for t in tracklist:
+        is_acr_only = t.get('engines') == ['acrcloud']
+        is_low_score = t.get('confidence_score', 0) < 0.40
+        is_single_hit = t.get('segment_count', 0) < ACR_LOW_SCORE_MIN_SEGMENTS
+
+        if is_acr_only and is_low_score and is_single_hit:
+            acr_noise_dropped += 1
+            continue
+        pre_filtered.append(t)
+
+    if acr_noise_dropped:
+        logger.info(f'Dropped {acr_noise_dropped} single-hit ACRCloud noise results (score < 40)')
+
+    tracklist = pre_filtered
 
     # First pass: resolve single-hit conflicts within CONFLICT_WINDOW_SEC
     result = []
@@ -170,11 +293,12 @@ def _resolve_conflicts(tracklist):
 def _compute_confidence(seg_count, avg_score, in_description):
     """Compute confidence level.
 
-    Tiers (single-segment results are pre-filtered by MIN_SEGMENT_HITS):
+    Tiers:
         verified  — 4+ segment hits, or cross-validated with description
-        high      — 3+ segments, or 2+ with strong Shazam confidence (>0.7)
+        high      — 3+ segments, or 2+ with strong confidence (>0.7),
+                     or 3+ low-score ACRCloud segments (multi-segment consistency)
         medium    — 2 segment hits
-        low       — 1 segment hit (only seen if MIN_SEGMENT_HITS=1)
+        low       — 1 segment hit
     """
     if seg_count >= 4 or (seg_count >= 2 and in_description):
         return 'verified'
