@@ -20,6 +20,44 @@ logger = logging.getLogger(__name__)
 BASE_URL = 'https://trackid.net/api'
 REQUEST_TIMEOUT = 15
 
+# Shared session with Cloudflare cookies
+_session = requests.Session()
+_session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': 'application/json',
+})
+
+
+def set_cf_clearance(cookie_value, domain='.trackid.net'):
+    """Set Cloudflare cf_clearance cookie (obtained via browser solve)."""
+    _session.cookies.set('cf_clearance', cookie_value, domain=domain)
+
+
+def _load_cf_cookie():
+    """Try to load cf_clearance from config if not already set."""
+    if 'cf_clearance' not in _session.cookies.get_dict():
+        try:
+            from core.views import get_config
+            cookie = get_config('TRACKID_CF_CLEARANCE')
+            if cookie:
+                set_cf_clearance(cookie)
+        except Exception:
+            pass
+
+
+def _get(url, **kwargs):
+    """HTTP GET with Cloudflare cookie bypass."""
+    _load_cf_cookie()
+    kwargs.setdefault('timeout', REQUEST_TIMEOUT)
+    return _session.get(url, **kwargs)
+
+
+def _post(url, **kwargs):
+    """HTTP POST with Cloudflare cookie bypass."""
+    _load_cf_cookie()
+    kwargs.setdefault('timeout', REQUEST_TIMEOUT)
+    return _session.post(url, **kwargs)
+
 
 def _clean_url(url):
     """Strip tracking/sharing query params, keeping only meaningful ones."""
@@ -32,43 +70,94 @@ def _clean_url(url):
     return urlunparse(clean)
 
 
-def lookup_by_url(url):
+def lookup_by_url(url, title=None):
     """Check if a mix URL has already been processed on TrackID.net.
+
+    Tries URL match first, then falls back to keyword search using the
+    URL path or provided title (SoundCloud URLs often differ between
+    the original and what TrackID indexed).
 
     Args:
         url: SoundCloud/YouTube/Mixcloud URL
+        title: Optional title to use for keyword search fallback
 
     Returns:
         dict with {slug, title, tracklist, duration_seconds, status} or None
     """
     clean = _clean_url(url)
     try:
-        resp = requests.get(
+        resp = _get(
             f'{BASE_URL}/public/audiostreams',
             params={'url': clean},
-            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
         streams = data.get('result', {}).get('audiostreams', [])
-        if not streams:
-            return None
+        if streams:
+            return _fetch_stream_detail(streams[0]['slug'])
 
-        # Use the first match
-        stream = streams[0]
-        return _fetch_stream_detail(stream['slug'])
+        # URL not found — try keyword search from URL path or title
+        return _search_fallback(url, title)
 
     except Exception as e:
         logger.warning(f'TrackID lookup failed for {url}: {e}')
         return None
 
 
+def _search_fallback(url, title=None):
+    """Search TrackID by keywords extracted from URL path or title."""
+    # Extract search terms from URL path
+    parsed = urlparse(url)
+    path_parts = parsed.path.strip('/').split('/')
+    # Use the last path segment (track/mix name) for search
+    slug_part = path_parts[-1] if path_parts else ''
+    # Convert URL slug to search terms (replace separators with spaces)
+    keywords = slug_part.replace('-', ' ').replace('_', ' ')
+    if title:
+        keywords = title
+
+    if not keywords or len(keywords) < 3:
+        return None
+
+    try:
+        resp = _get(
+            f'{BASE_URL}/public/audiostreams',
+            params={
+                'keywords': keywords,
+                'pageSize': 5,
+                'currentPage': 0,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        streams = data.get('result', {}).get('audiostreams', [])
+
+        if not streams:
+            return None
+
+        # Try to match by checking if the source domain matches
+        source_domain = parsed.netloc.replace('www.', '')
+        for stream in streams:
+            stream_url = stream.get('url', '')
+            if source_domain in stream_url:
+                return _fetch_stream_detail(stream['slug'])
+
+        # No domain match — use first result if keywords are specific enough
+        if len(keywords.split()) >= 2:
+            return _fetch_stream_detail(streams[0]['slug'])
+
+        return None
+
+    except Exception as e:
+        logger.warning(f'TrackID keyword search failed for "{keywords}": {e}')
+        return None
+
+
 def _fetch_stream_detail(slug):
     """Fetch full audiostream detail including tracklist."""
     try:
-        resp = requests.get(
+        resp = _get(
             f'{BASE_URL}/public/audiostreams/{slug}',
-            timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -128,7 +217,7 @@ def submit_url(url, token=None):
         return None
 
     try:
-        resp = requests.post(
+        resp = _post(
             f'{BASE_URL}/private/audiostreams',
             headers={
                 'Authorization': f'Bearer {token}',
@@ -136,7 +225,6 @@ def submit_url(url, token=None):
                 'Accept': 'application/json',
             },
             json={'url': url},
-            timeout=REQUEST_TIMEOUT,
         )
         if resp.status_code == 401:
             logger.warning('TrackID auth failed — token may be expired')

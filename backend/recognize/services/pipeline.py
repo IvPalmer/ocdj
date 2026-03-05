@@ -139,8 +139,8 @@ def _recognize_worker(job_id):
             job.save()
         else:
             description_tracks = job.description_tracks or []
-            # Re-check TrackID on resume
-            trackid_result = lookup_by_url(job.url)
+            # Re-check TrackID on resume (pass title for keyword fallback)
+            trackid_result = lookup_by_url(job.url, title=job.title)
 
         # Step 3: Segment + recognize
         job.status = 'recognizing'
