@@ -92,25 +92,41 @@
 4. **Zero overlap between ACRCloud and Shazam** on this mix — they cover completely different catalogs
 5. **The 3-engine merge is the right strategy** — each engine finds tracks the others miss
 
-## Missed Tracks Analysis (Goal: 100% TrackID coverage)
+## Targeted Testing Results (6 durations x 3s step x 2 engines per target)
 
-### Da Sunlounge - Chicago (15:18-18:44)
-- Neither Shazam nor ACRCloud found this
-- Om Records release — deep house, may be less fingerprinted
-- **Action:** Test with longer segments (20-30s) around this timestamp
+### MADVILLA - Down 4 Me (23:50-27:28) — SOLVED via multi-segment ACR acceptance
+- ACRCloud: **31 hits** across all segment durations (8s-30s), score 25-34
+- Shazam: 0 direct matches
+- **Fix:** Accept ACRCloud score 25+ when 3+ segments match (clustering.py)
 
-### Laurie Anderson - O Superman (45:04-45:46)
-- Classic track, surprisingly missed
-- Only 42s on TrackID — very short segment in the mix
-- **Action:** Test with overlapping segments, try different offsets
+### Laurie Anderson - O Superman (45:04-45:46) — SOLVED via title similarity grouping
+- ACRCloud: 1 hit as "Age Of Luv - O Superman" (score 25)
+- Shazam: **6 hits** as remixes — "Marcello Giordani - O Superman (Disco Spacer Mix)",
+  "Mandy & Booka Shade - O Superman" — all share the iconic vocal sample
+- **Fix:** Title similarity grouping merges all "O Superman" variants (clustering.py)
 
-### Rude Boy - Restless (55:06-56:21)
-- Gross National Product label — underground
-- **Action:** Test around this timestamp with varied segment lengths
+### Da Sunlounge - Chicago (15:18-18:44) — UNFIXABLE (DB gap)
+- 534 segment attempts across both engines, 6 durations, 3s step = zero matches
+- Not in either fingerprint database. Only TrackID's full-stream processing finds it.
 
-### MADVILLA - Down 4 Me (23:50-27:28)
-- ACRCloud found it weakly (score 25), Shazam missed entirely
-- **Action:** Test with longer segments, this track has a long play time
+### Rude Boy - Restless (55:06-56:21) — UNFIXABLE (DB gap)
+- 270 segment attempts across both engines = zero matches
+- Too underground (Gross National Product label). Not fingerprinted anywhere.
+
+## Algorithm Improvements Implemented
+
+### 1. Title similarity grouping (`clustering.py:_group_by_title_similarity`)
+- Merges covers/remixes/samples that share the same core title
+- Extracts core title by stripping parenthetical content: "O Superman (Disco Spacer Mix)" → "o superman"
+- Only merges when core title is 2+ words (avoids generic titles like "love")
+- Requires 2+ total segments across the group
+
+### 2. ACRCloud noise filtering (`clustering.py:_resolve_conflicts`)
+- Drops single-hit ACR results with score < 40 (overwhelmingly false positives)
+- Keeps multi-segment low-score hits (3+ segments) — these are real signal
+- Tested: 2230-2370s region had 14 false positive production music tracks, all single-hit
+
+### Coverage after improvements: 4/6 TrackID tracks (up from 2/6)
 
 ## Technical Notes
 
@@ -125,6 +141,6 @@
 - Added keyword search fallback to `lookup_by_url()` to handle this
 
 ### ACRCloud Score Interpretation
-- Scores 25-40: unreliable, mostly false positives
-- Our pipeline should filter ACRCloud hits below score 50 more aggressively
-- Multi-segment confirmation is critical for ACRCloud reliability
+- Scores 25-40: single-hit = noise, multi-segment (3+) = real signal
+- Pipeline now filters single-hit ACR < 40, keeps multi-segment low-score hits
+- Multi-segment confirmation is the key reliability signal for ACRCloud
