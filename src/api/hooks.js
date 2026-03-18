@@ -36,7 +36,7 @@ export function useWantedItems(params = {}) {
       const data = query.state.data
       const items = data?.results || []
       if (items.some(i => i.status === 'searching')) return 3000
-      return false
+      return 30000  // Poll every 30s to pick up items added by browser extensions
     },
   })
 }
@@ -347,7 +347,7 @@ export function useTraxDBOperations(params = {}) {
     refetchInterval: (query) => {
       const data = query.state.data
       const ops = data?.results || []
-      if (ops.some(o => o.status === 'running')) return 5000
+      if (ops.some(o => o.status === 'running' || o.status === 'pending')) return 5000
       return false
     },
   })
@@ -412,7 +412,7 @@ export function useRecognizeJobs() {
     refetchInterval: (query) => {
       const data = query.state.data
       const jobs = data?.results || []
-      if (jobs.some(j => j.status === 'downloading' || j.status === 'recognizing')) return 5000
+      if (jobs.some(j => j.status === 'pending' || j.status === 'downloading' || j.status === 'recognizing')) return 5000
       return false
     },
   })
@@ -425,7 +425,7 @@ export function useRecognizeJob(id) {
     enabled: !!id,
     refetchInterval: (query) => {
       const data = query.state.data
-      if (data?.status === 'downloading' || data?.status === 'recognizing') return 3000
+      if (data?.status === 'pending' || data?.status === 'downloading' || data?.status === 'recognizing') return 3000
       return false
     },
   })
@@ -444,6 +444,7 @@ export function useResumeRecognizeJob() {
   return useMutation({
     mutationFn: (id) => api.post(`/recognize/jobs/${id}/resume/`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['recognize-jobs'] }),
+    onError: (err) => console.error('Resume job failed:', err),
   })
 }
 
@@ -463,6 +464,7 @@ export function useRerunRecognizeJob() {
       qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
       qc.invalidateQueries({ queryKey: ['recognize-job'] })
     },
+    onError: (err) => console.error('Rerun job failed:', err),
   })
 }
 
@@ -474,6 +476,7 @@ export function useReclusterRecognizeJob() {
       qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
       qc.invalidateQueries({ queryKey: ['recognize-job'] })
     },
+    onError: (err) => console.error('Recluster job failed:', err),
   })
 }
 

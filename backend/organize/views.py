@@ -75,7 +75,13 @@ def pipeline_stats(request):
 @api_view(['POST'])
 def pipeline_process_all(request):
     """Process all items in 'downloaded' stage through the pipeline."""
-    from .services.pipeline import process_all_pending
+    from .services.pipeline import process_all_pending, _processing_all
+    if _processing_all:
+        return Response(
+            {'error': 'Pipeline is already processing'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
     items = PipelineItem.objects.filter(stage='downloaded')
     count = items.count()
     if count == 0:

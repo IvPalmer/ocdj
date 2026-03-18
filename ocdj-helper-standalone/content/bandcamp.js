@@ -111,7 +111,7 @@
         tooltip: 'Add to Wantlist',
         onClick: () => OCDJ.sendToBackground('dig:add', {
           artist: meta.artist || '',
-          title: '',
+          title: meta.release_name || '',
           release_name: meta.release_name || '',
           label: meta.label || '',
           source_url: meta.source_url,
@@ -211,7 +211,7 @@
         tooltip: `Add "${artist ? artist + ' - ' : ''}${title}" to Wantlist`,
         onClick: () => OCDJ.sendToBackground('dig:add', {
           artist,
-          title: '',
+          title: title,
           release_name: title,
           label,
           source_url: linkEl?.href || window.location.href,

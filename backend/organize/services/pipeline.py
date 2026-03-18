@@ -8,6 +8,10 @@ from django import db
 
 logger = logging.getLogger(__name__)
 
+# Guard against concurrent process_all_pending runs
+_processing_all = False
+_processing_all_lock = threading.Lock()
+
 STAGE_FOLDERS = {
     'downloaded': '01_downloaded',
     'tagged': '02_tagged',
@@ -258,13 +262,23 @@ def process_pipeline_item(item_id):
 
 def process_all_pending():
     """Process all items in 'downloaded' stage sequentially."""
+    global _processing_all
+    with _processing_all_lock:
+        if _processing_all:
+            logger.info('process_all_pending: already running, skipping')
+            return False
+        _processing_all = True
+
     try:
         from organize.models import PipelineItem
         items = PipelineItem.objects.filter(stage='downloaded')
         for item in items:
             process_pipeline_item(item.id)
     finally:
+        with _processing_all_lock:
+            _processing_all = False
         db.connections.close_all()
+    return True
 
 
 def auto_ingest_download(download_id):

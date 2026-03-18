@@ -331,7 +331,7 @@ function InventoryOverview({ inventory }) {
   )
 }
 
-function SyncSection({ latestSync, isRunning, onTrigger, isPending, inventory }) {
+function SyncSection({ latestSync, isRunning, onTrigger, isPending, triggerError, inventory }) {
   const summary = latestSync?.summary || {}
   const linksNew = Array.isArray(summary.links_new) ? summary.links_new : []
   const linksFound = Array.isArray(summary.links_found) ? summary.links_found : []
@@ -374,6 +374,11 @@ function SyncSection({ latestSync, isRunning, onTrigger, isPending, inventory })
           of {inventory?.known_lists_count ?? '?'} lists.
         </p>
 
+        {triggerError && (
+          <div className="traxdb-error">
+            {triggerError.data?.error || triggerError.message || 'Failed to start sync'}
+          </div>
+        )}
         {latestSync?.status === 'failed' && (
           <div className="traxdb-error">{latestSync.error_message || 'Sync failed'}</div>
         )}
@@ -418,11 +423,11 @@ function SyncSection({ latestSync, isRunning, onTrigger, isPending, inventory })
   )
 }
 
-function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onCancel, isPending }) {
+function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onCancel, isPending, triggerError }) {
   const progressId = isRunning ? latestDownload?.id : null
   const { data: progress } = useTraxDBDownloadProgress(progressId)
   const summary = latestDownload?.summary || {}
-  const hasSyncReport = latestSync?.status === 'completed' && latestSync?.report_path
+  const hasSyncCompleted = latestSync?.status === 'completed'
   const newCount = countField(latestSync?.summary || {}, 'links_new', 'links_new_count')
 
   // Calculate progress percentage
@@ -462,8 +467,8 @@ function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onC
             <button
               className="btn btn-accent btn-sm"
               onClick={() => onTrigger()}
-              disabled={!hasSyncReport || newCount === 0 || isPending}
-              title={!hasSyncReport ? 'Run a sync first' : newCount === 0 ? 'No new lists to download' : ''}
+              disabled={!hasSyncCompleted || newCount === 0 || isPending}
+              title={!hasSyncCompleted ? 'Run a sync first' : newCount === 0 ? 'No new lists to download' : ''}
             >
               Download New
             </button>
@@ -471,6 +476,11 @@ function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onC
         </div>
       </div>
       <div className="traxdb-section-body">
+        {triggerError && (
+          <div className="traxdb-error">
+            {triggerError.data?.error || triggerError.message || 'Failed to start download'}
+          </div>
+        )}
         {latestDownload?.status === 'failed' && (
           <div className="traxdb-error">{latestDownload.error_message || 'Download failed'}</div>
         )}
@@ -530,7 +540,7 @@ function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onC
 
         {!isRunning && !latestDownload && (
           <p className="traxdb-empty">
-            {hasSyncReport && newCount > 0
+            {hasSyncCompleted && newCount > 0
               ? `${newCount} new list${newCount !== 1 ? 's' : ''} ready to download from Pixeldrain.`
               : 'Run a sync first to find new content.'}
           </p>
@@ -540,9 +550,9 @@ function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onC
   )
 }
 
-function AuditSection({ latestAudit, latestSync, isRunning, onTrigger, isPending }) {
+function AuditSection({ latestAudit, latestSync, isRunning, onTrigger, isPending, triggerError }) {
   const summary = latestAudit?.summary || {}
-  const hasSyncReport = latestSync?.status === 'completed' && latestSync?.report_path
+  const hasSyncCompleted = latestSync?.status === 'completed'
 
   const lists = Array.isArray(summary.lists) ? summary.lists : []
   const deadLinks = Array.isArray(summary.dead_links) ? summary.dead_links : []
@@ -570,8 +580,8 @@ function AuditSection({ latestAudit, latestSync, isRunning, onTrigger, isPending
           <button
             className="btn btn-accent btn-sm"
             onClick={() => onTrigger()}
-            disabled={isRunning || !hasSyncReport || isPending}
-            title={!hasSyncReport ? 'Run a sync first' : ''}
+            disabled={isRunning || !hasSyncCompleted || isPending}
+            title={!hasSyncCompleted ? 'Run a sync first' : ''}
           >
             {isRunning ? 'Auditing...' : 'Run Audit'}
           </button>
@@ -584,6 +594,11 @@ function AuditSection({ latestAudit, latestSync, isRunning, onTrigger, isPending
           Run this after downloading to check integrity.
         </p>
 
+        {triggerError && (
+          <div className="traxdb-error">
+            {triggerError.data?.error || triggerError.message || 'Failed to start audit'}
+          </div>
+        )}
         {latestAudit?.status === 'failed' && (
           <div className="traxdb-error">{latestAudit.error_message || 'Audit failed'}</div>
         )}
@@ -782,9 +797,9 @@ function TraxDBPanel() {
   const latestDownload = useMemo(() => ops.find(o => o.op_type === 'download'), [ops])
   const latestAudit = useMemo(() => ops.find(o => o.op_type === 'audit'), [ops])
 
-  const syncRunning = latestSync?.status === 'running'
-  const downloadRunning = latestDownload?.status === 'running'
-  const auditRunning = latestAudit?.status === 'running'
+  const syncRunning = latestSync?.status === 'running' || latestSync?.status === 'pending'
+  const downloadRunning = latestDownload?.status === 'running' || latestDownload?.status === 'pending'
+  const auditRunning = latestAudit?.status === 'running' || latestAudit?.status === 'pending'
 
   return (
     <div className="traxdb-panel">
@@ -800,6 +815,7 @@ function TraxDBPanel() {
           isRunning={syncRunning}
           onTrigger={() => triggerSync.mutate()}
           isPending={triggerSync.isPending}
+          triggerError={triggerSync.error}
           inventory={inventory}
         />
 
@@ -810,6 +826,7 @@ function TraxDBPanel() {
           onTrigger={() => triggerDownload.mutate()}
           onCancel={(id) => cancelDownload.mutate(id)}
           isPending={triggerDownload.isPending}
+          triggerError={triggerDownload.error}
         />
 
         <AuditSection
@@ -818,6 +835,7 @@ function TraxDBPanel() {
           isRunning={auditRunning}
           onTrigger={() => triggerAudit.mutate()}
           isPending={triggerAudit.isPending}
+          triggerError={triggerAudit.error}
         />
       </div>
 

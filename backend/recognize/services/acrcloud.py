@@ -156,7 +156,7 @@ def recognize_segments(segments, on_progress=None, access_key=None, access_secre
                 'confidence_score': 0.0,
             })
             if on_progress:
-                on_progress(total, total)
+                on_progress(i + 1, total)
             break
 
         confidence_score = 0.0

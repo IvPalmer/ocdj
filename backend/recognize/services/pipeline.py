@@ -12,7 +12,7 @@ from .description_parser import parse_tracklist_from_description
 from .segmenter import segment_audio, segment_gaps, segment_verification
 from .recognition import recognize_segments as shazam_recognize_segments
 from .acrcloud import recognize_segments as acrcloud_recognize_segments
-from .clustering import cluster_results, find_gaps, find_single_segment_candidates
+from .clustering import cluster_results, find_gaps, find_single_segment_candidates, dedup_tracklist
 from .trackid import lookup_by_url, submit_url
 
 logger = logging.getLogger(__name__)
@@ -285,10 +285,13 @@ def _recognize_worker(job_id):
         # and merge into tracklist to fill gaps
         try:
             trackid_result = lookup_by_url(job.url)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'Job {job_id}: TrackID.net lookup failed: {e}')
         if trackid_result and trackid_result.get('tracklist'):
             tracklist = _merge_trackid_results(tracklist, trackid_result['tracklist'])
+
+        # Step 7c: Final dedup — merge same-track entries that slipped through
+        tracklist = dedup_tracklist(tracklist)
 
         # Set engine based on what was used
         engines_used = set()

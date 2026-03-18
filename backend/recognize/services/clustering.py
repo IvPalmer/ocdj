@@ -37,6 +37,15 @@ def _normalize_key(artist, title):
     base_title = re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
     # Use base title if non-empty, otherwise full title
     title = base_title if base_title else title
+    # Also strip dash-based remix suffixes: "Seven Days - Original Mix" → "Seven Days"
+    title = re.sub(r'\s*-\s*(?:original|extended|club|radio|dub|vocal|instrumental|remix)\s*(?:mix|version|edit)?.*$', '', title, flags=re.IGNORECASE).strip()
+    # Normalize abbreviations: "Pt." → "Part", "Vol." → "Volume"
+    title = re.sub(r'\bpt\.?\s', 'part ', title)
+    title = re.sub(r'\bvol\.?\s', 'volume ', title)
+    # Strip trailing punctuation from title (e.g., "Where?" → "Where")
+    title = re.sub(r'[?!.,;:]+$', '', title).strip()
+    # Remove commas within title for matching ("Detroit, Pt. II" → "Detroit Part II")
+    title = title.replace(',', '')
     # Collapse whitespace
     artist = re.sub(r'\s+', ' ', artist).strip()
     title = re.sub(r'\s+', ' ', title).strip()
@@ -54,6 +63,9 @@ def _extract_title_core(title):
     t = (title or '').lower().strip()
     t = re.sub(r'\s*[\(\[].*', '', t).strip()  # Strip everything from first ( or [
     t = re.sub(r'\s*-\s*(original|extended|club|radio|dub|vocal|instrumental|remix).*$', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'[?!.,;:]+$', '', t)  # Strip trailing punctuation
+    t = t.replace(',', '')  # Remove commas
+    t = re.sub(r'\bpt\.?\s', 'part ', t)  # Normalize abbreviations
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
@@ -84,10 +96,26 @@ def _group_by_title_similarity(track_hits, track_info):
 
     # Only merge groups with 2+ different keys AND the core is at least 2 words
     # (to avoid merging generic single-word titles like "love" or "deep")
+    # Exception: single-word titles merge when one artist is a substring of the other
+    # (e.g., "Michel Banabila - Where" + "Banabila - Where?" → same track)
     merged_keys = {}  # old_key -> canonical_key
     for core, keys in core_groups.items():
-        if len(keys) < 2 or len(core.split()) < 2:
+        if len(keys) < 2:
             continue
+        if len(core.split()) < 2:
+            # Single-word title — only merge if artists overlap (substring match)
+            artists = [(k, track_info[k].get('artist', '').lower()) for k in keys]
+            artist_overlap_keys = []
+            for i, (k1, a1) in enumerate(artists):
+                for k2, a2 in artists[i+1:]:
+                    if a1 and a2 and (a1 in a2 or a2 in a1):
+                        if k1 not in artist_overlap_keys:
+                            artist_overlap_keys.append(k1)
+                        if k2 not in artist_overlap_keys:
+                            artist_overlap_keys.append(k2)
+            if len(artist_overlap_keys) < 2:
+                continue
+            keys = artist_overlap_keys
 
         # Check total combined segments — only merge if the group is meaningful
         total_segs = sum(len(track_hits[k]) for k in keys)
@@ -223,6 +251,55 @@ def cluster_results(raw_results, description_tracks=None):
 
     logger.info(f'Clustered {len(raw_results)} results into {len(tracklist)} tracks')
     return tracklist
+
+
+def dedup_tracklist(tracklist):
+    """Remove duplicate entries for the same track that appear near each other.
+
+    After TrackID merge, the same track can appear multiple times if ACRCloud
+    detected it at timestamps beyond PROXIMITY_WINDOW_SEC. This pass merges
+    entries with the same normalized key that are within 300s of each other.
+    """
+    if len(tracklist) <= 1:
+        return tracklist
+
+    DEDUP_WINDOW = 300  # 5 minutes — generous for DJ mixes
+
+    result = []
+    seen = {}  # normalized_key -> index in result
+
+    for t in tracklist:
+        key = _normalize_key(t.get('artist', ''), t.get('title', ''))
+        if key in seen:
+            prev_idx = seen[key]
+            prev = result[prev_idx]
+            gap = t['timestamp_start'] - prev['timestamp_end']
+            if gap <= DEDUP_WINDOW:
+                # Merge: extend time range and combine metadata
+                prev['timestamp_end'] = max(prev['timestamp_end'], t['timestamp_end'])
+                prev['segment_count'] = prev.get('segment_count', 0) + t.get('segment_count', 0)
+                prev_engines = set(prev.get('engines', []))
+                prev_engines.update(t.get('engines', []))
+                prev['engines'] = list(prev_engines)
+                if t.get('confidence') == 'verified' or prev.get('confidence') == 'verified':
+                    prev['confidence'] = 'verified'
+                # Keep richer metadata
+                if t.get('label') and not prev.get('label'):
+                    prev['label'] = t['label']
+                if t.get('album') and not prev.get('album'):
+                    prev['album'] = t['album']
+                if t.get('shazam_url') and not prev.get('shazam_url'):
+                    prev['shazam_url'] = t['shazam_url']
+                continue
+
+        seen[key] = len(result)
+        result.append(t)
+
+    deduped = len(tracklist) - len(result)
+    if deduped:
+        logger.info(f'Dedup: merged {deduped} duplicate track entries')
+
+    return result
 
 
 def _resolve_conflicts(tracklist):

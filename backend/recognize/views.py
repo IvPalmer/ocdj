@@ -198,7 +198,7 @@ def recluster_job(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    from .services.clustering import cluster_results
+    from .services.clustering import cluster_results, dedup_tracklist
     from .services.pipeline import _merge_trackid_results
     tracklist = cluster_results(job.raw_results, job.description_tracks)
 
@@ -207,8 +207,10 @@ def recluster_job(request, pk):
         trackid_result = lookup_by_url(job.url)
         if trackid_result and trackid_result.get('tracklist'):
             tracklist = _merge_trackid_results(tracklist, trackid_result['tracklist'])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'TrackID.net lookup failed during recluster for job {pk}: {e}')
+
+    tracklist = dedup_tracklist(tracklist)
 
     # Update engine based on merged sources
     engines_used = set()

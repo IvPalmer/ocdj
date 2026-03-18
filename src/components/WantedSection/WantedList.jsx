@@ -403,7 +403,7 @@ function WantedList() {
                   <button
                     className="btn btn-xs btn-danger"
                     onClick={() => {
-                      if (confirm('Delete this item?')) deleteItem.mutate(item.id)
+                      deleteItem.mutate(item.id)
                     }}
                     title="Delete"
                   >
