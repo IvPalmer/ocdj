@@ -3,10 +3,22 @@ from .models import TraxDBOperation, ScrapedFolder, ScrapedTrack
 
 
 class TraxDBOperationSerializer(serializers.ModelSerializer):
+    """Full op including summary JSON. Use for detail endpoints only."""
     class Meta:
         model = TraxDBOperation
         fields = '__all__'
         read_only_fields = ['id', 'created', 'updated']
+
+
+class TraxDBOperationListSerializer(serializers.ModelSerializer):
+    """Lean op for list endpoints — omits summary JSON which can be 100KB+."""
+    class Meta:
+        model = TraxDBOperation
+        fields = [
+            'id', 'op_type', 'status', 'report_path', 'progress_path',
+            'error_message', 'created', 'updated',
+        ]
+        read_only_fields = fields
 
 
 class TriggerSyncSerializer(serializers.Serializer):
@@ -32,6 +44,8 @@ class ScrapedTrackSerializer(serializers.ModelSerializer):
 
 
 class ScrapedFolderSerializer(serializers.ModelSerializer):
+    # Populated by the view via .annotate(...) — see folders_list. Falls back
+    # to a live count if the annotation is missing (single-folder details).
     tracks_count = serializers.SerializerMethodField()
     tracks_downloaded = serializers.SerializerMethodField()
 
@@ -44,9 +58,15 @@ class ScrapedFolderSerializer(serializers.ModelSerializer):
         ]
 
     def get_tracks_count(self, obj):
+        annotated = getattr(obj, 'tracks_count_annotated', None)
+        if annotated is not None:
+            return annotated
         return obj.tracks.count()
 
     def get_tracks_downloaded(self, obj):
+        annotated = getattr(obj, 'tracks_downloaded_annotated', None)
+        if annotated is not None:
+            return annotated
         return obj.tracks.filter(downloaded=True).count()
 
 

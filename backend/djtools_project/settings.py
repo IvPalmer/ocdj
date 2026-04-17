@@ -136,6 +136,15 @@ CORS_ALLOWED_ORIGINS = os.getenv(
 ).split(',')
 CORS_ALLOW_CREDENTIALS = True
 
+# Chrome/Safari extensions use chrome-extension:// origins with a per-install ID
+# that we can't know ahead of time. Allow them via regex so the extension works
+# in DEBUG=False too, not only because CORS_ALLOW_ALL_ORIGINS is on.
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^chrome-extension://[a-p]{32}$',
+    r'^moz-extension://[0-9a-f-]+$',
+    r'^safari-web-extension://[0-9A-Fa-f-]+$',
+]
+
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 

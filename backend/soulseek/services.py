@@ -6,11 +6,16 @@ Talks to slskd via REST API (runs as sibling Docker container).
 import re
 import time
 import logging
+import unicodedata
 import requests
 from django.conf import settings
 from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
+
+# Default timeout for all slskd HTTP calls. Searches can be slow, so give polling
+# calls more headroom; other calls fail fast.
+DEFAULT_TIMEOUT = 30
 
 
 # ── slskd API Client ─────────────────────────────────────────
@@ -46,7 +51,7 @@ class SlskdClient:
             r = self.session.post(self._url('/searches'), json={
                 'searchText': query,
                 'searchTimeout': timeout,
-            })
+            }, timeout=DEFAULT_TIMEOUT)
             if r.status_code == 429:
                 wait = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(f"slskd 429 rate limit, retrying in {wait}s (attempt {attempt + 1})")
@@ -63,13 +68,13 @@ class SlskdClient:
         params = {}
         if include_responses:
             params['includeResponses'] = 'true'
-        r = self.session.get(self._url(f'/searches/{search_id}'), params=params)
+        r = self.session.get(self._url(f'/searches/{search_id}'), params=params, timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
         return r.json()
 
     def delete_search(self, search_id):
         """Delete a completed search."""
-        r = self.session.delete(self._url(f'/searches/{search_id}'))
+        r = self.session.delete(self._url(f'/searches/{search_id}'), timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
 
     def download(self, username, filename, size=0):
@@ -77,19 +82,30 @@ class SlskdClient:
         payload = [{'filename': filename}]
         if size:
             payload[0]['size'] = size
-        r = self.session.post(self._url(f'/transfers/downloads/{username}'), json=payload)
+        r = self.session.post(self._url(f'/transfers/downloads/{username}'), json=payload, timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
         return r.json()
 
     def get_downloads(self):
         """Get all current downloads."""
-        r = self.session.get(self._url('/transfers/downloads'), timeout=5)
+        r = self.session.get(self._url('/transfers/downloads'), timeout=10)
         r.raise_for_status()
         return r.json()
 
     def get_user_downloads(self, username):
         """Get downloads from a specific user."""
-        r = self.session.get(self._url(f'/transfers/downloads/{username}'))
+        r = self.session.get(self._url(f'/transfers/downloads/{username}'), timeout=DEFAULT_TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+
+    def browse_user(self, username):
+        """Browse a Soulseek user's full share. Returns {directories: [...]}.
+
+        Can be slow (peer must respond) and the payload may be tens of MB for
+        users with huge shares — caller should consider scoping the result
+        before returning it to the frontend.
+        """
+        r = self.session.get(self._url(f'/users/{username}/browse'), timeout=120)
         r.raise_for_status()
         return r.json()
 
@@ -99,12 +115,14 @@ class SlskdClient:
         r = self.session.put(
             self._url(f'/transfers/downloads/{username}/{transfer_id}'),
             json={'state': 'Completed, Cancelled'},
+            timeout=DEFAULT_TIMEOUT,
         )
         r.raise_for_status()
         if remove:
             try:
                 self.session.delete(
                     self._url(f'/transfers/downloads/{username}/{transfer_id}'),
+                    timeout=DEFAULT_TIMEOUT,
                 )
             except Exception:
                 pass
@@ -137,6 +155,56 @@ def normalize_text(text):
     return text
 
 
+# Words that are noise in slsk queries (artist credits inflate the term count
+# and shrink result sets — Soulseek prefers fewer, more generic terms).
+_QUERY_NOISE_WORDS = {
+    'feat', 'ft', 'featuring', 'with',
+    'remix', 'mix', 'edit', 'version', 'extended', 'original',
+    'vip', 'instrumental', 'radio', 'club', 'dub',
+    'and',
+    # Single-letter junk left by stripping apostrophes/punctuation
+    'a', 'i', 'o', 's', 't', 'm', 'd', 'll', 're', 've',
+}
+
+
+def simplify_query(text, max_tokens=6):
+    """Aggressive normalization for slsk search queries.
+
+    Soulseek matches on substring tokens — punctuation, hyphens, accents and
+    bracketed credits all hurt recall, and 6+ token queries return ~0 results
+    because no single uploader's filename contains every token. This:
+      - strips bracketed credits / mix annotations
+      - ASCII-folds accents (Sébastien → Sebastien)
+      - replaces all non-alphanumerics with spaces
+      - drops noise words (feat, remix, mix, original, …)
+      - keeps only the first `max_tokens` tokens to stay slsk-friendly
+    """
+    if not text:
+        return ''
+
+    # Strip bracketed credits / mix annotations BEFORE removing punctuation,
+    # otherwise '(feat. X)' would survive as 'feat x'.
+    cleaned = text
+    for pattern in STRIP_PATTERNS:
+        cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
+
+    # ASCII-fold accents: "Sébastien" -> "Sebastien"
+    cleaned = unicodedata.normalize('NFKD', cleaned)
+    cleaned = ''.join(ch for ch in cleaned if not unicodedata.combining(ch))
+
+    # Anything that isn't a letter or digit becomes a space.
+    cleaned = re.sub(r'[^a-zA-Z0-9]+', ' ', cleaned).lower()
+
+    # Drop noise words. Single-letter artist names (Mr. G, K-Hand) survive
+    # because they're not in the noise list.
+    tokens = [t for t in cleaned.split() if t and t not in _QUERY_NOISE_WORDS]
+
+    if max_tokens and len(tokens) > max_tokens:
+        tokens = tokens[:max_tokens]
+
+    return ' '.join(tokens).strip()[:80]
+
+
 def generate_queries(artist, title, release_name='', catalog_number='', label=''):
     """
     Generate search query variations for slskd.
@@ -144,13 +212,17 @@ def generate_queries(artist, title, release_name='', catalog_number='', label=''
     Soulseek is sensitive to over-specific queries — too many terms = no results.
     Strategy: try the most precise identifiers first, then broaden.
     Catalog numbers are gold (people name folders with them).
+
+    All query parts run through simplify_query() which strips hyphens, accents,
+    and punctuation — slsk indexes plain tokens, so 'Sébastien Léger - Pyt'
+    matches more uploads as 'sebastien leger pyt'.
     """
     queries = []
-    artist_clean = normalize_text(artist)
-    title_clean = normalize_text(title)
-    release_clean = normalize_text(release_name)
-    catalog_clean = normalize_text(catalog_number)
-    label_clean = normalize_text(label)
+    artist_clean = simplify_query(artist)
+    title_clean = simplify_query(title)
+    release_clean = simplify_query(release_name)
+    catalog_clean = simplify_query(catalog_number)
+    label_clean = simplify_query(label)
 
     # 1. Catalog number (if available) — very precise, great hit rate
     if catalog_clean:
@@ -180,11 +252,20 @@ def generate_queries(artist, title, release_name='', catalog_number='', label=''
     if artist_clean and len(artist_clean) > 3:
         queries.append(artist_clean)
 
+    # Re-cap combined queries at the final stage — slsk's recall drops sharply
+    # past ~6 tokens because no single uploader's filename hits every term.
+    capped = []
+    for q in queries:
+        toks = q.split()
+        if len(toks) > 6:
+            toks = toks[:6]
+        capped.append(' '.join(toks))
+
     # Deduplicate while preserving order
     seen = set()
     unique = []
-    for q in queries:
-        if q not in seen:
+    for q in capped:
+        if q and q not in seen:
             seen.add(q)
             unique.append(q)
 

@@ -283,6 +283,7 @@ def _recognize_worker(job_id):
 
         # Step 7b: Re-fetch TrackID.net results (may have completed during recognition)
         # and merge into tracklist to fill gaps
+        trackid_result = None
         try:
             trackid_result = lookup_by_url(job.url)
         except Exception as e:

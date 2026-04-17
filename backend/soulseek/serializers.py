@@ -3,6 +3,9 @@ from .models import SearchQueueItem, SearchResult, Download, QualityPreset
 
 
 class SearchQueueItemSerializer(serializers.ModelSerializer):
+    # Populated by the viewset via .annotate(search_results_count=Count(...))
+    # to avoid N+1 queries when listing the queue. Falls back to a live count
+    # if the annotation is missing (e.g. single-item retrieves).
     search_results_count = serializers.SerializerMethodField()
     display_label = serializers.CharField(read_only=True)
 
@@ -18,6 +21,9 @@ class SearchQueueItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['created', 'updated']
 
     def get_search_results_count(self, obj):
+        annotated = getattr(obj, 'search_results_count_annotated', None)
+        if annotated is not None:
+            return annotated
         return obj.search_results.count()
 
 

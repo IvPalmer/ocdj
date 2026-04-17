@@ -151,16 +151,69 @@ def scrape_blog_links(
     found: Dict[str, TraxDBLink] = {}
     next_url = start_url
 
+    pages_done = 0
     for _ in range(max_pages):
         r = session.get(next_url, timeout=60)
         if r.status_code != 200:
             raise RuntimeError(f"Failed to fetch {next_url} ({r.status_code})")
 
+        # Blogspot redirects private blogs to a Google sign-in page when our
+        # cookies are stale. Status is still 200 but content is the login form
+        # — if we don't catch this, the sync silently reports 0 new links.
+        final_host = r.url.split('/', 3)[2] if '://' in r.url else ''
+        if 'accounts.google.com' in final_host or 'blogger.com/blogin' in r.url:
+            raise RuntimeError(
+                f"Blog requires login — cookies stale or missing. "
+                f"Refresh {os.environ.get('TRAXDB_COOKIES', 'TRAXDB_COOKIES')} "
+                f"by re-exporting from a logged-in browser. "
+                f"Final URL: {r.url[:200]}"
+            )
+
         soup = BeautifulSoup(r.text, "html.parser")
 
+        # The blog moved away from `div.post.hentry` containers to a flat
+        # text format: each "post" is a date heading followed by a track list,
+        # with `MIRROR1: https://pixeldrain.com/l/...` lines at the bottom.
+        # We honour the old structure first (in case it ever returns) but fall
+        # back to a regex scan over the full text so we keep working when the
+        # template changes again.
         posts = soup.select("div.post.hentry") or soup.find_all("article", class_=re.compile(r"post", re.I))
-        if not posts:
-            posts = [soup]
+
+        if posts:
+            pages_done += 1
+        else:
+            # Flat-text mode — scan body for pixeldrain links and pair each one
+            # with the nearest preceding ISO date header in the document text.
+            body_text = soup.get_text("\n", strip=False)
+            # Index every (position, date) pair so we can look up the nearest
+            # heading before each link match.
+            date_positions = [
+                (m.start(), m.group(1))
+                for m in re.finditer(r'(\b\d{4}-\d{2}-\d{2}\b)', body_text)
+            ]
+
+            link_iter = re.finditer(
+                r'https?://pixeldrain\.com/l/([A-Za-z0-9]+)', body_text
+            )
+            for m in link_iter:
+                list_id = m.group(1)
+                if list_id in found:
+                    continue
+                # nearest preceding date
+                inferred = None
+                pos = m.start()
+                for dpos, ddate in reversed(date_positions):
+                    if dpos < pos:
+                        inferred = ddate
+                        break
+                found[list_id] = TraxDBLink(
+                    pixeldrain_url=m.group(0),
+                    list_id=list_id,
+                    source_url=next_url,
+                    inferred_date=inferred,
+                )
+            pages_done += 1
+            posts = []  # skip the structured-loop below
 
         oldest_post_date: Optional[str] = None
         for post in posts:
@@ -205,7 +258,14 @@ def scrape_blog_links(
             continue
         break
 
-    return list(found.values())
+    # Wrap in a small subclass so callers can read pages_done without changing
+    # the call sites that iterate the result like a list.
+    class _LinksList(list):
+        pass
+
+    result = _LinksList(found.values())
+    result._pages_scraped = pages_done
+    return result
 
 
 # ── Local inventory helpers ───────────────────────────────────
@@ -388,7 +448,7 @@ def run_sync(operation_id: int, max_pages: int = 50):
             'links_found_count': len(links),
             'links_new_count': len(new_links),
             'links_skipped_by_cutoff_date': len(skipped_by_cutoff),
-            'pages_scraped': max_pages,
+            'pages_scraped': getattr(links, '_pages_scraped', max_pages),
             'errors_count': len(errors),
             'links_found': links_found_data,
             'links_new': links_new_data,

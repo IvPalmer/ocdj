@@ -481,6 +481,21 @@
   white-space: nowrap;
 }
 
+.er-lock {
+  margin-right: 4px;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.expand-result-item.er-item--locked {
+  opacity: 0.65;
+}
+
+.expand-result-item.er-item--locked .er-file {
+  text-decoration: line-through;
+  text-decoration-color: rgba(0,0,0,0.2);
+}
+
 .expand-empty {
   padding: 12px 24px;
   font-size: 12px;
@@ -609,6 +624,29 @@
   gap: 8px;
   padding: 6px 12px;
   opacity: 0.7;
+}
+
+.dl-remove-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.dl-remove-btn:hover:not(:disabled) {
+  background: var(--accent-red, #c0392b);
+  color: #fff;
+  border-color: transparent;
+}
+
+.dl-remove-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .dl-row-main {

@@ -6,6 +6,8 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
 from django.utils import timezone
+from django.db import transaction
+from django.db.models import Count
 from django import db
 
 from wanted.models import WantedItem
@@ -15,7 +17,7 @@ from .serializers import (
     SearchResultSerializer, DownloadSerializer, QualityPresetSerializer,
     SearchRequestSerializer, DownloadRequestSerializer,
 )
-from .services import SlskdClient, generate_queries, score_result, filter_results, extract_file_info
+from .services import SlskdClient, generate_queries, score_result, filter_results, extract_file_info, simplify_query
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +29,11 @@ def _run_search_for_queue_item(queue_item_id):
     try:
         qi = SearchQueueItem.objects.get(id=queue_item_id)
 
-        # Build query
+        # Build query — simplify even raw text so hyphens/accents/punctuation
+        # don't tank slsk recall.
         if qi.raw_query:
-            queries = [qi.raw_query]
+            simplified = simplify_query(qi.raw_query)
+            queries = [simplified] if simplified else []
         else:
             queries = generate_queries(
                 qi.artist, qi.title,
@@ -57,19 +61,34 @@ def _run_search_for_queue_item(queue_item_id):
                 for _ in range(6):
                     time.sleep(5)
                     search_data = client.get_search(search_id, include_responses=False)
+                    if not search_data:
+                        break
                     state = search_data.get('state', '')
                     if 'Completed' in state:
                         break
 
-                # Extract results
-                search_data = client.get_search(search_id)
+                # Extract results — `files` are freely available, `lockedFiles`
+                # are gated to privileged peers. Keep both so the UI can show
+                # the 🔒 indicator instead of hiding them silently.
+                search_data = client.get_search(search_id) or {}
                 for response in search_data.get('responses', []):
                     username = response.get('username', '')
+                    upload_speed = response.get('uploadSpeed', 0)
+                    free_slots = response.get('hasFreeUploadSlot', False)
+                    queue_length = response.get('queueLength', 0)
                     for file_data in response.get('files', []):
                         file_data['_username'] = username
-                        file_data['_upload_speed'] = response.get('uploadSpeed', 0)
-                        file_data['_free_slots'] = response.get('hasFreeUploadSlot', False)
-                        file_data['_queue_length'] = response.get('queueLength', 0)
+                        file_data['_upload_speed'] = upload_speed
+                        file_data['_free_slots'] = free_slots
+                        file_data['_queue_length'] = queue_length
+                        file_data['_is_locked'] = False
+                        all_results.append(file_data)
+                    for file_data in response.get('lockedFiles', []):
+                        file_data['_username'] = username
+                        file_data['_upload_speed'] = upload_speed
+                        file_data['_free_slots'] = free_slots
+                        file_data['_queue_length'] = queue_length
+                        file_data['_is_locked'] = True
                         all_results.append(file_data)
 
                 try:
@@ -111,16 +130,17 @@ def _run_search_for_queue_item(queue_item_id):
                     'upload_speed': result.get('_upload_speed', 0),
                     'free_slots': result.get('_free_slots', False),
                     'queue_length': result.get('_queue_length', 0),
+                    'is_locked': result.get('_is_locked', False),
                 })
 
         scored.sort(key=lambda x: x['match_score'], reverse=True)
 
-        # Store results — delete old ones first
+        # Store results — delete old ones first, then bulk insert
         SearchResult.objects.filter(queue_item=qi).delete()
-        for r in scored[:50]:
-            SearchResult.objects.create(
+        SearchResult.objects.bulk_create([
+            SearchResult(
                 queue_item=qi,
-                wanted_item=qi.wanted_item,  # also link to wanted item if present
+                wanted_item=qi.wanted_item,
                 username=r['username'],
                 filename=r['filename'],
                 file_size=r['size'],
@@ -132,7 +152,10 @@ def _run_search_for_queue_item(queue_item_id):
                 upload_speed=r.get('upload_speed'),
                 queue_length=r.get('queue_length'),
                 free_upload_slots=r.get('free_slots', False),
+                is_locked=r.get('is_locked', False),
             )
+            for r in scored[:50]
+        ])
 
         # Update queue item
         qi.refresh_from_db()
@@ -181,7 +204,9 @@ class SearchQueueViewSet(viewsets.ModelViewSet):
     serializer_class = SearchQueueItemSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().annotate(
+            search_results_count_annotated=Count('search_results'),
+        )
         status_filter = self.request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -333,24 +358,25 @@ def search(request):
             'queue_item_id': qi.id,
         })
 
-    # Mark as searching
-    qi.status = 'searching'
-    qi.error_message = ''
-    qi.save()
+    # Mark as searching — atomic so queue/wanted status never diverge
+    with transaction.atomic():
+        qi.status = 'searching'
+        qi.error_message = ''
+        qi.save()
+        if qi.wanted_item:
+            qi.wanted_item.status = 'searching'
+            qi.wanted_item.error_message = ''
+            qi.wanted_item.save()
 
-    # Also update linked WantedItem
-    if qi.wanted_item:
-        qi.wanted_item.status = 'searching'
-        qi.wanted_item.error_message = ''
-        qi.wanted_item.save()
+    # Fire background thread after commit so it sees the 'searching' row
+    def _start_search():
+        threading.Thread(
+            target=_run_search_for_queue_item,
+            args=(qi.id,),
+            daemon=True,
+        ).start()
 
-    # Fire background thread
-    thread = threading.Thread(
-        target=_run_search_for_queue_item,
-        args=(qi.id,),
-        daemon=True,
-    )
-    thread.start()
+    transaction.on_commit(_start_search)
 
     return Response({
         'status': 'searching',
@@ -430,6 +456,8 @@ def downloads_status(request):
 
     # Build lookup: (username, filename) -> transfer data from slskd
     slskd_transfer_map = {}
+    slskd_unreachable = False
+    slskd_error = ''
     try:
         slskd_downloads = client.get_downloads()
         for user_entry in slskd_downloads:
@@ -440,6 +468,8 @@ def downloads_status(request):
                     key = (username.lower(), fn.lower())
                     slskd_transfer_map[key] = transfer
     except Exception as e:
+        slskd_unreachable = True
+        slskd_error = str(e)[:200]
         logger.warning(f"Could not fetch slskd downloads: {e}")
 
     our_downloads = Download.objects.all().order_by('-started')[:50]
@@ -463,27 +493,39 @@ def downloads_status(request):
             data['slskd_transfer_id'] = transfer.get('id', '')
 
             if 'Completed' in state and 'Succeeded' in state and dl.status != 'completed':
-                dl.status = 'completed'
-                dl.progress = 100
-                dl.completed_at = timezone.now()
-                dl.save()
+                with transaction.atomic():
+                    dl.status = 'completed'
+                    dl.progress = 100
+                    dl.completed_at = timezone.now()
+                    dl.save()
                 data['status'] = 'completed'
                 data['progress'] = 100
-                # Auto-trigger organize pipeline
-                try:
-                    from organize.services.pipeline import auto_ingest_download
-                    import threading
-                    threading.Thread(target=auto_ingest_download, args=(dl.id,), daemon=True).start()
-                except Exception:
-                    pass
+                # Auto-trigger organize pipeline after commit so thread sees completed row
+                dl_id = dl.id
+                def _ingest(_id=dl_id):
+                    try:
+                        from organize.services.pipeline import auto_ingest_download
+                        threading.Thread(target=auto_ingest_download, args=(_id,), daemon=True).start()
+                    except Exception as exc:
+                        logger.warning(f"auto_ingest dispatch failed for {_id}: {exc}")
+                transaction.on_commit(_ingest)
             elif 'InProgress' in state and dl.status != 'downloading':
                 dl.status = 'downloading'
                 dl.progress = transfer.get('percentComplete', 0)
                 dl.save()
                 data['status'] = 'downloading'
-            elif 'Completed' in state and ('Cancelled' in state or 'Errored' in state or 'TimedOut' in state):
+            elif 'Completed' in state and (
+                'Cancelled' in state or 'Errored' in state
+                or 'TimedOut' in state or 'Rejected' in state
+            ):
                 if dl.status not in ('failed', 'cancelled'):
-                    dl.status = 'failed' if 'Errored' in state or 'TimedOut' in state else 'cancelled'
+                    if 'Cancelled' in state:
+                        dl.status = 'cancelled'
+                    else:
+                        # Rejected/Errored/TimedOut → genuine failure the user
+                        # should see in the Failed group. Includes peers that
+                        # rejected the share (privileges, disabled, banned us).
+                        dl.status = 'failed'
                     dl.error_message = state
                     dl.save()
                     data['status'] = dl.status
@@ -549,6 +591,8 @@ def downloads_status(request):
     return Response({
         'downloads': enriched,
         'download_indicators': download_indicators,
+        'slskd_unreachable': slskd_unreachable,
+        'slskd_error': slskd_error,
     })
 
 
@@ -583,6 +627,137 @@ def cancel_download(request):
         dl.wanted_item.save()
 
     return Response({'status': 'cancelled', 'id': dl.id})
+
+
+AUDIO_EXT_SET = {'mp3', 'flac', 'wav', 'aiff', 'aif', 'ogg', 'opus', 'wma', 'aac', 'm4a'}
+
+
+@api_view(['GET'])
+def browse_user(request):
+    """Browse a Soulseek user's shared files.
+
+    Query params:
+      username: required
+      dir_prefix: optional path prefix — only directories whose name starts with
+        this are returned. Slskd uses backslashes in paths; we normalise both
+        sides to forward-slashes for matching so the FE can pass a clean prefix.
+      audio_only: '1' to drop non-audio files (default: include everything).
+      limit: max number of directories to return (default 200).
+    """
+    username = request.query_params.get('username', '').strip()
+    if not username:
+        return Response({'error': 'username is required'}, status=400)
+
+    dir_prefix = request.query_params.get('dir_prefix', '').strip()
+    audio_only = request.query_params.get('audio_only') in ('1', 'true', 'True')
+    try:
+        limit = int(request.query_params.get('limit', 200))
+    except (TypeError, ValueError):
+        limit = 200
+
+    client = SlskdClient()
+    try:
+        data = client.browse_user(username)
+    except requests.exceptions.HTTPError as e:
+        body = ''
+        try:
+            body = e.response.text if e.response else ''
+        except Exception:
+            pass
+        # slskd surfaces peer-side timeouts as a 500 with a TimeoutException
+        # in the body. Translate to a user-friendly message instead of leaking
+        # the .NET stack trace.
+        if 'TimeoutException' in body or 'timed out' in body.lower():
+            return Response(
+                {'error': f'{username} did not respond (likely offline, busy, or has browsing disabled). Try again later.'},
+                status=504,
+            )
+        msg = body[:200] or str(e)
+        return Response({'error': msg}, status=e.response.status_code if e.response else 502)
+    except requests.exceptions.Timeout:
+        return Response(
+            {'error': f'Browse timed out — {username} may be offline.'},
+            status=504,
+        )
+    except Exception as e:
+        return Response({'error': f'Browse failed: {e}'}, status=502)
+
+    raw_dirs = data.get('directories', []) if isinstance(data, dict) else []
+    raw_locked = data.get('lockedDirectories', []) if isinstance(data, dict) else []
+
+    def _normalize(p):
+        return (p or '').replace('\\', '/').lower().strip('/')
+
+    prefix_norm = _normalize(dir_prefix)
+    filtered = []
+    total_files = 0
+
+    def _process(dir_list, locked):
+        nonlocal total_files
+        for d in dir_list:
+            name = d.get('name', '')
+            if prefix_norm and not _normalize(name).startswith(prefix_norm):
+                continue
+            files = d.get('files', []) or []
+            if audio_only:
+                files = [
+                    f for f in files
+                    if (f.get('extension') or f.get('filename', '').rsplit('.', 1)[-1] or '').lower().lstrip('.') in AUDIO_EXT_SET
+                ]
+            total_files += len(files)
+            filtered.append({
+                'name': name,
+                'file_count': len(files),
+                'locked': locked,
+                'files': [
+                    {
+                        'filename': f.get('filename', ''),
+                        'size': f.get('size', 0),
+                        'extension': (f.get('extension') or '').lstrip('.'),
+                        'bitrate': f.get('bitRate'),
+                        'sample_rate': f.get('sampleRate'),
+                        'bit_depth': f.get('bitDepth'),
+                        'length': f.get('length'),
+                        'locked': locked,
+                    }
+                    for f in files
+                ],
+            })
+
+    _process(raw_dirs, locked=False)
+    _process(raw_locked, locked=True)
+
+    truncated = len(filtered) > limit
+    return Response({
+        'username': username,
+        'directories': filtered[:limit],
+        'returned_dirs': min(len(filtered), limit),
+        'matched_dirs': len(filtered),
+        'total_dirs': len(raw_dirs),
+        'locked_dirs': len(raw_locked),
+        'total_files': total_files,
+        'truncated': truncated,
+    })
+
+
+@api_view(['DELETE'])
+def delete_download(request, download_id):
+    """Remove a single download row from our DB. If still active in slskd,
+    cancel and remove it there too so the row really disappears."""
+    try:
+        dl = Download.objects.get(id=download_id)
+    except Download.DoesNotExist:
+        return Response({'error': 'Download not found'}, status=404)
+
+    if dl.slskd_id and dl.status in ('queued', 'downloading'):
+        client = SlskdClient()
+        try:
+            client.cancel_download(dl.username, dl.slskd_id, remove=True)
+        except Exception as e:
+            logger.warning(f"slskd cancel during delete failed: {e}")
+
+    dl.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['POST'])

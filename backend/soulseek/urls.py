@@ -15,5 +15,7 @@ urlpatterns = [
     path('downloads/', views.downloads_status, name='slskd-downloads'),
     path('downloads/cancel/', views.cancel_download, name='slskd-cancel-download'),
     path('downloads/clear/', views.clear_downloads, name='slskd-clear-downloads'),
+    path('downloads/<int:download_id>/', views.delete_download, name='slskd-delete-download'),
+    path('browse/', views.browse_user, name='slskd-browse-user'),
     path('', include(router.urls)),
 ]

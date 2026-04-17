@@ -36,7 +36,9 @@ def _fetch_from_discogs(artist, title, label='', catalog_number=''):
         else:
             return None
 
-        for result in results[:3]:
+        # discogs_client paginated lists don't support Python slice syntax.
+        from itertools import islice
+        for result in islice(results, 3):
             if hasattr(result, 'images') and result.images:
                 img_url = result.images[0].get('uri') or result.images[0].get('resource_url')
                 if img_url:

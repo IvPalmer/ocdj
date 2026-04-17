@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="popup-header">
+      <h1>OCDJ Standalone</h1>
+      <button id="settings-btn" title="Settings">&#9881;</button>
+    </header>
+
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search wantlist..." autocomplete="off">
+    </div>
+
+    <div id="wantlist" class="wantlist"></div>
+
+    <footer class="popup-footer">
+      <span id="item-count">0 items</span>
+      <div class="footer-actions">
+        <button id="export-btn" class="footer-btn" title="Export wantlist as text file">Export</button>
+        <button id="clear-btn" class="footer-btn footer-btn--danger" title="Clear entire wantlist">Clear</button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

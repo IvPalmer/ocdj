@@ -128,7 +128,10 @@ def _enrich_from_discogs(artist, title, label='', catalog_number=''):
         else:
             return None
 
-        for result in results[:5]:
+        # discogs_client paginated lists don't support Python slice syntax —
+        # `results[:5]` blows up with "slice // int". Iterate with a counter.
+        from itertools import islice
+        for result in islice(results, 5):
             # Verify match quality with rapidfuzz
             result_artist = ', '.join(a.name for a in result.artists) if hasattr(result, 'artists') else ''
             result_title = result.title if hasattr(result, 'title') else ''

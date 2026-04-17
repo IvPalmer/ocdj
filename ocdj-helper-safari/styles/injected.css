@@ -1,0 +1,237 @@
+/* OCDJ Dig — Injected Styles
+   All elements namespaced with .ocdj- prefix */
+
+/* ── Dig Button ─────────────────────────────────────────── */
+
+.ocdj-dig-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1;
+  transition: all 0.15s ease;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  z-index: 9999;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.ocdj-dig-btn:hover {
+  color: #fff;
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.ocdj-dig-btn:active {
+  transform: scale(0.93);
+}
+
+.ocdj-dig-btn--small {
+  height: 20px;
+  font-size: 11px;
+  padding: 0 5px;
+}
+
+.ocdj-dig-btn--medium {
+  height: 26px;
+  font-size: 12px;
+  padding: 0 8px;
+  gap: 3px;
+}
+
+.ocdj-dig-btn--large {
+  height: 30px;
+  font-size: 13px;
+  padding: 0 10px;
+  gap: 4px;
+}
+
+/* States */
+
+.ocdj-dig-btn--loading {
+  opacity: 0.6;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.ocdj-dig-btn--added {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  cursor: default;
+  pointer-events: none;
+}
+
+.ocdj-dig-btn--duplicate {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ── Toast Notifications ────────────────────────────────── */
+
+.ocdj-toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ocdj-toast {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  max-width: 340px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateX(120%);
+  transition: transform 0.3s ease;
+  pointer-events: auto;
+}
+
+.ocdj-toast--visible {
+  transform: translateX(0);
+}
+
+.ocdj-toast--success {
+  background: #16a34a;
+}
+
+.ocdj-toast--error {
+  background: #dc2626;
+}
+
+.ocdj-toast--duplicate {
+  background: #d97706;
+}
+
+.ocdj-toast--info {
+  background: #2563eb;
+}
+
+/* ── Play Button ───────────────────────────────────────── */
+
+.ocdj-play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1;
+  transition: all 0.15s ease;
+  background: rgba(13, 148, 136, 0.1);
+  color: #0d9488;
+  z-index: 9999;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.ocdj-play-btn:hover {
+  color: #fff;
+  background: #0d9488;
+  border-color: #0d9488;
+}
+
+.ocdj-play-btn:active {
+  transform: scale(0.93);
+}
+
+.ocdj-play-btn--small {
+  height: 20px;
+  font-size: 11px;
+  padding: 0 5px;
+}
+
+.ocdj-play-btn--medium {
+  height: 26px;
+  font-size: 12px;
+  padding: 0 8px;
+  gap: 3px;
+}
+
+.ocdj-play-btn--large {
+  height: 30px;
+  font-size: 13px;
+  padding: 0 10px;
+  gap: 4px;
+}
+
+.ocdj-play-btn--loading {
+  opacity: 0.5;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.ocdj-play-btn--queued {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ── Import Button (larger, for playlist/label pages) ──── */
+
+.ocdj-import-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  background: #7c3aed;
+  color: #fff;
+  transition: all 0.15s ease;
+  z-index: 9999;
+}
+
+.ocdj-import-btn:hover {
+  background: #6d28d9;
+  transform: scale(1.02);
+}
+
+.ocdj-import-btn:active {
+  transform: scale(0.98);
+}
+
+.ocdj-import-btn--loading {
+  opacity: 0.6;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.ocdj-import-btn--done {
+  background: #22c55e;
+  pointer-events: none;
+}
+
+/* ── Inline button group (keeps buttons next to text) ──── */
+
+.ocdj-btn-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}

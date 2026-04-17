@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      color: #e2e8f0;
+      background: #1a1a2e;
+      padding: 20px;
+      min-width: 400px;
+    }
+    h1 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      color: #f1f5f9;
+    }
+    .field {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .hint {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    input[type="text"] {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      padding: 8px 10px;
+      color: #e2e8f0;
+      font-size: 13px;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: #3b82f6; }
+    button {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary { background: #3b82f6; color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .toggle-section {
+      margin-top: 20px;
+      border-top: 1px solid #2a2a4a;
+      padding-top: 16px;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+    }
+    .toggle-label { font-size: 13px; }
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #334155;
+      border-radius: 10px;
+      transition: 0.2s;
+    }
+    .toggle-slider:before {
+      content: "";
+      position: absolute;
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background: #e2e8f0;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: #3b82f6; }
+    .toggle input:checked + .toggle-slider:before { transform: translateX(16px); }
+    #saved-msg {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #86efac;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>OCDJ Standalone Settings</h1>
+
+  <div class="field">
+    <label>Discogs Personal Access Token (optional)</label>
+    <input type="text" id="discogs-token" placeholder="Your Discogs token for higher API limits">
+    <p class="hint">Without a token: 60 requests/min. With a token: 240 requests/min.</p>
+  </div>
+
+  <button class="btn-primary" id="save-btn">Save</button>
+  <div id="saved-msg">Settings saved</div>
+
+  <div class="toggle-section">
+    <h2 style="font-size:13px; color:#94a3b8; margin-bottom:10px;">Content Scripts</h2>
+    <div class="toggle-row">
+      <span class="toggle-label">Discogs</span>
+      <label class="toggle"><input type="checkbox" id="site-discogs" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">Bandcamp</span>
+      <label class="toggle"><input type="checkbox" id="site-bandcamp" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">YouTube</span>
+      <label class="toggle"><input type="checkbox" id="site-youtube" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">SoundCloud</span>
+      <label class="toggle"><input type="checkbox" id="site-soundcloud" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">Spotify</span>
+      <label class="toggle"><input type="checkbox" id="site-spotify" checked><span class="toggle-slider"></span></label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px; border-top:1px solid #2a2a4a; padding-top:8px;">
+      <span class="toggle-label">Toast Notifications</span>
+      <label class="toggle"><input type="checkbox" id="show-toasts" checked><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

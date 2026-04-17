@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from .models import TraxDBOperation, ScrapedFolder, ScrapedTrack
 from .serializers import (
-    TraxDBOperationSerializer,
+    TraxDBOperationSerializer, TraxDBOperationListSerializer,
     TriggerSyncSerializer,
     TriggerDownloadSerializer,
     TriggerAuditSerializer,
@@ -96,11 +96,12 @@ def operations(request):
     if op_status:
         qs = qs.filter(status=op_status)
 
+    total = qs.count()
     limit = int(request.query_params.get('limit', 50))
     qs = qs[:limit]
 
-    serializer = TraxDBOperationSerializer(qs, many=True)
-    return Response({'results': serializer.data})
+    serializer = TraxDBOperationListSerializer(qs, many=True)
+    return Response({'count': total, 'results': serializer.data})
 
 
 @api_view(['GET'])
@@ -117,6 +118,42 @@ def operation_detail(request, pk):
 
 # ── Trigger endpoints ─────────────────────────────────────────
 
+# Per-op-type locks to atomically gate "is a run already in flight?". The
+# previous check-then-create pattern lost the race when two POSTs arrived
+# simultaneously — both passed `.exists()` and both spawned worker threads.
+# The lock must be held through the .create() so the gap between check and
+# insert can't be exploited by a concurrent caller.
+_TRIGGER_LOCKS = {
+    'sync': threading.Lock(),
+    'download': threading.Lock(),
+    'audit': threading.Lock(),
+}
+
+
+class _trigger_slot:
+    """Context manager: acquires the per-op-type lock and validates no run is
+    already in progress. Use `slot.claimed` to check; if False, return 409."""
+
+    def __init__(self, op_type):
+        self.op_type = op_type
+        self.lock = _TRIGGER_LOCKS[op_type]
+        self.claimed = False
+
+    def __enter__(self):
+        if not self.lock.acquire(blocking=False):
+            return self
+        if TraxDBOperation.objects.filter(op_type=self.op_type, status='running').exists():
+            self.lock.release()
+            return self
+        self.claimed = True
+        return self
+
+    def __exit__(self, *exc):
+        if self.claimed:
+            self.lock.release()
+        return False
+
+
 def _get_latest_sync_report():
     """Return the report_path of the latest completed sync operation, or None."""
     op = TraxDBOperation.objects.filter(
@@ -130,25 +167,24 @@ def _get_latest_sync_report():
 @api_view(['POST'])
 def trigger_sync(request):
     """Trigger a blog sync operation."""
-    if TraxDBOperation.objects.filter(op_type='sync', status='running').exists():
-        return Response(
-            {'error': 'A sync is already running'},
-            status=status.HTTP_409_CONFLICT,
-        )
-
     ser = TriggerSyncSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     max_pages = ser.validated_data.get('max_pages', 50)
 
-    op = TraxDBOperation.objects.create(op_type='sync')
+    with _trigger_slot('sync') as slot:
+        if not slot.claimed:
+            return Response(
+                {'error': 'A sync is already running'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        op = TraxDBOperation.objects.create(op_type='sync', status='running')
 
-    thread = threading.Thread(
+    threading.Thread(
         target=run_sync,
         args=(op.id,),
         kwargs={'max_pages': max_pages},
         daemon=True,
-    )
-    thread.start()
+    ).start()
 
     return Response(
         TraxDBOperationSerializer(op).data,
@@ -159,12 +195,6 @@ def trigger_sync(request):
 @api_view(['POST'])
 def trigger_download(request):
     """Trigger a download operation."""
-    if TraxDBOperation.objects.filter(op_type='download', status='running').exists():
-        return Response(
-            {'error': 'A download is already running'},
-            status=status.HTTP_409_CONFLICT,
-        )
-
     ser = TriggerDownloadSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
@@ -198,15 +228,20 @@ def trigger_download(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-    op = TraxDBOperation.objects.create(op_type='download')
+    with _trigger_slot('download') as slot:
+        if not slot.claimed:
+            return Response(
+                {'error': 'A download is already running'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        op = TraxDBOperation.objects.create(op_type='download', status='running')
 
-    thread = threading.Thread(
+    threading.Thread(
         target=run_download,
         args=(op.id,),
         kwargs={'sync_report_path': sync_report_path, 'links_key': links_key},
         daemon=True,
-    )
-    thread.start()
+    ).start()
 
     return Response(
         TraxDBOperationSerializer(op).data,
@@ -217,12 +252,6 @@ def trigger_download(request):
 @api_view(['POST'])
 def trigger_audit(request):
     """Trigger an audit operation."""
-    if TraxDBOperation.objects.filter(op_type='audit', status='running').exists():
-        return Response(
-            {'error': 'An audit is already running'},
-            status=status.HTTP_409_CONFLICT,
-        )
-
     ser = TriggerAuditSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
@@ -247,15 +276,20 @@ def trigger_audit(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    op = TraxDBOperation.objects.create(op_type='audit')
+    with _trigger_slot('audit') as slot:
+        if not slot.claimed:
+            return Response(
+                {'error': 'An audit is already running'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        op = TraxDBOperation.objects.create(op_type='audit', status='running')
 
-    thread = threading.Thread(
+    threading.Thread(
         target=run_audit,
         args=(op.id,),
         kwargs={'sync_report_path': sync_report_path},
         daemon=True,
-    )
-    thread.start()
+    ).start()
 
     return Response(
         TraxDBOperationSerializer(op).data,
@@ -326,7 +360,11 @@ def cancel_download(request, pk):
 @api_view(['GET'])
 def folders_list(request):
     """List scraped folders with filtering."""
-    qs = ScrapedFolder.objects.all()
+    from django.db.models import Count, Q as DBQ
+    qs = ScrapedFolder.objects.annotate(
+        tracks_count_annotated=Count('tracks'),
+        tracks_downloaded_annotated=Count('tracks', filter=DBQ(tracks__downloaded=True)),
+    )
 
     # Filter by download status
     dl_status = request.query_params.get('download_status')

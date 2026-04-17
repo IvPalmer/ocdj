@@ -1,0 +1,629 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		475FA7932F91D9C600153852 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475FA7922F91D9C600153852 /* AppDelegate.swift */; };
+		475FA7972F91D9C600153852 /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7952F91D9C600153852 /* Main.html */; };
+		475FA7992F91D9C600153852 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7982F91D9C600153852 /* Icon.png */; };
+		475FA79B2F91D9C600153852 /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 475FA79A2F91D9C600153852 /* Style.css */; };
+		475FA79D2F91D9C600153852 /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = 475FA79C2F91D9C600153852 /* Script.js */; };
+		475FA79F2F91D9C600153852 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475FA79E2F91D9C600153852 /* ViewController.swift */; };
+		475FA7A22F91D9C600153852 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7A02F91D9C600153852 /* Main.storyboard */; };
+		475FA7A42F91D9C700153852 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7A32F91D9C700153852 /* Assets.xcassets */; };
+		475FA7AB2F91D9C700153852 /* OCDJ Helper Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 475FA7AA2F91D9C700153852 /* OCDJ Helper Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		475FA7B02F91D9C700153852 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475FA7AF2F91D9C700153852 /* SafariWebExtensionHandler.swift */; };
+		475FA7C52F91D9C800153852 /* background in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7BC2F91D9C800153852 /* background */; };
+		475FA7C62F91D9C800153852 /* options in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7BD2F91D9C800153852 /* options */; };
+		475FA7C72F91D9C800153852 /* popup in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7BE2F91D9C800153852 /* popup */; };
+		475FA7C82F91D9C800153852 /* content in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7BF2F91D9C800153852 /* content */; };
+		475FA7C92F91D9C800153852 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7C02F91D9C800153852 /* README.md */; };
+		475FA7CA2F91D9C800153852 /* styles in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7C12F91D9C800153852 /* styles */; };
+		475FA7CB2F91D9C800153852 /* side-panel in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7C22F91D9C800153852 /* side-panel */; };
+		475FA7CC2F91D9C800153852 /* icons in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7C32F91D9C800153852 /* icons */; };
+		475FA7CD2F91D9C800153852 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7C42F91D9C800153852 /* manifest.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		475FA7AC2F91D9C700153852 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 475FA7872F91D9C600153852 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 475FA7A92F91D9C700153852;
+			remoteInfo = "OCDJ Helper Extension";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		475FA7B72F91D9C700153852 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				475FA7AB2F91D9C700153852 /* OCDJ Helper Extension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		475FA78F2F91D9C600153852 /* OCDJ Helper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OCDJ Helper.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		475FA7922F91D9C600153852 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		475FA7962F91D9C600153852 /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
+		475FA7982F91D9C600153852 /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
+		475FA79A2F91D9C600153852 /* Style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = Style.css; sourceTree = "<group>"; };
+		475FA79C2F91D9C600153852 /* Script.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Script.js; sourceTree = "<group>"; };
+		475FA79E2F91D9C600153852 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		475FA7A12F91D9C600153852 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		475FA7A32F91D9C700153852 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		475FA7A52F91D9C700153852 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		475FA7AA2F91D9C700153852 /* OCDJ Helper Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "OCDJ Helper Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		475FA7AF2F91D9C700153852 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		475FA7B12F91D9C700153852 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		475FA7BC2F91D9C800153852 /* background */ = {isa = PBXFileReference; lastKnownFileType = folder; name = background; path = Resources/background; sourceTree = "<group>"; };
+		475FA7BD2F91D9C800153852 /* options */ = {isa = PBXFileReference; lastKnownFileType = folder; name = options; path = Resources/options; sourceTree = "<group>"; };
+		475FA7BE2F91D9C800153852 /* popup */ = {isa = PBXFileReference; lastKnownFileType = folder; name = popup; path = Resources/popup; sourceTree = "<group>"; };
+		475FA7BF2F91D9C800153852 /* content */ = {isa = PBXFileReference; lastKnownFileType = folder; name = content; path = Resources/content; sourceTree = "<group>"; };
+		475FA7C02F91D9C800153852 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = Resources/README.md; sourceTree = "<group>"; };
+		475FA7C12F91D9C800153852 /* styles */ = {isa = PBXFileReference; lastKnownFileType = folder; name = styles; path = Resources/styles; sourceTree = "<group>"; };
+		475FA7C22F91D9C800153852 /* side-panel */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "side-panel"; path = "Resources/side-panel"; sourceTree = "<group>"; };
+		475FA7C32F91D9C800153852 /* icons */ = {isa = PBXFileReference; lastKnownFileType = folder; name = icons; path = Resources/icons; sourceTree = "<group>"; };
+		475FA7C42F91D9C800153852 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = manifest.json; path = Resources/manifest.json; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		475FA78C2F91D9C600153852 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		475FA7A72F91D9C700153852 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		475FA7862F91D9C600153852 = {
+			isa = PBXGroup;
+			children = (
+				475FA7912F91D9C600153852 /* OCDJ Helper */,
+				475FA7AE2F91D9C700153852 /* OCDJ Helper Extension */,
+				475FA7902F91D9C600153852 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		475FA7902F91D9C600153852 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				475FA78F2F91D9C600153852 /* OCDJ Helper.app */,
+				475FA7AA2F91D9C700153852 /* OCDJ Helper Extension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		475FA7912F91D9C600153852 /* OCDJ Helper */ = {
+			isa = PBXGroup;
+			children = (
+				475FA7922F91D9C600153852 /* AppDelegate.swift */,
+				475FA79E2F91D9C600153852 /* ViewController.swift */,
+				475FA7A02F91D9C600153852 /* Main.storyboard */,
+				475FA7A32F91D9C700153852 /* Assets.xcassets */,
+				475FA7A52F91D9C700153852 /* Info.plist */,
+				475FA7942F91D9C600153852 /* Resources */,
+			);
+			path = "OCDJ Helper";
+			sourceTree = "<group>";
+		};
+		475FA7942F91D9C600153852 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				475FA7952F91D9C600153852 /* Main.html */,
+				475FA7982F91D9C600153852 /* Icon.png */,
+				475FA79A2F91D9C600153852 /* Style.css */,
+				475FA79C2F91D9C600153852 /* Script.js */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		475FA7AE2F91D9C700153852 /* OCDJ Helper Extension */ = {
+			isa = PBXGroup;
+			children = (
+				475FA7BB2F91D9C800153852 /* Resources */,
+				475FA7AF2F91D9C700153852 /* SafariWebExtensionHandler.swift */,
+				475FA7B12F91D9C700153852 /* Info.plist */,
+			);
+			path = "OCDJ Helper Extension";
+			sourceTree = "<group>";
+		};
+		475FA7BB2F91D9C800153852 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				475FA7BC2F91D9C800153852 /* background */,
+				475FA7BD2F91D9C800153852 /* options */,
+				475FA7BE2F91D9C800153852 /* popup */,
+				475FA7BF2F91D9C800153852 /* content */,
+				475FA7C02F91D9C800153852 /* README.md */,
+				475FA7C12F91D9C800153852 /* styles */,
+				475FA7C22F91D9C800153852 /* side-panel */,
+				475FA7C32F91D9C800153852 /* icons */,
+				475FA7C42F91D9C800153852 /* manifest.json */,
+			);
+			name = Resources;
+			path = "OCDJ Helper Extension";
+			sourceTree = SOURCE_ROOT;
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		475FA78E2F91D9C600153852 /* OCDJ Helper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 475FA7B82F91D9C700153852 /* Build configuration list for PBXNativeTarget "OCDJ Helper" */;
+			buildPhases = (
+				475FA78B2F91D9C600153852 /* Sources */,
+				475FA78C2F91D9C600153852 /* Frameworks */,
+				475FA78D2F91D9C600153852 /* Resources */,
+				475FA7B72F91D9C700153852 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				475FA7AD2F91D9C700153852 /* PBXTargetDependency */,
+			);
+			name = "OCDJ Helper";
+			packageProductDependencies = (
+			);
+			productName = "OCDJ Helper";
+			productReference = 475FA78F2F91D9C600153852 /* OCDJ Helper.app */;
+			productType = "com.apple.product-type.application";
+		};
+		475FA7A92F91D9C700153852 /* OCDJ Helper Extension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 475FA7B42F91D9C700153852 /* Build configuration list for PBXNativeTarget "OCDJ Helper Extension" */;
+			buildPhases = (
+				475FA7A62F91D9C700153852 /* Sources */,
+				475FA7A72F91D9C700153852 /* Frameworks */,
+				475FA7A82F91D9C700153852 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "OCDJ Helper Extension";
+			packageProductDependencies = (
+			);
+			productName = "OCDJ Helper Extension";
+			productReference = 475FA7AA2F91D9C700153852 /* OCDJ Helper Extension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		475FA7872F91D9C600153852 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					475FA78E2F91D9C600153852 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					475FA7A92F91D9C700153852 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+				};
+			};
+			buildConfigurationList = 475FA78A2F91D9C600153852 /* Build configuration list for PBXProject "OCDJ Helper" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 475FA7862F91D9C600153852;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 475FA7902F91D9C600153852 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				475FA78E2F91D9C600153852 /* OCDJ Helper */,
+				475FA7A92F91D9C700153852 /* OCDJ Helper Extension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		475FA78D2F91D9C600153852 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				475FA7992F91D9C600153852 /* Icon.png in Resources */,
+				475FA7A22F91D9C600153852 /* Main.storyboard in Resources */,
+				475FA79D2F91D9C600153852 /* Script.js in Resources */,
+				475FA7972F91D9C600153852 /* Main.html in Resources */,
+				475FA7A42F91D9C700153852 /* Assets.xcassets in Resources */,
+				475FA79B2F91D9C600153852 /* Style.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		475FA7A82F91D9C700153852 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				475FA7C72F91D9C800153852 /* popup in Resources */,
+				475FA7CC2F91D9C800153852 /* icons in Resources */,
+				475FA7C52F91D9C800153852 /* background in Resources */,
+				475FA7C92F91D9C800153852 /* README.md in Resources */,
+				475FA7CD2F91D9C800153852 /* manifest.json in Resources */,
+				475FA7C82F91D9C800153852 /* content in Resources */,
+				475FA7CA2F91D9C800153852 /* styles in Resources */,
+				475FA7C62F91D9C800153852 /* options in Resources */,
+				475FA7CB2F91D9C800153852 /* side-panel in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		475FA78B2F91D9C600153852 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				475FA79F2F91D9C600153852 /* ViewController.swift in Sources */,
+				475FA7932F91D9C600153852 /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		475FA7A62F91D9C700153852 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				475FA7B02F91D9C700153852 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		475FA7AD2F91D9C700153852 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 475FA7A92F91D9C700153852 /* OCDJ Helper Extension */;
+			targetProxy = 475FA7AC2F91D9C700153852 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		475FA7952F91D9C600153852 /* Main.html */ = {
+			isa = PBXVariantGroup;
+			children = (
+				475FA7962F91D9C600153852 /* Base */,
+			);
+			name = Main.html;
+			sourceTree = "<group>";
+		};
+		475FA7A02F91D9C600153852 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				475FA7A12F91D9C600153852 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		475FA7B22F91D9C700153852 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		475FA7B32F91D9C700153852 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		475FA7B52F91D9C700153852 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Helper Extension/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Helper Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJ-Helper.Extension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		475FA7B62F91D9C700153852 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Helper Extension/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Helper Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJ-Helper.Extension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		475FA7B92F91D9C700153852 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Helper/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Helper";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJ-Helper";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		475FA7BA2F91D9C700153852 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Helper/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Helper";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJ-Helper";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		475FA78A2F91D9C600153852 /* Build configuration list for PBXProject "OCDJ Helper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				475FA7B22F91D9C700153852 /* Debug */,
+				475FA7B32F91D9C700153852 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		475FA7B42F91D9C700153852 /* Build configuration list for PBXNativeTarget "OCDJ Helper Extension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				475FA7B52F91D9C700153852 /* Debug */,
+				475FA7B62F91D9C700153852 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		475FA7B82F91D9C700153852 /* Build configuration list for PBXNativeTarget "OCDJ Helper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				475FA7B92F91D9C700153852 /* Debug */,
+				475FA7BA2F91D9C700153852 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 475FA7872F91D9C600153852 /* Project object */;
+}

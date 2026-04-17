@@ -122,6 +122,10 @@ class SearchResult(models.Model):
     queue_length = models.IntegerField(null=True, blank=True)
     free_upload_slots = models.BooleanField(default=False)
 
+    # True when this came from the peer's `lockedFiles` list (only privileged
+    # users can request it). Soulseek's native client shows a 🔒 next to these.
+    is_locked = models.BooleanField(default=False)
+
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:

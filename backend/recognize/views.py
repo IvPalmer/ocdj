@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @api_view(['GET'])
 def job_list(request):
     """List all recognition jobs."""
-    qs = RecognizeJob.objects.all()
+    qs = RecognizeJob.objects.all().order_by('-created')
 
     limit = int(request.query_params.get('limit', 50))
     qs = qs[:limit]

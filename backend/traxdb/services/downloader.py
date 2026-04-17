@@ -77,32 +77,27 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
 
         client = PixeldrainClient(api_key=pixeldrain_key)
 
-        # Determine which folders to download
+        # Determine which folders to download.
+        # The DB (ScrapedFolder.download_status='pending') is the source of
+        # truth — it accumulates across multiple sync runs. The latest sync's
+        # `links_new` only reports lists *new in that one run* and goes empty
+        # the moment you re-run sync, even when 17 lists are still pending.
+        # Only fall back to the legacy report if explicitly provided.
         if sync_report_path and os.path.exists(sync_report_path):
-            # Legacy mode: read from sync report JSON
             with open(sync_report_path, 'r', encoding='utf-8') as f:
                 sr = json.load(f)
             links = sr.get(links_key) or []
         else:
-            # Native mode: get pending ScrapedFolders from the latest sync
-            # Find the latest completed sync operation
-            latest_sync = TraxDBOperation.objects.filter(
-                op_type='sync', status='completed'
-            ).first()
-            if latest_sync and latest_sync.summary:
-                links = latest_sync.summary.get('links_new', [])
-            else:
-                # Fallback: download all pending folders
-                pending_folders = ScrapedFolder.objects.filter(download_status='pending')
-                links = [
-                    {
-                        'list_id': f.folder_id,
-                        'pixeldrain_url': f.pixeldrain_url,
-                        'inferred_date': f.inferred_date,
-                        'source_url': f.url,
-                    }
-                    for f in pending_folders
-                ]
+            pending_folders = ScrapedFolder.objects.filter(download_status='pending')
+            links = [
+                {
+                    'list_id': f.folder_id,
+                    'pixeldrain_url': f.pixeldrain_url,
+                    'inferred_date': f.inferred_date,
+                    'source_url': f.url,
+                }
+                for f in pending_folders
+            ]
 
         if not links:
             op.status = 'completed'
@@ -299,8 +294,15 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
                 else:
                     errors.append({'list_id': list_id, 'error': repr(e)})
 
+                # Only persist 'failed' for genuinely dead lists (404). Other
+                # errors (network, auth, rate-limit) are transient — leave the
+                # folder as 'pending' so the next "Download New" retries it
+                # without the user having to manually reset state.
                 if folder:
-                    folder.download_status = 'failed'
+                    if is_pixeldrain_not_found(e):
+                        folder.download_status = 'failed'
+                    else:
+                        folder.download_status = 'pending'
                     folder.save(update_fields=['download_status'])
 
                 _write_progress(progress_path, progress)

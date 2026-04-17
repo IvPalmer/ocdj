@@ -20,6 +20,19 @@ app/**/.swiftpm/
 app/**/xcuserdata/
 DerivedData/
 
+# Safari extension Xcode build output
+OCDJ Helper/build/
+ocdj-helper-safari-xcode/**/build/
+**/xcuserdata/
+**/.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Debug logs
+firebase-debug.log
+*.log
+
+# Build artifacts
+ocdj-helper-standalone.zip
+
 # slskd local runtime data
 tools/soulseek_sync/slskd/
 tools/soulseek_sync/slskd_app/

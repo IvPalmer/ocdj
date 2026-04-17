@@ -96,9 +96,15 @@ def check_spotify_status():
         token_info = auth_manager.get_cached_token()
         if token_info:
             return {'configured': True, 'connected': True}
-        return {'configured': True, 'connected': False}
-    except Exception:
-        return {'configured': True, 'connected': False}
+        return {'configured': True, 'connected': False, 'error': 'No cached token — run auth flow'}
+    except Exception as exc:
+        logger.exception('Spotify connection check failed')
+        return {
+            'configured': True,
+            'connected': False,
+            'auth_failed': True,
+            'error': str(exc)[:200],
+        }
 
 
 def _extract_playlist_id(url):

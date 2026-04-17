@@ -5,6 +5,8 @@
   "description": "Save tracks to your wantlist and queue music from Discogs, Bandcamp, YouTube, SoundCloud, and Spotify",
   "permissions": ["storage", "activeTab", "sidePanel", "declarativeNetRequestWithHostAccess", "scripting"],
   "host_permissions": [
+    "http://localhost:8002/*",
+    "http://127.0.0.1:8002/*",
     "https://api.discogs.com/*",
     "https://soundcloud.com/*",
     "https://w.soundcloud.com/*",

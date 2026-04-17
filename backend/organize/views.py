@@ -75,19 +75,33 @@ def pipeline_stats(request):
 @api_view(['POST'])
 def pipeline_process_all(request):
     """Process all items in 'downloaded' stage through the pipeline."""
-    from .services.pipeline import process_all_pending, _processing_all
-    if _processing_all:
-        return Response(
-            {'error': 'Pipeline is already processing'},
-            status=http_status.HTTP_409_CONFLICT,
-        )
+    from .services.pipeline import (
+        process_all_pending,
+        try_claim_processing_all,
+        release_processing_all,
+    )
 
     items = PipelineItem.objects.filter(stage='downloaded')
     count = items.count()
     if count == 0:
         return Response({'message': 'No items to process', 'count': 0})
 
-    threading.Thread(target=process_all_pending, daemon=True).start()
+    # Claim atomically so two concurrent requests can't both spawn a worker.
+    if not try_claim_processing_all():
+        return Response(
+            {'error': 'Pipeline is already processing'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
+    def _run():
+        try:
+            process_all_pending(already_claimed=True)
+        except Exception:
+            # process_all_pending only releases on its own happy path; ensure we release on crash
+            release_processing_all()
+            raise
+
+    threading.Thread(target=_run, daemon=True).start()
     return Response({'message': f'Processing {count} items', 'count': count})
 
 

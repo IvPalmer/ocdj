@@ -172,11 +172,17 @@ export function useSearch() {
   })
 }
 
-export function useSearchResults(queueItemId) {
+export function useSearchResults(queueItemId, queueItemStatus) {
   return useQuery({
-    queryKey: ['search-results', queueItemId],
+    // Status is part of the key so a re-search (status flips searching→found)
+    // forces a fresh fetch — the worker deletes old SearchResult rows at the
+    // START of the search, so the previous query would otherwise serve an
+    // empty cached list for up to 5 minutes after results land in the DB.
+    queryKey: ['search-results', queueItemId, queueItemStatus],
     queryFn: () => api.get(`/soulseek/search/results/?queue_item_id=${queueItemId}`),
     enabled: !!queueItemId,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }
 
@@ -199,15 +205,26 @@ export function useDownloadFile() {
   })
 }
 
+function downloadsStatusSignature(data) {
+  const dls = data?.downloads || []
+  return dls.map(d => `${d.id}:${d.status}:${d.progress || 0}`).join('|')
+}
+
 export function useDownloadsStatus() {
   const qc = useQueryClient()
+  const lastSigRef = { current: null }
   return useQuery({
     queryKey: ['downloads'],
     queryFn: async () => {
       const data = await api.get('/soulseek/downloads/')
-      // Refresh both queue and wanted items so status badges stay in sync
-      qc.invalidateQueries({ queryKey: ['search-queue'] })
-      qc.invalidateQueries({ queryKey: ['wanted-items'] })
+      // Only invalidate dependent queries if a status actually changed — avoids
+      // a cascading refetch storm every poll tick.
+      const sig = downloadsStatusSignature(data)
+      if (sig !== lastSigRef.current) {
+        lastSigRef.current = sig
+        qc.invalidateQueries({ queryKey: ['search-queue'] })
+        qc.invalidateQueries({ queryKey: ['wanted-items'] })
+      }
       return data
     },
     retry: false,
@@ -237,6 +254,35 @@ export function useClearDownloads() {
   return useMutation({
     mutationFn: (mode = 'completed') => api.post('/soulseek/downloads/clear/', { mode }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['downloads'] }),
+  })
+}
+
+export function useBrowseUser({ username, dirPrefix = '', audioOnly = true, limit = 200, enabled = true } = {}) {
+  const params = new URLSearchParams()
+  if (username) params.set('username', username)
+  if (dirPrefix) params.set('dir_prefix', dirPrefix)
+  if (audioOnly) params.set('audio_only', '1')
+  if (limit) params.set('limit', String(limit))
+  return useQuery({
+    queryKey: ['browse-user', username, dirPrefix, audioOnly, limit],
+    // slskd's peer-browse can take up to 60s before it itself times out, so
+    // we need to give the request more headroom than the global 30s default.
+    queryFn: () => api.get(`/soulseek/browse/?${params.toString()}`, { timeout: 90_000 }),
+    enabled: !!username && enabled,
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
+export function useDeleteDownload() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (downloadId) => api.delete(`/soulseek/downloads/${downloadId}/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['downloads'] })
+      qc.invalidateQueries({ queryKey: ['search-queue'] })
+      qc.invalidateQueries({ queryKey: ['wanted-items'] })
+    },
   })
 }
 
@@ -444,7 +490,6 @@ export function useResumeRecognizeJob() {
   return useMutation({
     mutationFn: (id) => api.post(`/recognize/jobs/${id}/resume/`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['recognize-jobs'] }),
-    onError: (err) => console.error('Resume job failed:', err),
   })
 }
 
@@ -464,7 +509,6 @@ export function useRerunRecognizeJob() {
       qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
       qc.invalidateQueries({ queryKey: ['recognize-job'] })
     },
-    onError: (err) => console.error('Rerun job failed:', err),
   })
 }
 
@@ -476,7 +520,6 @@ export function useReclusterRecognizeJob() {
       qc.invalidateQueries({ queryKey: ['recognize-jobs'] })
       qc.invalidateQueries({ queryKey: ['recognize-job'] })
     },
-    onError: (err) => console.error('Recluster job failed:', err),
   })
 }
 

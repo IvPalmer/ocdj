@@ -133,6 +133,61 @@ ocdj/
 - Browsable scraped archive in frontend
 - `tools/traxdb_sync/` preserved but no longer called from Django
 
+### Phase G: Stability & Polish Pass (2026-04-17)
+
+**Soulseek**
+- Added timeouts to all slskd HTTP calls (hangs on dead slskd killed)
+- Atomic QueueItem + WantedItem status save (`transaction.atomic`)
+- Auto-ingest race fixed with `transaction.on_commit`
+- `slskd_unreachable` flag surfaced to frontend instead of stuck "queued" state
+- `bulk_create` SearchResults (was N+1)
+- "Completed, Rejected" now correctly flips to `failed`
+- Query simplification: new `simplify_query()` strips hyphens/accents/punctuation, drops noise words (feat/remix/mix/original), caps at 6 tokens — slsk recall now much better
+- `search_results_count` via `Count` annotation (was N+1)
+- New `DELETE /soulseek/downloads/<id>/` for per-row remove on completed/failed rows
+- **New: browse user shared folder** — `GET /soulseek/browse/?username=X&dir_prefix=Y&audio_only=1` with 📁 button in each result row, modal with folder tree, 🔒 lock indicator for privileged-only files and directories (slskd's `lockedDirectories` + `lockedFiles`)
+- `SearchResult.is_locked` field + migration 0004
+
+**Frontend resilience**
+- `ErrorBoundary` + `ToastProvider` + global mutation/query onError → toast
+- `AbortController` 30s timeout on fetch (90s for browse)
+- `useDownloadsStatus` signature-diff invalidation (killed refetch storm)
+- `useSearchResults` status-keyed + `staleTime: 0` (fixed "No results found" after re-search)
+
+**Recognize**
+- `trackid_result` initialized to `None` (fixed AttributeError on lookup failure)
+
+**Organize**
+- `try_claim_processing_all()` atomic claim (fixed race)
+- `_find_file_on_disk` 20k-entry cap (no more multi-minute hangs on big trees)
+- Discogs enrichment fixed: `results[:5]` → `itertools.islice(results, 5)` (was silently crashing on every tag attempt; artwork.py same pattern)
+
+**Wanted**
+- Spotify `_status()` distinguishes `auth_failed` from unconfigured
+
+**Backend config**
+- `CORS_ALLOWED_ORIGIN_REGEXES` covers `chrome-extension://`, `moz-extension://`, `safari-web-extension://`
+
+**Extension**
+- Standalone manifest host_permissions now includes `http://localhost:8002/*`
+- **New: Safari extension built** via `safari-web-extension-converter`; Xcode project at `/OCDJ Helper/`, registered with Safari, requires "Allow Unsigned Extensions" until codesigned
+
+**TraxDB**
+- Operations list payload 156KB → 1KB (added `TraxDBOperationListSerializer` without `summary`)
+- Folder list N+1 → single query (annotate `tracks_count` + `tracks_downloaded`)
+- Atomic `_trigger_slot` context manager for trigger views (killed sync/download/audit races)
+- **Loud failure** on Google login redirect (was silently returning 0 new lists)
+- **New HTML parser fallback** — blog changed format to date-header + `MIRROR1:` lines; parser now regex-scans pixeldrain links and pairs with nearest date
+- Downloader trusts DB `pending` folders (was deferring to stale `latest_sync.links_new`)
+- Transient download errors (not 404) revert folder to `pending` for next-run retry
+- `apps.py` startup hook marks zombie `running` ops as `failed` on every backend boot
+- **New tool: `tools/traxdb_sync/refresh_cookies.py`** — one-shot Chrome cookie extractor for stale session refresh
+- **Simplified TraxDB UI** — single-flow "Check New Lists → Download N → Advanced" pane replaces old 3-card Sync/Download/Audit layout
+
+**Review**
+- Full architecture + UX + strategy review at `docs/REVIEW_2026-04-17.md` (6 parallel agents, 557 lines)
+- Panel screenshots at `docs/review_screenshots/`
+
 ---
 
 ## Dropped (not planned)

@@ -3,8 +3,9 @@ import {
   useSlskdHealth, useSearch, useDownloadFile,
   useDownloadsStatus, useSearchResults,
   useSearchQueue, useAddToQueue, useRemoveFromQueue, useClearQueue,
-  useCancelDownload, useClearDownloads,
+  useCancelDownload, useClearDownloads, useDeleteDownload,
 } from '../../api/hooks'
+import BrowseModal from './BrowseModal'
 import './SoulseekPanel.css'
 
 const STATUS_LABELS = {
@@ -30,12 +31,15 @@ function SoulseekPanel() {
   const downloadMutation = useDownloadFile()
   const cancelMutation = useCancelDownload()
   const clearDlMutation = useClearDownloads()
+  const deleteDlMutation = useDeleteDownload()
   const addToQueue = useAddToQueue()
   const removeFromQueue = useRemoveFromQueue()
   const clearQueue = useClearQueue()
 
   const [query, setQuery] = useState('')
   const [expandedItemId, setExpandedItemId] = useState(null)
+  // Browse modal target: { username, filename, queueItemId, wantedItemId } or null
+  const [browseTarget, setBrowseTarget] = useState(null)
 
   const connected = health?.status === 'connected'
   const loggedIn = health?.info?.server?.isLoggedIn
@@ -264,6 +268,12 @@ function SoulseekPanel() {
                   )}
                   onSearch={() => handleItemSearch(item.id)}
                   onDownload={handleDownload}
+                  onBrowse={(result) => setBrowseTarget({
+                    username: result.username,
+                    filename: result.filename,
+                    queueItemId: item.id,
+                    wantedItemId: item.wanted_item || null,
+                  })}
                   onRemove={handleRemove}
                   downloadPending={downloadMutation.isPending}
                   getFileDownloadStatus={getFileDownloadStatus}
@@ -332,6 +342,14 @@ function SoulseekPanel() {
                   <span className="dl-icon">✓</span>
                   <span className="dl-name">{dl.filename.split(/[/\\]/).pop()}</span>
                   <span className="dl-user">from {dl.username}</span>
+                  <button
+                    className="btn btn-xs btn-ghost dl-remove-btn"
+                    onClick={() => deleteDlMutation.mutate(dl.id)}
+                    disabled={deleteDlMutation.isPending}
+                    title="Remove from list"
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
@@ -347,11 +365,29 @@ function SoulseekPanel() {
                   <span className="dl-error" title={dl.error_message || dl.slskd_state}>
                     {dl.error_message || dl.slskd_state || dl.status}
                   </span>
+                  <button
+                    className="btn btn-xs btn-ghost dl-remove-btn"
+                    onClick={() => deleteDlMutation.mutate(dl.id)}
+                    disabled={deleteDlMutation.isPending}
+                    title="Remove from list"
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {browseTarget && (
+        <BrowseModal
+          username={browseTarget.username}
+          initialFilename={browseTarget.filename}
+          queueItemId={browseTarget.queueItemId}
+          wantedItemId={browseTarget.wantedItemId}
+          onClose={() => setBrowseTarget(null)}
+        />
       )}
     </div>
   )
@@ -423,10 +459,10 @@ function DownloadRow({ dl, onCancel, cancelPending, formatSize, formatSpeed }) {
 
 function QueueItemRow({
   item, expanded, onToggle, onSearch,
-  onDownload, onRemove, downloadPending, getFileDownloadStatus,
+  onDownload, onBrowse, onRemove, downloadPending, getFileDownloadStatus,
   formatSize, formatAgo, connected,
 }) {
-  const { data: searchResults } = useSearchResults(expanded ? item.id : null)
+  const { data: searchResults } = useSearchResults(expanded ? item.id : null, item.status)
 
   const isRawQuery = !!item.raw_query
   const label = isRawQuery
@@ -500,7 +536,7 @@ function QueueItemRow({
                   return (
                     <div
                       key={r.id || i}
-                      className={`expand-result-item${dlStatus ? ' er-item--downloaded' : ''}`}
+                      className={`expand-result-item${dlStatus ? ' er-item--downloaded' : ''}${r.is_locked ? ' er-item--locked' : ''}`}
                     >
                       <span className="er-score">{r.match_score}%</span>
                       <span className="er-file" title={r.filename}>
@@ -512,9 +548,22 @@ function QueueItemRow({
                         {r.bitrate ? `${r.bitrate}k` : r.bit_depth ? `${r.bit_depth}bit` : ''}
                       </span>
                       <span className="er-user">
+                        {r.is_locked && (
+                          <span className="er-lock" title="Locked — peer requires privileged access">🔒</span>
+                        )}
                         {r.username}
                         {r.free_upload_slots && <span className="free-slot"> free</span>}
                       </span>
+                      <button
+                        className="btn btn-xs btn-ghost"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onBrowse(r)
+                        }}
+                        title={`Browse ${r.username}'s shared folder`}
+                      >
+                        📁
+                      </button>
                       {dlStatus ? (
                         <span className={`dl-badge dl-badge--${dlStatus}`}>
                           {dlStatus === 'completed' ? '✓ Done' : dlStatus === 'downloading' ? '↓ DL' : '⏳ Queue'}

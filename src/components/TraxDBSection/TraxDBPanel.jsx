@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   useTraxDBInventory,
   useTraxDBOperations,
+  useTraxDBOperation,
   useTriggerSync,
   useTriggerDownload,
   useTriggerAudit,
@@ -31,286 +32,22 @@ function timeAgo(isoStr) {
 }
 
 function countField(summary, arrayKey, countKey) {
-  const arr = summary[arrayKey]
+  const arr = summary?.[arrayKey]
   if (Array.isArray(arr)) return arr.length
-  return summary[countKey] ?? summary[arrayKey] ?? '?'
+  return summary?.[countKey] ?? 0
 }
 
-function summarySentence(op) {
-  const s = op.summary || {}
-  if (op.op_type === 'sync') {
-    const found = countField(s, 'links_found', 'links_found_count')
-    const newLinks = countField(s, 'links_new', 'links_new_count')
-    return `${newLinks} new / ${found} on page`
-  }
-  if (op.op_type === 'download') {
-    const files = s.files_completed ?? s.files_total ?? '?'
-    const bytes = s.bytes_downloaded ? formatBytes(s.bytes_downloaded) : ''
-    return `${files} files${bytes ? ` (${bytes})` : ''}`
-  }
-  if (op.op_type === 'audit') {
-    const ok = s.files_ok ?? '?'
-    const missing = s.files_missing ?? 0
-    return `${ok} ok, ${missing} missing`
-  }
-  return ''
-}
+/* ── compact library overview ── */
 
-/* ── detail components ── */
-
-function LinkTable({ links, title, emptyText, isNew }) {
-  const [expanded, setExpanded] = useState(false)
-
-  if (!links || links.length === 0) {
-    return emptyText ? <p className="traxdb-empty">{emptyText}</p> : null
-  }
-
-  return (
-    <div className={`traxdb-detail ${isNew ? 'traxdb-detail--new' : ''}`}>
-      <div className="traxdb-detail-header" onClick={() => setExpanded(e => !e)}>
-        <span className="traxdb-detail-title">
-          {title} <span className="traxdb-detail-count">({links.length})</span>
-        </span>
-        <span className={`traxdb-history-toggle ${expanded ? 'traxdb-history-toggle--open' : ''}`}>
-          &#9654;
-        </span>
-      </div>
-      {expanded && (
-        <div className="traxdb-detail-body">
-          <table className="traxdb-link-table">
-            <thead>
-              <tr>
-                <th>List ID</th>
-                <th>Date</th>
-                <th>Files</th>
-                <th>Link</th>
-              </tr>
-            </thead>
-            <tbody>
-              {links.map((link, i) => (
-                <tr key={link.list_id || i}>
-                  <td className="mono">{link.list_id || '\u2014'}</td>
-                  <td>{link.inferred_date || '\u2014'}</td>
-                  <td className="mono">
-                    {link.files ? link.files.length : link.file_count ?? '\u2014'}
-                  </td>
-                  <td>
-                    {link.pixeldrain_url ? (
-                      <a
-                        href={link.pixeldrain_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="traxdb-link"
-                      >
-                        pixeldrain &#8599;
-                      </a>
-                    ) : '\u2014'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function AuditListsDetail({ lists, deadLinks, errors }) {
-  const [expanded, setExpanded] = useState(false)
-
-  const hasData = (lists && lists.length > 0) || (deadLinks && deadLinks.length > 0)
-  if (!hasData) return null
-
-  return (
-    <div className="traxdb-detail">
-      <div className="traxdb-detail-header" onClick={() => setExpanded(e => !e)}>
-        <span className="traxdb-detail-title">
-          Audit Details <span className="traxdb-detail-count">({(lists || []).length} lists)</span>
-        </span>
-        <span className={`traxdb-history-toggle ${expanded ? 'traxdb-history-toggle--open' : ''}`}>
-          &#9654;
-        </span>
-      </div>
-      {expanded && (
-        <div className="traxdb-detail-body">
-          {(lists || []).map((list, i) => {
-            const files = list.files || []
-            const missing = files.filter(f => f.status === 'missing')
-            const mismatch = files.filter(f => f.status === 'size_mismatch')
-            const ok = files.filter(f => f.status === 'ok')
-            const hasIssues = missing.length > 0 || mismatch.length > 0
-
-            return (
-              <div key={list.list_id || i} className={`traxdb-audit-list ${hasIssues ? 'traxdb-audit-list--issues' : ''}`}>
-                <div className="traxdb-audit-list-header">
-                  <span className="mono">{list.list_id || `List ${i + 1}`}</span>
-                  <span className="traxdb-audit-badges">
-                    {ok.length > 0 && <span className="audit-badge audit-badge--ok">{ok.length} ok</span>}
-                    {missing.length > 0 && <span className="audit-badge audit-badge--missing">{missing.length} missing</span>}
-                    {mismatch.length > 0 && <span className="audit-badge audit-badge--mismatch">{mismatch.length} mismatch</span>}
-                  </span>
-                </div>
-                {hasIssues && (
-                  <div className="traxdb-audit-files">
-                    {[...missing, ...mismatch].map((file, fi) => (
-                      <div key={fi} className={`traxdb-audit-file traxdb-audit-file--${file.status}`}>
-                        <span className={`audit-file-status audit-file-status--${file.status}`}>
-                          {file.status === 'missing' ? '\u2717' : '\u26A0'}
-                        </span>
-                        <span className="traxdb-audit-filename">{file.name || file.filename || '(unknown)'}</span>
-                        {file.expected_size && (
-                          <span className="traxdb-audit-size">
-                            {file.status === 'size_mismatch'
-                              ? `${formatBytes(file.local_size)} / ${formatBytes(file.expected_size)}`
-                              : formatBytes(file.expected_size)}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-
-          {deadLinks && deadLinks.length > 0 && (
-            <div className="traxdb-dead-links">
-              <div className="traxdb-dead-links-title">Dead Links ({deadLinks.length})</div>
-              {deadLinks.map((dl, i) => (
-                <div key={i} className="traxdb-dead-link">
-                  <span className="mono">{dl.list_id || dl.url || dl}</span>
-                  {dl.error && <span className="traxdb-dead-link-error">{dl.error}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function DownloadListsDetail({ lists, deadLinks, errors }) {
-  const [expanded, setExpanded] = useState(false)
-
-  const hasData = (lists && lists.length > 0) || (deadLinks && deadLinks.length > 0)
-  if (!hasData) return null
-
-  return (
-    <div className="traxdb-detail">
-      <div className="traxdb-detail-header" onClick={() => setExpanded(e => !e)}>
-        <span className="traxdb-detail-title">
-          Download Details <span className="traxdb-detail-count">({(lists || []).length} lists)</span>
-        </span>
-        <span className={`traxdb-history-toggle ${expanded ? 'traxdb-history-toggle--open' : ''}`}>
-          &#9654;
-        </span>
-      </div>
-      {expanded && (
-        <div className="traxdb-detail-body">
-          {(lists || []).map((list, i) => {
-            const files = list.files || []
-            return (
-              <div key={list.list_id || i} className="traxdb-download-list">
-                <div className="traxdb-download-list-header">
-                  <span className="mono">{list.list_id || `List ${i + 1}`}</span>
-                  <span className="traxdb-download-list-meta">
-                    {files.length} files
-                    {list.bytes_downloaded ? ` \u00B7 ${formatBytes(list.bytes_downloaded)}` : ''}
-                    {list.status && list.status !== 'completed' && (
-                      <span className={`audit-badge audit-badge--${list.status === 'dead' ? 'missing' : 'ok'}`}>
-                        {list.status}
-                      </span>
-                    )}
-                  </span>
-                </div>
-                {files.length > 0 && (
-                  <div className="traxdb-download-files">
-                    {files.map((file, fi) => (
-                      <div key={fi} className="traxdb-download-file">
-                        <span className="traxdb-download-filename">{file.name || file.filename || '(unknown)'}</span>
-                        {file.size && <span className="mono traxdb-download-filesize">{formatBytes(file.size)}</span>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-
-          {deadLinks && deadLinks.length > 0 && (
-            <div className="traxdb-dead-links">
-              <div className="traxdb-dead-links-title">Dead Links ({deadLinks.length})</div>
-              {deadLinks.map((dl, i) => (
-                <div key={i} className="traxdb-dead-link">
-                  <span className="mono">{dl.list_id || dl.url || dl}</span>
-                  {dl.error && <span className="traxdb-dead-link-error">{dl.error}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ErrorsDetail({ errors }) {
-  const [expanded, setExpanded] = useState(false)
-
-  if (!errors || errors.length === 0) return null
-
-  return (
-    <div className="traxdb-detail traxdb-detail--errors">
-      <div className="traxdb-detail-header" onClick={() => setExpanded(e => !e)}>
-        <span className="traxdb-detail-title traxdb-detail-title--error">
-          Errors <span className="traxdb-detail-count">({errors.length})</span>
-        </span>
-        <span className={`traxdb-history-toggle ${expanded ? 'traxdb-history-toggle--open' : ''}`}>
-          &#9654;
-        </span>
-      </div>
-      {expanded && (
-        <div className="traxdb-detail-body">
-          {errors.map((err, i) => (
-            <div key={i} className="traxdb-error-item">
-              {err.list && (
-                <span className="traxdb-error-list-id">{err.list.list_id || err.list_id}: </span>
-              )}
-              {err.list_id && !err.list && (
-                <span className="traxdb-error-list-id">{err.list_id}: </span>
-              )}
-              <span className="traxdb-error-message">
-                {typeof err === 'string' ? err : (err.message || err.error || JSON.stringify(err))}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── section components ── */
-
-function InventoryOverview({ inventory }) {
+function LibraryOverview({ inventory, latestSync, latestDownload }) {
   if (!inventory) return null
-
   return (
     <div className="traxdb-section traxdb-section--inventory">
-      <div className="traxdb-section-header">
-        <h3>Local Library</h3>
-      </div>
       <div className="traxdb-section-body">
         <div className="traxdb-summary">
           <div className="traxdb-stat">
             <div className="traxdb-stat-value">{inventory.known_lists_count}</div>
-            <div className="traxdb-stat-label">Pixeldrain Lists</div>
-          </div>
-          <div className="traxdb-stat">
-            <div className="traxdb-stat-value">{inventory.date_dirs_count}</div>
-            <div className="traxdb-stat-label">Date Folders</div>
+            <div className="traxdb-stat-label">Lists</div>
           </div>
           <div className="traxdb-stat">
             <div className="traxdb-stat-value">{inventory.file_count?.toLocaleString()}</div>
@@ -318,464 +55,290 @@ function InventoryOverview({ inventory }) {
           </div>
           <div className="traxdb-stat">
             <div className="traxdb-stat-value">{formatBytes(inventory.total_bytes)}</div>
-            <div className="traxdb-stat-label">Total Size</div>
+            <div className="traxdb-stat-label">Size</div>
+          </div>
+          <div className="traxdb-stat">
+            <div className="traxdb-stat-value">{inventory.latest_date || '—'}</div>
+            <div className="traxdb-stat-label">Newest in library</div>
           </div>
         </div>
         <div className="traxdb-inventory-meta">
-          {inventory.oldest_date && inventory.latest_date && (
-            <span>Spanning {inventory.oldest_date} to {inventory.latest_date}</span>
-          )}
+          <span>Last check: {latestSync?.updated ? timeAgo(latestSync.updated) : 'never'}</span>
+          <span> · </span>
+          <span>Last download: {latestDownload?.updated ? timeAgo(latestDownload.updated) : 'never'}</span>
         </div>
       </div>
     </div>
   )
 }
 
-function SyncSection({ latestSync, isRunning, onTrigger, isPending, triggerError, inventory }) {
-  const summary = latestSync?.summary || {}
-  const linksNew = Array.isArray(summary.links_new) ? summary.links_new : []
-  const linksFound = Array.isArray(summary.links_found) ? summary.links_found : []
-  const errors = Array.isArray(summary.errors) ? summary.errors : []
-  const newCount = countField(summary, 'links_new', 'links_new_count')
-  const foundCount = countField(summary, 'links_found', 'links_found_count')
-  const alreadyInLib = typeof foundCount === 'number' && typeof newCount === 'number'
-    ? foundCount - newCount
-    : 0
+/* ── main flow: check → download ── */
+
+function CheckAndDownload({
+  latestSync, syncRunning, onCheck, syncPending,
+  latestDownload, downloadRunning, onDownload, onCancel, downloadPending,
+  inventory,
+}) {
+  // What "new" means here is: scraped lists in the DB that aren't downloaded
+  // yet. The sync's `links_new` only counts deltas since the last sync run —
+  // re-running sync on already-discovered lists would (correctly) report 0
+  // new even when 17 are still pending download. Pull pending list metadata
+  // straight from the folders endpoint so the UI matches reality.
+  const { data: pendingData } = useTraxDBFolders({
+    download_status: 'pending',
+    limit: 100,
+  })
+  const pendingFolders = pendingData?.results || []
+  const newCount = pendingData?.total ?? pendingFolders.length
+
+  // Live download progress. The endpoint returns { status, progress: {...} }
+  // so the actual counters live one level down.
+  const progressId = downloadRunning ? latestDownload?.id : null
+  const { data: progressResp } = useTraxDBDownloadProgress(progressId)
+  const progress = progressResp?.progress || progressResp || {}
+  const listsTotal = progress.lists_total || 0
+  const listsCompleted = progress.lists_completed || 0
+  const filesTotal = progress.files_total || 0
+  const filesCompleted = progress.files_completed || 0
+  const bytesTotal = progress.bytes_total || 0
+  const bytesDownloaded = progress.bytes_downloaded || 0
+  // Prefer file-level progress when we know it — gives smoother bar movement
+  // since one list can take minutes and visual progress would otherwise stall.
+  const pct = filesTotal > 0
+    ? Math.round((filesCompleted / filesTotal) * 100)
+    : (listsTotal > 0 ? Math.round((listsCompleted / listsTotal) * 100) : 0)
+
+  const dlSummary = latestDownload?.summary || {}
+  const dlCompleted = !downloadRunning && latestDownload?.status === 'completed'
+
+  // Has the latest download already consumed the latest sync? Avoid showing
+  // stale "X new" after a successful download.
+  const downloadIsAfterSync = latestDownload?.created && latestSync?.created
+    && new Date(latestDownload.created) >= new Date(latestSync.created)
 
   return (
     <div className="traxdb-section">
-      <div className="traxdb-section-header">
-        <h3><span className="step-badge">1</span> Check for New</h3>
-        <div className="traxdb-actions">
-          {isRunning && (
-            <span className="traxdb-status traxdb-status--running">
-              <span className="traxdb-spinner" /> Scanning blog...
-            </span>
-          )}
-          {!isRunning && latestSync?.status === 'completed' && (
-            <span className="traxdb-status traxdb-status--completed">
-              {timeAgo(latestSync.updated)}
-            </span>
-          )}
-          <button
-            className="btn btn-accent btn-sm"
-            onClick={() => onTrigger()}
-            disabled={isRunning || isPending}
-          >
-            {isRunning ? 'Scanning...' : 'Check for New'}
-          </button>
-        </div>
-      </div>
-      <div className="traxdb-section-body">
-        <p className="traxdb-section-desc">
-          Scans the blog for new Pixeldrain lists since the last download
-          {inventory?.latest_date ? ` (${inventory.latest_date})` : ''}.
-          This is an incremental check — it only looks for new content, not your full history
-          of {inventory?.known_lists_count ?? '?'} lists.
-        </p>
-
-        {triggerError && (
-          <div className="traxdb-error">
-            {triggerError.data?.error || triggerError.message || 'Failed to start sync'}
-          </div>
-        )}
-        {latestSync?.status === 'failed' && (
-          <div className="traxdb-error">{latestSync.error_message || 'Sync failed'}</div>
-        )}
-        {latestSync?.status === 'completed' && (newCount > 0 || foundCount > 0) ? (
-          <>
-            <div className="traxdb-summary">
-              <div className="traxdb-stat traxdb-stat--accent">
-                <div className="traxdb-stat-value">{newCount}</div>
-                <div className="traxdb-stat-label">New to Download</div>
-              </div>
-              <div className="traxdb-stat">
-                <div className="traxdb-stat-value">{alreadyInLib}</div>
-                <div className="traxdb-stat-label">Already in Library</div>
-              </div>
-              <div className="traxdb-stat">
-                <div className="traxdb-stat-value">{foundCount}</div>
-                <div className="traxdb-stat-label">On Blog Page</div>
-              </div>
-            </div>
-
-            {/* Detail sections */}
-            {linksNew.length > 0 && (
-              <LinkTable links={linksNew} title="New Lists (ready to download)" isNew />
-            )}
-            {linksFound.length > linksNew.length && (
-              <LinkTable links={linksFound} title="All Lists on Blog Page" />
-            )}
-            <ErrorsDetail errors={errors} />
-          </>
-        ) : (
-          !isRunning && !latestSync?.status && (
-            <p className="traxdb-empty">Click "Check for New" to scan the blog for new Pixeldrain lists.</p>
-          )
-        )}
-        {latestSync?.status === 'completed' && newCount === 0 && foundCount > 0 && (
-          <p className="traxdb-empty traxdb-empty--good">
-            All {foundCount} lists on the blog page are already in your library. You're up to date!
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function DownloadSection({ latestDownload, latestSync, isRunning, onTrigger, onCancel, isPending, triggerError }) {
-  const progressId = isRunning ? latestDownload?.id : null
-  const { data: progress } = useTraxDBDownloadProgress(progressId)
-  const summary = latestDownload?.summary || {}
-  const hasSyncCompleted = latestSync?.status === 'completed'
-  const newCount = countField(latestSync?.summary || {}, 'links_new', 'links_new_count')
-
-  // Calculate progress percentage
-  const listsTotal = progress?.lists_total || 0
-  const listsCompleted = progress?.lists_completed || 0
-  const pct = listsTotal > 0 ? Math.round((listsCompleted / listsTotal) * 100) : 0
-
-  const lists = Array.isArray(summary.lists) ? summary.lists : []
-  const deadLinks = Array.isArray(summary.dead_links) ? summary.dead_links : []
-  const errors = Array.isArray(summary.errors) ? summary.errors : []
-
-  return (
-    <div className="traxdb-section">
-      <div className="traxdb-section-header">
-        <h3><span className="step-badge">2</span> Download</h3>
-        <div className="traxdb-actions">
-          {isRunning && (
-            <span className="traxdb-status traxdb-status--running">
-              <span className="traxdb-spinner" /> Downloading...
-            </span>
-          )}
-          {!isRunning && latestDownload?.status === 'completed' && (
-            <span className="traxdb-status traxdb-status--completed">
-              {timeAgo(latestDownload.updated)}
-            </span>
-          )}
-          {isRunning && (
+      <div className="traxdb-section-body traxdb-flow">
+        {/* Stage 1: Check */}
+        {!syncRunning && !downloadRunning && (
+          <div className="traxdb-flow-step">
             <button
-              className="btn btn-danger btn-sm"
-              onClick={() => onCancel(latestDownload.id)}
-              disabled={isPending}
+              className="btn btn-accent btn-lg"
+              onClick={onCheck}
+              disabled={syncPending}
             >
-              Cancel
+              {latestSync ? 'Check Again for New Lists' : 'Check for New Lists'}
             </button>
-          )}
-          {!isRunning && (
+            {latestSync?.status === 'failed' && (
+              <div className="traxdb-error">{latestSync.error_message || 'Check failed'}</div>
+            )}
+          </div>
+        )}
+
+        {syncRunning && (
+          <div className="traxdb-flow-step">
+            <span className="traxdb-status traxdb-status--running">
+              <span className="traxdb-spinner" /> Scanning blog…
+            </span>
+          </div>
+        )}
+
+        {/* Stage 2: Pending lists ready to download */}
+        {!syncRunning && !downloadRunning && newCount > 0 && (
+          <div className="traxdb-flow-step">
+            <div className="traxdb-result traxdb-result--good">
+              <strong>{newCount}</strong> list{newCount === 1 ? '' : 's'} ready to download.
+            </div>
+            <ul className="traxdb-newlist">
+              {pendingFolders.slice(0, 8).map(f => (
+                <li key={f.id}>
+                  <span className="mono">{f.folder_id}</span>
+                  <span className="traxdb-newlist-date">{f.inferred_date || ''}</span>
+                </li>
+              ))}
+              {pendingFolders.length > 8 && <li className="muted">…and {pendingFolders.length - 8} more</li>}
+            </ul>
             <button
-              className="btn btn-accent btn-sm"
-              onClick={() => onTrigger()}
-              disabled={!hasSyncCompleted || newCount === 0 || isPending}
-              title={!hasSyncCompleted ? 'Run a sync first' : newCount === 0 ? 'No new lists to download' : ''}
+              className="btn btn-accent btn-lg"
+              onClick={onDownload}
+              disabled={downloadPending}
             >
-              Download New
+              Download {newCount} New
             </button>
-          )}
-        </div>
-      </div>
-      <div className="traxdb-section-body">
-        {triggerError && (
-          <div className="traxdb-error">
-            {triggerError.data?.error || triggerError.message || 'Failed to start download'}
           </div>
         )}
-        {latestDownload?.status === 'failed' && (
-          <div className="traxdb-error">{latestDownload.error_message || 'Download failed'}</div>
-        )}
 
-        {/* Live progress */}
-        {isRunning && progress && listsTotal > 0 && (
-          <div className="traxdb-progress">
-            <div className="traxdb-progress-bar">
-              <div className="traxdb-progress-fill" style={{ width: `${pct}%` }} />
-            </div>
-            <div className="traxdb-progress-meta">
-              <span>Lists: {listsCompleted} / {listsTotal}</span>
-              <span>{pct}%</span>
-            </div>
-            <div className="traxdb-progress-detail">
-              {progress.files_completed != null && (
-                <span>Files: {progress.files_completed}{progress.files_total ? ` / ${progress.files_total}` : ''}</span>
-              )}
-              {progress.bytes_downloaded != null && (
-                <span>Downloaded: {formatBytes(progress.bytes_downloaded)}</span>
-              )}
-              {progress.current_list && (
-                <span>Current: {progress.current_list}</span>
-              )}
+        {/* Stage 2 (alt): Up to date */}
+        {!syncRunning && !downloadRunning && newCount === 0 && latestSync?.status === 'completed' && (
+          <div className="traxdb-flow-step">
+            <div className="traxdb-result traxdb-result--neutral">
+              You're up to date. No new lists pending download.
             </div>
           </div>
         )}
 
-        {/* Completed summary */}
-        {!isRunning && latestDownload?.status === 'completed' && Object.keys(summary).length > 0 && (
-          <>
-            <div className="traxdb-summary">
-              <div className="traxdb-stat">
-                <div className="traxdb-stat-value">{summary.lists_completed ?? 0}</div>
-                <div className="traxdb-stat-label">Lists Done</div>
+        {/* Stage 3: Downloading */}
+        {downloadRunning && (
+          <div className="traxdb-flow-step">
+            <div className="traxdb-status traxdb-status--running">
+              <span className="traxdb-spinner" /> Downloading…
+            </div>
+            <div className="traxdb-progress">
+              <div className="traxdb-progress-bar">
+                <div className="traxdb-progress-fill" style={{ width: `${pct}%` }} />
               </div>
-              <div className="traxdb-stat">
-                <div className="traxdb-stat-value">{summary.files_completed ?? 0}</div>
-                <div className="traxdb-stat-label">Files</div>
+              <div className="traxdb-progress-meta">
+                <span>
+                  {listsCompleted} / {listsTotal || '?'} lists
+                  {filesTotal > 0 && ` · ${filesCompleted} / ${filesTotal} files`}
+                </span>
+                <span>{pct}%</span>
               </div>
-              <div className="traxdb-stat">
-                <div className="traxdb-stat-value">{formatBytes(summary.bytes_downloaded)}</div>
-                <div className="traxdb-stat-label">Downloaded</div>
-              </div>
-              {(summary.dead_links_count ?? 0) > 0 && (
-                <div className="traxdb-stat">
-                  <div className="traxdb-stat-value">{summary.dead_links_count}</div>
-                  <div className="traxdb-stat-label">Dead Links</div>
+              {(bytesDownloaded > 0 || progress.current_list) && (
+                <div className="traxdb-progress-detail">
+                  {bytesTotal > 0 && (
+                    <span>{formatBytes(bytesDownloaded)} / {formatBytes(bytesTotal)}</span>
+                  )}
+                  {progress.current_list && (
+                    <span> · current: <span className="mono">{progress.current_list}</span></span>
+                  )}
                 </div>
               )}
             </div>
-
-            <DownloadListsDetail lists={lists} deadLinks={deadLinks} errors={errors} />
-            <ErrorsDetail errors={errors} />
-          </>
-        )}
-
-        {!isRunning && !latestDownload && (
-          <p className="traxdb-empty">
-            {hasSyncCompleted && newCount > 0
-              ? `${newCount} new list${newCount !== 1 ? 's' : ''} ready to download from Pixeldrain.`
-              : 'Run a sync first to find new content.'}
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function AuditSection({ latestAudit, latestSync, isRunning, onTrigger, isPending, triggerError }) {
-  const summary = latestAudit?.summary || {}
-  const hasSyncCompleted = latestSync?.status === 'completed'
-
-  const lists = Array.isArray(summary.lists) ? summary.lists : []
-  const deadLinks = Array.isArray(summary.dead_links) ? summary.dead_links : []
-  const errors = Array.isArray(summary.errors) ? summary.errors : []
-
-  // Count how many lists in the audit have missing files
-  const auditListCount = lists.length
-  const syncFoundCount = countField(latestSync?.summary || {}, 'links_found', 'links_found_count')
-
-  return (
-    <div className="traxdb-section">
-      <div className="traxdb-section-header">
-        <h3><span className="step-badge">3</span> Audit</h3>
-        <div className="traxdb-actions">
-          {isRunning && (
-            <span className="traxdb-status traxdb-status--running">
-              <span className="traxdb-spinner" /> Auditing files...
-            </span>
-          )}
-          {!isRunning && latestAudit?.status === 'completed' && (
-            <span className="traxdb-status traxdb-status--completed">
-              {timeAgo(latestAudit.updated)}
-            </span>
-          )}
-          <button
-            className="btn btn-accent btn-sm"
-            onClick={() => onTrigger()}
-            disabled={isRunning || !hasSyncCompleted || isPending}
-            title={!hasSyncCompleted ? 'Run a sync first' : ''}
-          >
-            {isRunning ? 'Auditing...' : 'Run Audit'}
-          </button>
-        </div>
-      </div>
-      <div className="traxdb-section-body">
-        <p className="traxdb-section-desc">
-          Verifies local files against Pixeldrain for the {syncFoundCount || '?'} lists
-          found in the latest sync. Missing files = not yet downloaded or deleted.
-          Run this after downloading to check integrity.
-        </p>
-
-        {triggerError && (
-          <div className="traxdb-error">
-            {triggerError.data?.error || triggerError.message || 'Failed to start audit'}
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() => onCancel(latestDownload.id)}
+              disabled={downloadPending}
+            >
+              Cancel
+            </button>
           </div>
         )}
-        {latestAudit?.status === 'failed' && (
-          <div className="traxdb-error">{latestAudit.error_message || 'Audit failed'}</div>
-        )}
-        {!isRunning && latestAudit?.status === 'completed' && Object.keys(summary).length > 0 && (
-          <div className="traxdb-summary">
-            <div className="traxdb-stat">
-              <div className="traxdb-stat-value">{summary.files_ok ?? 0}</div>
-              <div className="traxdb-stat-label">OK</div>
-            </div>
-            <div className="traxdb-stat">
-              <div className="traxdb-stat-value">{summary.files_missing ?? 0}</div>
-              <div className="traxdb-stat-label">Missing</div>
-            </div>
-            {(summary.files_size_mismatch ?? 0) > 0 && (
-              <div className="traxdb-stat">
-                <div className="traxdb-stat-value">{summary.files_size_mismatch}</div>
-                <div className="traxdb-stat-label">Size Mismatch</div>
-              </div>
-            )}
-            <div className="traxdb-stat">
-              <div className="traxdb-stat-value">{summary.files_total ?? '?'}</div>
-              <div className="traxdb-stat-label">Total Checked</div>
+
+        {/* Stage 4: Just-finished download summary (only fresh ones) */}
+        {!downloadRunning && dlCompleted && downloadIsAfterSync && newCount === 0 && (
+          <div className="traxdb-flow-step">
+            <div className="traxdb-result traxdb-result--good">
+              Downloaded <strong>{dlSummary.lists_completed ?? 0}</strong> list
+              {(dlSummary.lists_completed ?? 0) === 1 ? '' : 's'},{' '}
+              <strong>{dlSummary.files_completed ?? 0}</strong> file
+              {(dlSummary.files_completed ?? 0) === 1 ? '' : 's'}{' '}
+              ({formatBytes(dlSummary.bytes_downloaded)})
+              {(dlSummary.dead_links_count ?? 0) > 0 && (
+                <span className="muted"> · {dlSummary.dead_links_count} dead link{dlSummary.dead_links_count === 1 ? '' : 's'} skipped</span>
+              )}
             </div>
           </div>
         )}
-        {/* Show detail sections for both completed and failed (if data exists) */}
-        {!isRunning && (latestAudit?.status === 'completed' || latestAudit?.status === 'failed') && (
-          <>
-            <AuditListsDetail lists={lists} deadLinks={deadLinks} errors={errors} />
-            <ErrorsDetail errors={errors} />
-          </>
-        )}
-        {!isRunning && !latestAudit?.status && (
-          <p className="traxdb-empty">Run an audit after downloading to verify file integrity.</p>
+
+        {!downloadRunning && latestDownload?.status === 'failed' && (
+          <div className="traxdb-error">{latestDownload.error_message || 'Download failed'}</div>
         )}
       </div>
     </div>
   )
 }
 
-function OperationsHistory({ operations }) {
-  const [expanded, setExpanded] = useState(false)
+/* ── advanced (audit + archive) collapsed by default ── */
 
-  if (!operations || operations.length === 0) return null
-
-  return (
-    <div className="traxdb-history">
-      <div className="traxdb-history-header" onClick={() => setExpanded(e => !e)}>
-        <h3>Operations History ({operations.length})</h3>
-        <span className={`traxdb-history-toggle ${expanded ? 'traxdb-history-toggle--open' : ''}`}>
-          &#9654;
-        </span>
-      </div>
-      {expanded && (
-        <table className="traxdb-history-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Status</th>
-              <th>When</th>
-              <th>Summary</th>
-            </tr>
-          </thead>
-          <tbody>
-            {operations.map(op => (
-              <tr key={op.id}>
-                <td>
-                  <span className={`op-type-badge op-type-badge--${op.op_type}`}>
-                    {op.op_type}
-                  </span>
-                </td>
-                <td>
-                  <span className={`status-badge status-badge--${op.status}`}>
-                    {op.status === 'running' && <span className="traxdb-spinner" />}
-                    {op.status}
-                  </span>
-                </td>
-                <td>{timeAgo(op.created)}</td>
-                <td className="traxdb-history-summary">
-                  {op.status === 'failed'
-                    ? (op.error_message || 'Failed').slice(0, 60)
-                    : summarySentence(op)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
-}
-
-/* ── Scraped Folders ── */
-
-function FoldersSection() {
-  const [statusFilter, setStatusFilter] = useState('')
-  const [search, setSearch] = useState('')
-  const { data: foldersData } = useTraxDBFolders({
-    download_status: statusFilter || undefined,
-    search: search || undefined,
-    limit: 50,
-  })
-
+function Advanced({ latestAudit, auditRunning, onAudit, auditPending, opsCount }) {
+  const [open, setOpen] = useState(false)
+  const [showFolders, setShowFolders] = useState(false)
+  const { data: foldersData } = useTraxDBFolders({ limit: 100 })
   const folders = foldersData?.results || []
   const total = foldersData?.total || 0
+  const summary = latestAudit?.summary || {}
 
   return (
-    <div className="traxdb-section">
-      <div className="traxdb-section-header">
-        <h3>Scraped Archive ({total})</h3>
-        <div className="traxdb-actions">
-          <select
-            className="traxdb-filter-select"
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-          >
-            <option value="">All</option>
-            <option value="pending">Pending</option>
-            <option value="downloaded">Downloaded</option>
-            <option value="failed">Failed</option>
-          </select>
-          <input
-            className="traxdb-search-input"
-            type="text"
-            placeholder="Search folders..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+    <div className="traxdb-section traxdb-section--advanced">
+      <div
+        className="traxdb-section-header traxdb-section-header--clickable"
+        onClick={() => setOpen(o => !o)}
+      >
+        <h3>
+          <span className={`traxdb-history-toggle ${open ? 'traxdb-history-toggle--open' : ''}`}>
+            &#9654;
+          </span>
+          {' '}Advanced
+        </h3>
+      </div>
+      {open && (
+        <div className="traxdb-section-body">
+          {/* Audit */}
+          <div className="traxdb-flow-step">
+            <div className="traxdb-row-between">
+              <div>
+                <strong>Verify integrity</strong>
+                <p className="muted small">
+                  Check local files match Pixeldrain. Run after download to confirm everything saved.
+                  {summary.files_total != null && (
+                    <> Last run: {summary.files_ok ?? 0} ok, {summary.files_missing ?? 0} missing.</>
+                  )}
+                </p>
+              </div>
+              <button
+                className="btn btn-sm"
+                onClick={onAudit}
+                disabled={auditRunning || auditPending}
+              >
+                {auditRunning ? 'Auditing…' : 'Run Audit'}
+              </button>
+            </div>
+            {latestAudit?.status === 'failed' && (
+              <div className="traxdb-error">{latestAudit.error_message}</div>
+            )}
+          </div>
+
+          {/* Folder browser */}
+          <div className="traxdb-flow-step">
+            <div className="traxdb-row-between">
+              <div>
+                <strong>Scraped Archive</strong>
+                <p className="muted small">{total} lists in DB.</p>
+              </div>
+              <button className="btn btn-sm" onClick={() => setShowFolders(s => !s)}>
+                {showFolders ? 'Hide' : 'Browse'}
+              </button>
+            </div>
+            {showFolders && (
+              <table className="traxdb-link-table">
+                <thead>
+                  <tr>
+                    <th>List</th>
+                    <th>Date</th>
+                    <th>Tracks</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {folders.map(f => (
+                    <tr key={f.id}>
+                      <td className="mono">{f.folder_id}</td>
+                      <td>{f.inferred_date || '—'}</td>
+                      <td className="mono">{f.tracks_downloaded}/{f.tracks_count}</td>
+                      <td>
+                        <span className={`status-badge status-badge--${f.download_status}`}>
+                          {f.download_status}
+                        </span>
+                      </td>
+                      <td>
+                        {f.pixeldrain_url && (
+                          <a href={f.pixeldrain_url} target="_blank" rel="noopener noreferrer" className="traxdb-link">
+                            ↗
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <p className="muted small">{opsCount} operations recorded.</p>
         </div>
-      </div>
-      <div className="traxdb-section-body">
-        {folders.length === 0 ? (
-          <p className="traxdb-empty">
-            {total === 0 ? 'No scraped folders yet. Run a sync to discover content.' : 'No folders match your filters.'}
-          </p>
-        ) : (
-          <table className="traxdb-link-table">
-            <thead>
-              <tr>
-                <th>List ID</th>
-                <th>Date</th>
-                <th>Tracks</th>
-                <th>Status</th>
-                <th>Link</th>
-              </tr>
-            </thead>
-            <tbody>
-              {folders.map(f => (
-                <tr key={f.id}>
-                  <td className="mono">{f.folder_id}</td>
-                  <td>{f.inferred_date || '\u2014'}</td>
-                  <td className="mono">
-                    {f.tracks_downloaded}/{f.tracks_count}
-                  </td>
-                  <td>
-                    <span className={`status-badge status-badge--${f.download_status}`}>
-                      {f.download_status}
-                    </span>
-                  </td>
-                  <td>
-                    {f.pixeldrain_url ? (
-                      <a
-                        href={f.pixeldrain_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="traxdb-link"
-                      >
-                        pixeldrain &#8599;
-                      </a>
-                    ) : '\u2014'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      )}
     </div>
   )
 }
@@ -791,11 +354,19 @@ function TraxDBPanel() {
   const cancelDownload = useCancelTraxDBDownload()
 
   const ops = opsData?.results || []
+  const latestSyncStub = useMemo(() => ops.find(o => o.op_type === 'sync'), [ops])
+  const latestDownloadStub = useMemo(() => ops.find(o => o.op_type === 'download'), [ops])
+  const latestAuditStub = useMemo(() => ops.find(o => o.op_type === 'audit'), [ops])
 
-  // Derive latest ops per type
-  const latestSync = useMemo(() => ops.find(o => o.op_type === 'sync'), [ops])
-  const latestDownload = useMemo(() => ops.find(o => o.op_type === 'download'), [ops])
-  const latestAudit = useMemo(() => ops.find(o => o.op_type === 'audit'), [ops])
+  // Fetch full detail (with summary JSON) for the latest of each kind. The
+  // operations LIST endpoint omits `summary` to keep the payload small.
+  const { data: latestSyncDetail } = useTraxDBOperation(latestSyncStub?.id)
+  const { data: latestDownloadDetail } = useTraxDBOperation(latestDownloadStub?.id)
+  const { data: latestAuditDetail } = useTraxDBOperation(latestAuditStub?.id)
+
+  const latestSync = latestSyncDetail || latestSyncStub
+  const latestDownload = latestDownloadDetail || latestDownloadStub
+  const latestAudit = latestAuditDetail || latestAuditStub
 
   const syncRunning = latestSync?.status === 'running' || latestSync?.status === 'pending'
   const downloadRunning = latestDownload?.status === 'running' || latestDownload?.status === 'pending'
@@ -807,41 +378,32 @@ function TraxDBPanel() {
         <h1 className="page-title">TraxDB</h1>
       </div>
 
-      <InventoryOverview inventory={inventory} />
+      <LibraryOverview
+        inventory={inventory}
+        latestSync={latestSync}
+        latestDownload={latestDownload}
+      />
 
-      <div className="traxdb-workflow">
-        <SyncSection
-          latestSync={latestSync}
-          isRunning={syncRunning}
-          onTrigger={() => triggerSync.mutate()}
-          isPending={triggerSync.isPending}
-          triggerError={triggerSync.error}
-          inventory={inventory}
-        />
+      <CheckAndDownload
+        latestSync={latestSync}
+        syncRunning={syncRunning}
+        onCheck={() => triggerSync.mutate({})}
+        syncPending={triggerSync.isPending}
+        latestDownload={latestDownload}
+        downloadRunning={downloadRunning}
+        onDownload={() => triggerDownload.mutate({})}
+        onCancel={(id) => cancelDownload.mutate(id)}
+        downloadPending={triggerDownload.isPending}
+        inventory={inventory}
+      />
 
-        <DownloadSection
-          latestDownload={latestDownload}
-          latestSync={latestSync}
-          isRunning={downloadRunning}
-          onTrigger={() => triggerDownload.mutate()}
-          onCancel={(id) => cancelDownload.mutate(id)}
-          isPending={triggerDownload.isPending}
-          triggerError={triggerDownload.error}
-        />
-
-        <AuditSection
-          latestAudit={latestAudit}
-          latestSync={latestSync}
-          isRunning={auditRunning}
-          onTrigger={() => triggerAudit.mutate()}
-          isPending={triggerAudit.isPending}
-          triggerError={triggerAudit.error}
-        />
-      </div>
-
-      <FoldersSection />
-
-      <OperationsHistory operations={ops} />
+      <Advanced
+        latestAudit={latestAudit}
+        auditRunning={auditRunning}
+        onAudit={() => triggerAudit.mutate({})}
+        auditPending={triggerAudit.isPending}
+        opsCount={ops.length}
+      />
     </div>
   )
 }

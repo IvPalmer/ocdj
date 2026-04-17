@@ -12,6 +12,27 @@ logger = logging.getLogger(__name__)
 _processing_all = False
 _processing_all_lock = threading.Lock()
 
+# Cap for disk-walk fallback to avoid multi-minute blocks on big/network mounts
+_MAX_WALK_ENTRIES = 20000
+
+
+def try_claim_processing_all():
+    """Atomic check-and-set for the pipeline-wide processing guard.
+    Returns True if the caller claimed the slot; False if a run is already in flight.
+    """
+    global _processing_all
+    with _processing_all_lock:
+        if _processing_all:
+            return False
+        _processing_all = True
+        return True
+
+
+def release_processing_all():
+    global _processing_all
+    with _processing_all_lock:
+        _processing_all = False
+
 STAGE_FOLDERS = {
     'downloaded': '01_downloaded',
     'tagged': '02_tagged',
@@ -32,14 +53,26 @@ def ensure_pipeline_folders():
 
 
 def _find_file_on_disk(root, basename):
-    """Walk the download root looking for a file by basename."""
+    """Walk the download root looking for a file by basename.
+
+    Bails out after _MAX_WALK_ENTRIES inodes so we don't hang the request thread
+    for minutes on huge / network-mounted trees.
+    """
+    scanned = 0
     for dirpath, dirnames, filenames in os.walk(root):
         # Skip our pipeline stage folders
         rel = os.path.relpath(dirpath, root)
         if rel.split(os.sep)[0] in STAGE_FOLDERS.values():
+            dirnames[:] = []
             continue
+        scanned += len(filenames) + len(dirnames)
         if basename in filenames:
             return os.path.join(dirpath, basename)
+        if scanned > _MAX_WALK_ENTRIES:
+            logger.warning(
+                f'_find_file_on_disk aborted after {scanned} entries looking for {basename!r}'
+            )
+            return None
     return None
 
 
@@ -260,14 +293,17 @@ def process_pipeline_item(item_id):
         db.connections.close_all()
 
 
-def process_all_pending():
-    """Process all items in 'downloaded' stage sequentially."""
-    global _processing_all
-    with _processing_all_lock:
-        if _processing_all:
+def process_all_pending(already_claimed=False):
+    """Process all items in 'downloaded' stage sequentially.
+
+    Callers should normally claim the guard via try_claim_processing_all()
+    BEFORE spawning a thread so the HTTP view can return 409 on contention
+    without racing. Pass already_claimed=True to skip a re-claim here.
+    """
+    if not already_claimed:
+        if not try_claim_processing_all():
             logger.info('process_all_pending: already running, skipping')
             return False
-        _processing_all = True
 
     try:
         from organize.models import PipelineItem
@@ -275,8 +311,7 @@ def process_all_pending():
         for item in items:
             process_pipeline_item(item.id)
     finally:
-        with _processing_all_lock:
-            _processing_all = False
+        release_processing_all()
         db.connections.close_all()
     return True
 
