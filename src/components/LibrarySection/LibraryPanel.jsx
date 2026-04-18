@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  useLibraryTracks, useLibraryStats, useScanLibrary, useUpdateLibraryTrack,
+  useLibraryTracks, useLibraryStats, useScanLibrary, useUpdateLibraryTrack, usePromoteTrack,
 } from '../../api/hooks'
 import './LibraryPanel.css'
 
@@ -104,6 +104,41 @@ function EditModal({ track, onClose }) {
     </div>
   )
 }
+
+function PromoteButton({ track }) {
+  const promote = usePromoteTrack()
+  const [msg, setMsg] = useState('')
+  const handle = async () => {
+    try {
+      const res = await promote.mutateAsync(track.id)
+      if (res.skipped?.some(s => s.includes('already_exists'))) {
+        setMsg('Already in review')
+      } else if (res.review_path) {
+        setMsg('Sent to review')
+      } else {
+        setMsg('Done')
+      }
+      setTimeout(() => setMsg(''), 3000)
+    } catch (e) {
+      setMsg('Failed')
+      setTimeout(() => setMsg(''), 3000)
+    }
+  }
+  return (
+    <>
+      <button
+        className="btn btn-xs"
+        onClick={handle}
+        disabled={promote.isPending}
+        title="Copy file into the review staging folder"
+      >
+        {promote.isPending ? '...' : 'Send to Review'}
+      </button>
+      {msg && <span className="promote-msg">{msg}</span>}
+    </>
+  )
+}
+
 
 function LibraryPanel() {
   const [search, setSearch] = useState('')
@@ -215,6 +250,7 @@ function LibraryPanel() {
                     >
                       Edit
                     </button>
+                    <PromoteButton track={track} />
                   </span>
                 </div>
                 {expandedId === track.id && (

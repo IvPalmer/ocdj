@@ -228,3 +228,10 @@
   z-index: 100;
   box-shadow: var(--shadow-md);
 }
+
+.promote-msg {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+  animation: fade-out 3s forwards;
+}

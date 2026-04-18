@@ -99,6 +99,25 @@ def track_update(request, pk):
 
 
 @api_view(['POST'])
+def promote_track(request, pk):
+    """Copy the file into ELECTRONIC_LIBRARY_ROOT + ITUNES_AUTO_ADD_FOLDER.
+
+    Idempotent: skips destinations where the file already exists.
+    """
+    try:
+        track = LibraryTrack.objects.get(pk=pk)
+    except LibraryTrack.DoesNotExist:
+        return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    from .services_promote import promote_track as do_promote
+    result = do_promote(track)
+
+    if not result.ok:
+        return Response(result.as_dict(), status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(result.as_dict())
+
+
+@api_view(['POST'])
 def scan_library(request):
     """Trigger a library scan in background."""
     from .services import scan_library as do_scan
