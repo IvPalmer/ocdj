@@ -190,6 +190,137 @@ ocdj/
 
 ---
 
+## Phase H — Delivered (2026-04-17)
+
+Shipped this session (H1, H2, H4, H3, H6, H7 quick-wins, H10 + follow-ups).
+H5, H8, H9 and the rest of H7 still planned — see sections below.
+
+### New endpoints
+- `GET  /api/core/config/schema/` — full schema by category (drives Settings UI)
+- `POST /api/core/audit-music-root/` — HTTP wrapper around the mgmt command
+- `POST /api/soulseek/connect/` — trigger slskd login to the Soulseek P2P network
+- `POST /api/soulseek/disconnect/` — drop the P2P session
+- `POST /api/organize/pipeline/rerename/` — re-apply rename template to a stage
+- `POST /api/organize/pipeline/retag-clean/` — rewrite ID3/FLAC tags using clean rules; self-heals stale paths via `MUSIC_ROOT` walk
+- `POST /api/organize/retag-directory/` — walk a directory, retag every audio file (standalone, no DB)
+- `POST /api/library/tracks/<pk>/promote/` — copy a ready track into `REVIEW_FOLDER`
+- `PATCH /api/recognize/jobs/<pk>/tracks/<idx>/` — manual track override (`manual=true, verified=true`)
+
+### New things
+- **`core.services.config`** — 48-key schema registry with `get_config/set_config/source_of/mask_value`
+- **`backend/core/management/commands/audit_music_root.py`** — ID3 folder cleanup (dry-run default, `--apply`, `--reclassify`)
+- **Huey worker container** — `worker` service in compose + `huey_volume` + `HUEY` settings block
+- **`backend/recognize/tasks.py`, `backend/traxdb/tasks.py`** — `@db_task` wrappers for long jobs
+- **`ocdj-sidecar/`** — host-side FastAPI service using `claude-agent-sdk` for the in-app Agent. Max subscription auth via local `claude` CLI — no API key.
+- **Agent panel** — `src/components/AgentSection/` chat UI + SSE, 14 tools wired to OCDJ endpoints
+- **`REVIEW_FOLDER` config** — promote button copies `05_ready/...` → review staging folder for manual drag into iTunes
+- **Orphan scan** — `scan_completed_downloads()` now walks `01_downloaded/` for files without a Download record (Telegram rips, manually-added files) and creates PipelineItems with `download=None`
+
+### Behavior changes
+- `run_recognize(job_id)` now enqueues on Huey instead of spawning a raw thread
+- Trigger endpoints in `traxdb/views.py` enqueue on Huey (sync/download/audit)
+- `write_tags()` always cleans artist/title via the renamer rules before writing — tags match filenames
+- `ORGANIZE_RENAME_TEMPLATE` default is now `{artist} - {title}`; artist/title are auto-cleaned of catalog brackets, URL stamps, track prefixes (`A1.`, `B2.`, `01_`, `NN ` when `NN ≤ 30`), `(Original Mix)`/`(Main Mix)`/`(Album Version)`, and artist repetition at the start of the title
+- Recognize P0s: `asyncio.run()` reuse crash fixed, gap-fill dedup, Cloudflare cookie refresh, resume validation, hybrid confidence rerank
+- Recognize P1s: overlap calc requires ≥70% of both tracks before rejecting; ACRCloud region now config-driven
+- Settings panel auto-renders from the schema (13 categories, every key editable)
+- Sidebar regrouped: Dashboard / Agent / Capture / Curate / Fetch / Process / Library
+- Organize panel shows `final_filename` (current on-disk name) with stale `original_filename` as a subtitle when different
+- Wanted "Queue" → **"Find"**, bulk "Add to Queue" → **"Find All"**, empty-state CTAs added
+- Soulseek panel now has a **Login** button when `connected && !loggedIn`
+
+### Deferred (still planned)
+- H5 Classifier v0 — embeddings + suggestions
+- H7 polish remainder — unified StatusBadge, Dashboard recent-activity, Wanted row-expand downstream history, density toggle, shared Pipeline component, Soulseek "Send to Organize" bulk, filename cleanup in Soulseek
+- H8 SourceAdapter + scheduler + new sources (SC Likes, YT Watch Later, Shazam history, Safari Tab Group)
+- H9 Tests + AutomationTask model
+
+---
+
+## Phase H — Original plan (2026-04-17, post-review)
+
+Full review at `docs/REVIEW_2026-04-17.md` informs this phase. User answers to open questions:
+- Personal use, always product-minded → everything configurable (API keys, tokens, playlists, paths)
+- TraxDB stays separate archive → future ML classifier surfaces "probably want" tracks
+- Music flow: cleaned → Electronic folder → iTunes → manual classification into iTunes playlists
+- Recognize target: trackid.net-level accuracy
+- Classifier: suggest top-3 + accept, never unattended
+- Jobs MUST survive container restart → worker container required
+
+### H1 — Config consolidation (foundation)
+- `core.services.config.get_config(key, default, cast)` resolver: DB → env → settings → registry default
+- `ConfigKey` registry model: `key, category, type, description, default, is_secret`
+- Migrate all hardcoded/env-only: paths (Electronic folder, pipeline root, TraxDB root, 05_ready), API keys, OAuth tokens, ACRCloud region, recognize thresholds, automation confidence, scheduler intervals
+- Settings panel auto-renders from registry (tabs by category)
+
+### H2 — ID3 folder cleanup
+- Config-driven paths (uses H1) for pipeline root + traxdb root + electronic-library root
+- `manage.py audit_music_root` (dry-run) + `--apply` (executes)
+- Archive legacy folders to `/Users/palmer/Music/Musicas/Electronic/_archive_2026-04-17/`: `wavs/`, `to fix/`, `rafa/`, `drive-download-…/`, `soulseek_sync/`, `logs/`, `conversion/`, `complete/`, `flacs/`, `sets/`, `downloading/`, `04_ready/` (ghost)
+- Sweep 44 orphan root `.flac`s into `01_downloaded/_to_triage/` for reprocessing
+- Delete `.venv/`, `.DS_Store`
+
+### H4 — Worker container (jobs survive restart)
+- Add **Huey** + SQLite persistence
+- Worker container in docker-compose
+- Migrate recognize, traxdb downloader, soulseek search, organize batch, wanted sync to Huey tasks
+- Remove 13+ raw `threading.Thread` spawn sites
+
+### H3 — Recognize → trackid.net parity
+- P0: asyncio.run() reuse (`recognition.py:122`), gap-fill dedup (`pipeline.py:239`), cf_clearance refresh, resume validation, worker crash recovery
+- P1: overlap calc (`tt_duration * 0.5` wrong for DJ overlaps), 30s conflict window rejects mashups, ACRCloud region via config
+- Manual override: `PATCH /recognize/jobs/<id>/track/<idx>/` with `verified=true` flag
+- Hybrid confidence rerank (matched-by-2-engines boost)
+- Fingerprint cache: `(audio_hash, segment_index) → result`
+- SSE live progress stream
+- Per-row "+ Wanted" + bulk "add verified"
+
+### H7 — UX polish + sidebar reorder
+- Sidebar groups: Capture (Recognize, TraxDB) / Curate (Wanted) / Fetch (Soulseek) / Process (Organize) / Library (Library, Settings)
+- Rename Wanted "Queue" → "Find" with live result count
+- Unified `StatusBadge` component
+- Empty-state CTAs in Wanted ("Import / TraxDB / Recognize mixtape")
+- Dashboard: recent activity feed replaces zero-tiles
+- Wanted row-expand shows downstream Soulseek/Organize/Library state
+- Density toggle in Library (48px → 32px rows)
+- Share Pipeline component between Dashboard and Organize
+- Filename cleanup in Soulseek (strip `…www.djsoundtop.com.flac`)
+- Move Organize "Conversion Rules" tab into Settings
+
+### H5 — Classifier v0 (suggest+accept)
+- New `classify` Django app: `Embedding`, `PlaylistClassifier`, `Classification` models
+- Essentia + Discogs-EffNet embedding extractor (Huey task)
+- iTunes XML import for training labels
+- Per-playlist `LogisticRegression(class_weight='balanced')`
+- Triage UI: new track → top-3 playlist suggestions + confidence bars
+- **TraxDB extension:** rank un-adopted TraxDB tracks by similarity to adopted library → "probably want" surface in TraxDB panel
+
+### H6 — iTunes bridge (minimal)
+- `organize.services.itunes_bridge.add_to_music(path)` via AppleScript
+- "Add to iTunes" button on ready tracks
+- NO playlist sync, NO ratings, NO play counts
+
+### H8 — SourceAdapter + scheduler + new sources
+- `TrackSource` ABC in `wanted/services/base.py`
+- Convert 5 existing services (spotify, youtube, soundcloud, discogs, bandcamp) to adapters
+- Huey periodic task `sync_wanted_sources` (replaces APScheduler need)
+- `poll_interval_hours` + `next_sync_at` on `WantedSource`
+- New adapters: SoundCloud Likes, YouTube Watch Later (OAuth), Shazam history, Safari Tab Group (Swift helper app reading `~/Library/Safari/Bookmarks.plist`)
+- Cross-source dedup: `source_ids JSONField` on WantedItem
+
+### H9 — Tests + `AutomationTask` unified state
+- pytest-django + GH Actions CI
+- 5 unit tests: automation FSM, soulseek scoring, organize pipeline stage movement, recognize clustering, cross-module state sync
+- `AutomationTask` record-of-truth: OneToOne WantedItem, FKs to SearchQueueItem/Download/PipelineItem/LibraryTrack, `state_history JSONField`
+- Wanted row-expand surfaces full downstream history without panel-hopping
+
+### Execution order
+H1 → H2 → H4 → H3 → H7 → H5 → H6 → H8 → H9
+
+Rationale: config store first (everything depends on it), disk cleanup motivates path config, worker unblocks durable Recognize P0 fixes, marquee feature next, UX polish, ML moat, iTunes bridge, sources+scheduler, tests last.
+
+---
+
 ## Dropped (not planned)
 
 - Telegram import — not needed
