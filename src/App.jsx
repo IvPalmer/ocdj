@@ -8,6 +8,7 @@ import RecognizePanel from './components/RecognizeSection/RecognizePanel'
 import OrganizePanel from './components/OrganizeSection/OrganizePanel'
 import LibraryPanel from './components/LibrarySection/LibraryPanel'
 import SettingsPanel from './components/SettingsSection/SettingsPanel'
+import AgentPanel from './components/AgentSection/AgentPanel'
 import './App.css'
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
         <Route path="/recognize" element={<RecognizePanel />} />
         <Route path="/organize" element={<OrganizePanel />} />
         <Route path="/library" element={<LibraryPanel />} />
+        <Route path="/agent" element={<AgentPanel />} />
         <Route path="/settings" element={<SettingsPanel />} />
       </Routes>
     </Layout>

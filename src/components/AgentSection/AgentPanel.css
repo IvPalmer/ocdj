@@ -1,0 +1,118 @@
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: calc(100vh - 40px);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  gap: 16px;
+}
+
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.agent-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 0 0;
+}
+.agent-subtitle code {
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-subtle, rgba(0,0,0,0.05));
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.agent-status-bad { color: #c0392b; font-weight: 500; }
+.agent-status-ok { color: #27ae60; }
+
+.agent-transcript {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--bg-subtle, rgba(0,0,0,0.02));
+  border-radius: 8px;
+  min-height: 420px;
+}
+
+.agent-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+}
+.agent-empty__title { font-weight: 600; font-size: 15px; }
+.agent-empty__sub { font-size: 13px; color: var(--text-muted); }
+.agent-empty__starters { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.agent-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-msg--user { align-items: flex-end; }
+
+.agent-msg__role {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.agent-msg__body {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  padding: 10px 14px;
+  border-radius: 10px;
+  max-width: 85%;
+  font-size: 13.5px;
+}
+.agent-msg--user .agent-msg__body {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+.agent-msg--assistant .agent-msg__body {
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, rgba(0,0,0,0.06));
+}
+
+.agent-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px;
+}
+.agent-tool-chip {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border, rgba(0,0,0,0.08));
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: var(--text-muted);
+}
+
+.agent-composer {
+  display: flex;
+  gap: 8px;
+}
+.agent-composer input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--bg-input, var(--bg));
+  color: var(--text);
+}
+.agent-composer input:disabled { opacity: 0.5; }
