@@ -206,8 +206,30 @@ def enrich_metadata(artist, title, label='', catalog_number=''):
     return None
 
 
+def _clean_metadata(metadata: dict) -> dict:
+    """Normalize artist/title in place before writing to tags.
+
+    Filename and tag display should match: both strip catalog brackets,
+    URL stamps, track prefixes, 'Original Mix' baseline, and artist
+    repetition in title. Applied here so any code path that writes tags
+    produces the same clean result.
+    """
+    from .renamer import clean_artist, clean_title, _strip_artist_prefix
+    out = dict(metadata)
+    a = clean_artist(out.get('artist') or '')
+    t = clean_title(out.get('title') or '')
+    if a:
+        t = _strip_artist_prefix(t, a)
+    if a:
+        out['artist'] = a
+    if t:
+        out['title'] = t
+    return out
+
+
 def write_tags(filepath, metadata):
     """Write tags to an audio file using mutagen. Format-aware."""
+    metadata = _clean_metadata(metadata)
     try:
         audio = mutagen.File(filepath)
         if audio is None:

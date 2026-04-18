@@ -265,21 +265,41 @@ function OrganizePanel() {
         ) : (
           <div className="pipeline-table">
             <div className="pipeline-table__header">
-              <span className="col-file">File</span>
-              <span className="col-meta">Artist / Title</span>
+              <span className="col-file">Current filename</span>
+              <span className="col-meta">Tags</span>
               <span className="col-stage">Stage</span>
               <span className="col-source">Source</span>
               <span className="col-actions">Actions</span>
             </div>
-            {items.map(item => (
+            {items.map(item => {
+              const currentName = item.final_filename
+                || (item.current_path ? item.current_path.split('/').pop() : null)
+                || item.original_filename
+              const renamed = item.final_filename && item.original_filename
+                && item.final_filename !== item.original_filename
+              return (
               <div key={item.id} className="pipeline-table__row">
-                <span className="col-file" title={item.original_filename}>
-                  {item.original_filename}
+                <span className="col-file" title={item.current_path || currentName}>
+                  <span className="col-file__name">{currentName}</span>
+                  {renamed && (
+                    <span className="col-file__original" title={`Originally: ${item.original_filename}`}>
+                      was: {item.original_filename}
+                    </span>
+                  )}
                 </span>
                 <span className="col-meta">
-                  {item.artist && item.title
-                    ? `${item.artist} - ${item.title}`
-                    : item.artist || item.title || '—'}
+                  {item.artist || item.title ? (
+                    <>
+                      <span className="col-meta__main">
+                        {[item.artist, item.title].filter(Boolean).join(' — ')}
+                      </span>
+                      {(item.album || item.label) && (
+                        <span className="col-meta__sub">
+                          {[item.album, item.label].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                    </>
+                  ) : '—'}
                 </span>
                 <span className="col-stage">
                   <StagePill stage={item.stage} />
@@ -323,7 +343,8 @@ function OrganizePanel() {
                   )}
                 </span>
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

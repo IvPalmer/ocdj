@@ -330,3 +330,38 @@
     transform: translateY(0);
   }
 }
+
+.col-file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.col-file__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+}
+.col-file__original {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.col-meta__main {
+  font-size: 13px;
+}
+.col-meta__sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}

@@ -1,5 +1,7 @@
 import threading
 
+import os
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status as http_status
@@ -180,6 +182,198 @@ def pipeline_retag(request, pk):
         return Response(PipelineItemSerializer(item).data)
     except Exception as e:
         return Response({'error': str(e)}, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def retag_directory(request):
+    """Walk a directory and re-write ID3/FLAC artist+title tags using the
+    current clean rules.
+
+    Use this for files you've already dragged out of the pipeline (e.g.
+    into your Electronic library) — the DB has lost track of them but the
+    tags still need cleaning so iTunes / Music.app displays what you want.
+
+    Body: { "path": "/music/Electronic", "dry_run": false, "recursive": false }
+    """
+    import mutagen
+    from .services.tagger import _clean_metadata, write_tags
+
+    root = request.data.get('path') or '/music/Electronic'
+    dry_run = bool(request.data.get('dry_run', False))
+    recursive = bool(request.data.get('recursive', False))
+
+    audio_exts = {'.mp3', '.flac', '.aiff', '.aif', '.wav', '.m4a', '.ogg'}
+    if not os.path.isdir(root):
+        return Response({'error': f'not a directory: {root}'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+
+    cleaned = []
+    skipped = 0
+    errors = []
+
+    walker = os.walk(root) if recursive else [(root, [], os.listdir(root))]
+    for dirpath, _dirs, filenames in walker:
+        for fn in filenames:
+            ext = os.path.splitext(fn)[1].lower()
+            if ext not in audio_exts:
+                skipped += 1
+                continue
+            full = os.path.join(dirpath, fn)
+            try:
+                audio = mutagen.File(full, easy=True)
+                if audio is None:
+                    skipped += 1
+                    continue
+                old_artist = (audio.get('artist') or [''])[0]
+                old_title = (audio.get('title') or [''])[0]
+                if not old_artist and not old_title:
+                    skipped += 1
+                    continue
+                cleaned_md = _clean_metadata({'artist': old_artist, 'title': old_title})
+                new_artist = cleaned_md.get('artist', old_artist)
+                new_title = cleaned_md.get('title', old_title)
+                if new_artist == old_artist and new_title == old_title:
+                    continue
+                entry = {
+                    'file': fn,
+                    'artist': [old_artist, new_artist],
+                    'title': [old_title, new_title],
+                }
+                cleaned.append(entry)
+                if not dry_run:
+                    # Use the low-level write (re-cleans again but that's idempotent).
+                    meta = {'artist': new_artist, 'title': new_title}
+                    write_tags(full, meta)
+            except Exception as e:
+                errors.append({'file': fn, 'error': str(e)})
+        if not recursive:
+            break
+
+    return Response({
+        'path': root,
+        'recursive': recursive,
+        'dry_run': dry_run,
+        'changed': len(cleaned),
+        'skipped': skipped,
+        'errors': errors,
+        'samples': cleaned[:20],
+    })
+
+
+def _find_file_by_basename(basename: str, search_roots: list[str],
+                           max_entries: int = 50000) -> str | None:
+    """Walk the given roots looking for a file with matching basename."""
+    seen = 0
+    for root in search_roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, filenames in os.walk(root):
+            for fn in filenames:
+                seen += 1
+                if seen > max_entries:
+                    return None
+                if fn == basename:
+                    return os.path.join(dirpath, fn)
+    return None
+
+
+@api_view(['POST'])
+def pipeline_retag_clean(request):
+    """Re-clean artist/title in tags + DB for every item in the given stage.
+
+    Uses the current renamer rules so ID3/FLAC tags match what the filenames
+    now look like (iTunes reads tags, not filenames). Does NOT re-enrich from
+    Discogs/MusicBrainz — purely a normalization pass on what's already stored.
+
+    Self-heals stale paths: if the tracked file no longer exists at
+    item.current_path (user moved it out of the pipeline), searches for the
+    same basename under MUSIC_ROOT and retags wherever it actually lives.
+    """
+    from .services.tagger import write_tags
+    from .services.renamer import clean_artist, clean_title, _strip_artist_prefix
+    from core.services.config import get_config
+
+    stage = request.data.get('stage', 'ready')
+    items = PipelineItem.objects.filter(stage=stage)
+    cleaned = 0
+    relocated = 0
+    errors = []
+
+    search_roots = [get_config('MUSIC_ROOT')]
+    for item in items:
+        try:
+            new_a = clean_artist(item.artist or '')
+            new_t = clean_title(item.title or '')
+            if new_a:
+                new_t = _strip_artist_prefix(new_t, new_a)
+            target_path = item.current_path
+            if not os.path.exists(target_path):
+                basename = item.final_filename or os.path.basename(item.current_path or '')
+                if basename:
+                    found = _find_file_by_basename(basename, search_roots)
+                    if found:
+                        target_path = found
+                        relocated += 1
+                        item.current_path = found
+                        item.save(update_fields=['current_path'])
+                    else:
+                        errors.append({'id': item.id, 'error': f'file missing and not found under {search_roots}'})
+                        continue
+                else:
+                    errors.append({'id': item.id, 'error': 'no basename to search for'})
+                    continue
+            metadata = {
+                'artist': new_a, 'title': new_t,
+                'album': item.album, 'label': item.label,
+                'catalog_number': item.catalog_number,
+                'genre': item.genre, 'year': item.year,
+                'track_number': item.track_number,
+            }
+            write_tags(target_path, metadata)
+            changed = (new_a != item.artist) or (new_t != item.title)
+            if changed:
+                item.artist = new_a
+                item.title = new_t
+                item.save(update_fields=['artist', 'title'])
+                cleaned += 1
+        except Exception as e:
+            errors.append({'id': item.id, 'error': str(e)})
+    return Response({
+        'stage': stage,
+        'total': items.count(),
+        'cleaned': cleaned,
+        'relocated': relocated,
+        'errors': errors[:30],
+    })
+
+
+@api_view(['POST'])
+def pipeline_rerename_all(request):
+    """Re-run rename on every item currently in 'ready' (or the given stage).
+
+    Useful after a rename-template change so existing filenames pick up the
+    new convention without a full reprocess.
+    """
+    from .services.renamer import rename_file
+
+    stage = request.data.get('stage', 'ready')
+    items = PipelineItem.objects.filter(stage=stage)
+    renamed = 0
+    errors = []
+    for item in items:
+        try:
+            before = item.current_path
+            rename_file(item)
+            if item.current_path != before:
+                renamed += 1
+        except Exception as e:
+            errors.append({'id': item.id, 'error': str(e)})
+    return Response({
+        'stage': stage,
+        'total': items.count(),
+        'renamed': renamed,
+        'errors': errors,
+    })
 
 
 @api_view(['POST'])
