@@ -6,16 +6,24 @@ try:
 except ImportError:
     fuzz = None
 
+from core.services.config import get_config
+
 logger = logging.getLogger(__name__)
 
-# Clustering configuration
-PROXIMITY_WINDOW_SEC = 120  # Max gap between segments of the same track to merge them
-CONFLICT_WINDOW_SEC = 30    # If multiple different tracks hit within this window, keep only the best
+# Clustering tunables live in core.Config (see core/services/config.py).
+# Helpers read fresh values on each call so changes via Settings UI take
+# effect on the next cluster pass without a restart.
 
-# Multi-segment ACRCloud low-score acceptance — tested March 2026:
-# MADVILLA - Down 4 Me hit 31 times at score 25-34 across all segment durations.
-# A single hit at score 25 is noise, but 3+ hits of the same track is real signal.
-ACR_LOW_SCORE_MIN_SEGMENTS = 3  # Accept score 25+ if this many segments match
+def _proximity_window():
+    return get_config('RECOGNIZE_PROXIMITY_WINDOW')
+
+
+def _conflict_window():
+    return get_config('RECOGNIZE_CONFLICT_WINDOW')
+
+
+def _acr_low_score_min_segments():
+    return get_config('RECOGNIZE_ACR_LOW_SCORE_MIN_SEGMENTS')
 
 
 def _normalize_key(artist, title):
@@ -196,16 +204,17 @@ def cluster_results(raw_results, description_tracks=None):
     # Build raw tracklist — merge nearby hits for the same track
     desc_set = _build_description_set(description_tracks)
     raw_tracklist = []
+    proximity_window = _proximity_window()
 
     for key, hits in track_hits.items():
         hits.sort(key=lambda r: r['start_sec'])
         track = track_info[key]
 
-        # Split into proximity groups (hits within PROXIMITY_WINDOW_SEC of each other)
+        # Split into proximity groups (hits within the configured proximity window)
         groups = []
         current = [hits[0]]
         for h in hits[1:]:
-            if h['start_sec'] - current[-1]['start_sec'] <= PROXIMITY_WINDOW_SEC:
+            if h['start_sec'] - current[-1]['start_sec'] <= proximity_window:
                 current.append(h)
             else:
                 groups.append(current)
@@ -318,12 +327,14 @@ def _resolve_conflicts(tracklist):
 
     # Pre-filter: drop single-hit ACRCloud noise (score < 40 and only 1 segment)
     # Multi-segment low-score hits are kept — they represent real signal
+    acr_min_segments = _acr_low_score_min_segments()
+    conflict_window = _conflict_window()
     pre_filtered = []
     acr_noise_dropped = 0
     for t in tracklist:
         is_acr_only = t.get('engines') == ['acrcloud']
         is_low_score = t.get('confidence_score', 0) < 0.40
-        is_single_hit = t.get('segment_count', 0) < ACR_LOW_SCORE_MIN_SEGMENTS
+        is_single_hit = t.get('segment_count', 0) < acr_min_segments
 
         if is_acr_only and is_low_score and is_single_hit:
             acr_noise_dropped += 1
@@ -350,7 +361,7 @@ def _resolve_conflicts(tracklist):
         # Collect all single-hit tracks in this time window
         conflict_group = [t]
         j = i + 1
-        while j < len(tracklist) and tracklist[j]['timestamp_start'] - t['timestamp_start'] <= CONFLICT_WINDOW_SEC:
+        while j < len(tracklist) and tracklist[j]['timestamp_start'] - t['timestamp_start'] <= conflict_window:
             if tracklist[j]['segment_count'] <= 1:
                 conflict_group.append(tracklist[j])
             j += 1

@@ -5,8 +5,9 @@ import mutagen
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
-from django.conf import settings
 from django.db.models import Count, Sum
+
+from core.services.config import get_config
 
 from .models import LibraryTrack
 
@@ -27,8 +28,7 @@ EXT_TO_FORMAT = {
 
 def _get_ready_dir():
     """Get the ready directory where finished files live."""
-    root = getattr(settings, 'SOULSEEK_DOWNLOAD_ROOT', '/music/soulseek')
-    return os.path.join(root, '05_ready')
+    return os.path.join(get_config('SOULSEEK_DOWNLOAD_ROOT'), '05_ready')
 
 
 def _read_audio_metadata(filepath):

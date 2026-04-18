@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Set
 
 import requests
 from bs4 import BeautifulSoup
+
+from core.services.config import get_config
 from django import db
 
 from .pixeldrain import PixeldrainClient, PixeldrainFile, is_pixeldrain_not_found
@@ -164,7 +166,7 @@ def scrape_blog_links(
         if 'accounts.google.com' in final_host or 'blogger.com/blogin' in r.url:
             raise RuntimeError(
                 f"Blog requires login — cookies stale or missing. "
-                f"Refresh {os.environ.get('TRAXDB_COOKIES', 'TRAXDB_COOKIES')} "
+                f"Refresh {get_config('TRAXDB_COOKIES') or 'TRAXDB_COOKIES'} "
                 f"by re-exporting from a logged-in browser. "
                 f"Final URL: {r.url[:200]}"
             )
@@ -333,10 +335,10 @@ def run_sync(operation_id: int, max_pages: int = 50):
         op.status = 'running'
         op.save()
 
-        traxdb_root = os.environ.get('TRAXDB_ROOT', '/music/Electronic/ID3/traxdb')
-        start_url = os.environ.get('TRAXDB_START_URL', '')
-        pixeldrain_key = os.environ.get('PIXELDRAIN_API_KEY', '')
-        cookies_path = os.environ.get('TRAXDB_COOKIES', '')
+        traxdb_root = get_config('TRAXDB_ROOT')
+        start_url = get_config('TRAXDB_START_URL')
+        pixeldrain_key = get_config('PIXELDRAIN_API_KEY')
+        cookies_path = get_config('TRAXDB_COOKIES')
 
         if not start_url:
             op.status = 'failed'

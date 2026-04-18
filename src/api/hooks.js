@@ -295,6 +295,14 @@ export function useConfig() {
   })
 }
 
+export function useConfigSchema() {
+  return useQuery({
+    queryKey: ['config-schema'],
+    queryFn: () => api.get('/core/config/schema/'),
+    staleTime: 60 * 60 * 1000,  // schema is code-defined; cache aggressively
+  })
+}
+
 export function useUpdateConfig() {
   const qc = useQueryClient()
   return useMutation({
@@ -797,5 +805,11 @@ export function useUpdateLibraryTrack() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['library-tracks'] })
     },
+  })
+}
+
+export function usePromoteTrack() {
+  return useMutation({
+    mutationFn: (id) => api.post(`/library/tracks/${id}/promote/`),
   })
 }

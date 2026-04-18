@@ -3,8 +3,9 @@ import shutil
 import logging
 import threading
 
-from django.conf import settings
 from django import db
+
+from core.services.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ STAGE_FOLDERS = {
 
 
 def get_pipeline_root():
-    return getattr(settings, 'SOULSEEK_DOWNLOAD_ROOT', '/music/soulseek')
+    return get_config('SOULSEEK_DOWNLOAD_ROOT')
 
 
 def ensure_pipeline_folders():
@@ -171,28 +172,95 @@ def discover_and_ingest(download_id):
     return item
 
 
+AUDIO_EXTS = {'.mp3', '.flac', '.aiff', '.aif', '.wav', '.m4a', '.ogg'}
+
+
 def scan_completed_downloads():
-    """Scan all completed Downloads and create PipelineItems for untracked ones."""
+    """Scan for untracked files + create PipelineItems for them.
+
+    Two passes:
+      1. Download rows with status=completed that don't yet have a PipelineItem —
+         re-uses the slskd-aware discover_and_ingest path.
+      2. Filesystem sweep of 01_downloaded/ (and subdirs, including `_to_triage/`)
+         for audio files that don't correspond to any PipelineItem.current_path.
+         Creates a download-less PipelineItem so the file enters the pipeline.
+
+    Pass 2 is what handles files that skipped Soulseek entirely — e.g.
+    Telegram rips, friend shares, files rescued by audit_music_root.
+    """
     from organize.models import PipelineItem
     from soulseek.models import Download
 
     ensure_pipeline_folders()
+
+    # Pass 1 — Soulseek downloads
     completed = Download.objects.filter(status='completed')
-    already_tracked = set(
+    already_tracked_dl = set(
         PipelineItem.objects.values_list('download_id', flat=True)
     )
-
-    created = 0
+    created_from_downloads = 0
     for dl in completed:
-        if dl.id in already_tracked:
+        if dl.id in already_tracked_dl:
             continue
         try:
             item = discover_and_ingest(dl.id)
             if item:
-                created += 1
+                created_from_downloads += 1
         except Exception as e:
             logger.error(f"Error ingesting download {dl.id}: {e}")
 
+    # Pass 2 — orphan audio files in 01_downloaded/
+    created_from_filesystem = _scan_filesystem_orphans()
+
+    return created_from_downloads + created_from_filesystem
+
+
+def _scan_filesystem_orphans():
+    """Create PipelineItems for audio files in 01_downloaded/ that aren't tracked.
+
+    Walks the stage folder recursively (handles `_to_triage/` and any
+    slskd-style release subfolders). Each untracked audio file becomes a
+    PipelineItem with download=None. The pipeline's tag/rename/convert
+    stages don't depend on the Download FK, so they'll run normally.
+    """
+    from organize.models import PipelineItem
+
+    stage_root = os.path.join(get_pipeline_root(), STAGE_FOLDERS['downloaded'])
+    if not os.path.isdir(stage_root):
+        return 0
+
+    tracked_paths = set(
+        PipelineItem.objects.values_list('current_path', flat=True)
+    )
+
+    created = 0
+    seen = 0
+    for dirpath, _dirs, filenames in os.walk(stage_root):
+        for fn in filenames:
+            seen += 1
+            if seen > _MAX_WALK_ENTRIES:
+                logger.warning('_scan_filesystem_orphans: walk cap hit, stopping')
+                return created
+            ext = os.path.splitext(fn)[1].lower()
+            if ext not in AUDIO_EXTS:
+                continue
+            full = os.path.join(dirpath, fn)
+            if full in tracked_paths:
+                continue
+            try:
+                PipelineItem.objects.create(
+                    download=None,
+                    wanted_item=None,
+                    original_filename=fn,
+                    current_path=full,
+                    stage='downloaded',
+                )
+                created += 1
+            except Exception as e:
+                logger.error(f'Failed to create PipelineItem for {full}: {e}')
+
+    if created:
+        logger.info(f'Ingested {created} orphan audio file(s) from {stage_root}')
     return created
 
 

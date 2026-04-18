@@ -20,6 +20,9 @@ from .serializers import (
     ScrapedTrackSerializer,
 )
 from .services import run_sync, run_download, run_audit
+from .tasks import task_sync, task_download, task_audit
+
+from core.services.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ logger = logging.getLogger(__name__)
 @api_view(['GET'])
 def inventory(request):
     """Return local TraxDB inventory stats (date dirs, file counts, known lists)."""
-    traxdb_root = os.environ.get('TRAXDB_ROOT', '/music/Electronic/ID3/traxdb')
+    traxdb_root = get_config('TRAXDB_ROOT')
 
     date_dirs = []
     file_count = 0
@@ -179,12 +182,7 @@ def trigger_sync(request):
             )
         op = TraxDBOperation.objects.create(op_type='sync', status='running')
 
-    threading.Thread(
-        target=run_sync,
-        args=(op.id,),
-        kwargs={'max_pages': max_pages},
-        daemon=True,
-    ).start()
+    task_sync(op.id, max_pages=max_pages)
 
     return Response(
         TraxDBOperationSerializer(op).data,
@@ -236,12 +234,7 @@ def trigger_download(request):
             )
         op = TraxDBOperation.objects.create(op_type='download', status='running')
 
-    threading.Thread(
-        target=run_download,
-        args=(op.id,),
-        kwargs={'sync_report_path': sync_report_path, 'links_key': links_key},
-        daemon=True,
-    ).start()
+    task_download(op.id, sync_report_path=sync_report_path, links_key=links_key)
 
     return Response(
         TraxDBOperationSerializer(op).data,
@@ -284,12 +277,7 @@ def trigger_audit(request):
             )
         op = TraxDBOperation.objects.create(op_type='audit', status='running')
 
-    threading.Thread(
-        target=run_audit,
-        args=(op.id,),
-        kwargs={'sync_report_path': sync_report_path},
-        daemon=True,
-    ).start()
+    task_audit(op.id, sync_report_path=sync_report_path)
 
     return Response(
         TraxDBOperationSerializer(op).data,
@@ -340,7 +328,7 @@ def cancel_download(request, pk):
         )
 
     # Remove lock file to signal stop
-    traxdb_root = os.environ.get('TRAXDB_ROOT', '/music/Electronic/ID3/traxdb')
+    traxdb_root = get_config('TRAXDB_ROOT')
     lock_path = os.path.join(traxdb_root, '.download_from_report.lock')
     try:
         if os.path.exists(lock_path):

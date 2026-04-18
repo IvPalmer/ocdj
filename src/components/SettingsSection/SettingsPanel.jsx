@@ -1,104 +1,170 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  useHealth, useSlskdHealth, useConfig, useUpdateConfig,
+  useHealth, useSlskdHealth, useConfig, useUpdateConfig, useConfigSchema,
   useImportConfigStatus, useSpotifyStatus,
   useAutomationConfig, useUpdateAutomationConfig, useRunAutomation,
   useAutomationStatus,
 } from '../../api/hooks'
 import './SettingsPanel.css'
 
-const CONFIG_SECTIONS = [
-  {
-    title: 'YouTube',
-    keys: [
-      { key: 'YOUTUBE_API_KEY', label: 'API Key', placeholder: 'AIzaSy...', secret: true },
-      { key: 'YOUTUBE_DEFAULT_PLAYLIST', label: 'Default Playlist', placeholder: 'https://www.youtube.com/playlist?list=...' },
-    ],
-  },
-  {
-    title: 'SoundCloud',
-    keys: [
-      { key: 'SC_CLIENT_ID', label: 'Client ID', placeholder: 'Client ID', secret: true },
-      { key: 'SC_CLIENT_SECRET', label: 'Client Secret', placeholder: 'Client Secret', secret: true },
-      { key: 'SC_DEFAULT_PLAYLIST', label: 'Default Playlist', placeholder: 'https://soundcloud.com/user/sets/playlist' },
-    ],
-  },
-  {
-    title: 'Spotify',
-    keys: [
-      { key: 'SPOTIFY_CLIENT_ID', label: 'Client ID', placeholder: 'Client ID', secret: true },
-      { key: 'SPOTIFY_CLIENT_SECRET', label: 'Client Secret', placeholder: 'Client Secret', secret: true },
-      { key: 'SPOTIFY_REDIRECT_URI', label: 'Redirect URI', placeholder: 'http://127.0.0.1:8002/api/wanted/import/spotify/callback', secret: true },
-      { key: 'SPOTIFY_DEFAULT_PLAYLIST', label: 'Default Playlist', placeholder: 'https://open.spotify.com/playlist/...' },
-    ],
-    hasConnect: true,
-  },
-  {
-    title: 'Discogs',
-    keys: [
-      { key: 'DISCOGS_PERSONAL_TOKEN', label: 'Personal Token', placeholder: 'Token', secret: true },
-      { key: 'DISCOGS_USERNAME', label: 'Username', placeholder: 'your_username' },
-    ],
-  },
-  {
-    title: 'Organize',
-    keys: [
-      { key: 'ORGANIZE_RENAME_TEMPLATE', label: 'Rename Template', placeholder: '{artist} - {title} [{label} {catalog}]' },
-    ],
-  },
+// Human titles + display order for schema categories.
+const CATEGORY_META = {
+  spotify:    { title: 'Spotify',    hasConnect: true },
+  youtube:    { title: 'YouTube' },
+  soundcloud: { title: 'SoundCloud' },
+  discogs:    { title: 'Discogs' },
+  acrcloud:   { title: 'ACRCloud (track ID)' },
+  trackid:    { title: 'TrackID.net' },
+  acoustid:   { title: 'AcoustID (reserved)' },
+  slskd:      { title: 'slskd / Soulseek' },
+  organize:   { title: 'Organize — tagging + conversion' },
+  recognize:  { title: 'Recognize — pipeline tuning' },
+  traxdb:     { title: 'TraxDB — blog + Pixeldrain' },
+  automation: { title: 'Automation — toggles + thresholds', hidden: true },
+  paths:      { title: 'Paths' },
+}
+
+const CATEGORY_ORDER = [
+  'spotify', 'youtube', 'soundcloud', 'discogs',
+  'slskd', 'paths', 'organize', 'recognize',
+  'acrcloud', 'trackid', 'acoustid', 'traxdb',
 ]
 
-function ConfigSection({ section, configData, onSave, importStatus, spotifyStatus }) {
+// Labels override the raw key for nicer display. Anything not listed falls
+// back to a Title Case render of the key suffix.
+const FIELD_LABELS = {
+  YOUTUBE_API_KEY: 'API Key',
+  YOUTUBE_DEFAULT_PLAYLIST: 'Default Playlist',
+  YOUTUBE_DEFAULT_PLAYLIST_NAME: 'Default Playlist Name',
+  SC_CLIENT_ID: 'Client ID',
+  SC_CLIENT_SECRET: 'Client Secret',
+  SC_DEFAULT_PLAYLIST: 'Default Playlist',
+  SC_DEFAULT_PLAYLIST_NAME: 'Default Playlist Name',
+  SPOTIFY_CLIENT_ID: 'Client ID',
+  SPOTIFY_CLIENT_SECRET: 'Client Secret',
+  SPOTIFY_REDIRECT_URI: 'Redirect URI',
+  SPOTIFY_DEFAULT_PLAYLIST: 'Default Playlist',
+  SPOTIFY_DEFAULT_PLAYLIST_NAME: 'Default Playlist Name',
+  DISCOGS_PERSONAL_TOKEN: 'Personal Token',
+  DISCOGS_USERNAME: 'Username',
+  ACRCLOUD_ACCESS_KEY: 'Access Key',
+  ACRCLOUD_ACCESS_SECRET: 'Access Secret',
+  ACRCLOUD_HOST: 'Host',
+  ACRCLOUD_BEARER_TOKEN: 'Bearer Token',
+  TRACKID_TOKEN: 'API Token',
+  TRACKID_CF_CLEARANCE: 'Cloudflare Clearance Cookie',
+  MUSIC_ROOT: 'Music Root',
+  SOULSEEK_DOWNLOAD_ROOT: 'Soulseek Pipeline Root',
+  TRAXDB_ROOT: 'TraxDB Archive Root',
+  ELECTRONIC_LIBRARY_ROOT: 'Electronic Library Root',
+  SLSKD_BASE_URL: 'slskd URL',
+  SLSKD_API_KEY: 'slskd API Key',
+  ORGANIZE_RENAME_TEMPLATE: 'Rename Template',
+  ORGANIZE_CONVERSION_RULES: 'Conversion Rules (one per line)',
+  TRAXDB_START_URL: 'Blog Start URL',
+  PIXELDRAIN_API_KEY: 'Pixeldrain API Key',
+  TRAXDB_COOKIES: 'Blog Cookie File Path',
+  RECOGNIZE_SEGMENT_DURATION: 'Segment Duration (s)',
+  RECOGNIZE_SEGMENT_STEP: 'Shazam Fallback Step (s)',
+  RECOGNIZE_ACRCLOUD_STEP: 'ACRCloud Segment Step (s)',
+  RECOGNIZE_GAP_THRESHOLD: 'Gap Threshold (s)',
+  RECOGNIZE_GAP_SEGMENT_DURATION: 'Gap Segment Duration (s)',
+  RECOGNIZE_GAP_SEGMENT_STEP: 'Gap Segment Step (s)',
+  RECOGNIZE_MAX_GAP_SEGMENTS: 'Max Gap Segments',
+  RECOGNIZE_PROXIMITY_WINDOW: 'Proximity Window (s)',
+  RECOGNIZE_CONFLICT_WINDOW: 'Conflict Window (s)',
+  RECOGNIZE_ACR_LOW_SCORE_MIN_SEGMENTS: 'Low-Score Min Segments',
+  ACOUSTID_API_KEY: 'AcoustID API Key',
+}
+
+function labelFor(key) {
+  return FIELD_LABELS[key] || key.replace(/_/g, ' ')
+}
+
+function ConfigSection({ category, fields, configData, onSave, spotifyStatus }) {
+  const meta = CATEGORY_META[category] || { title: category }
   const [editing, setEditing] = useState(false)
   const [values, setValues] = useState({})
 
   const startEdit = () => {
     const initial = {}
-    section.keys.forEach(k => {
-      initial[k.key] = ''
+    fields.forEach(f => {
+      const type = f.type
+      const current = configData?.[f.key]?.value
+      // Prefill bool/int fields so the user sees what they're about to change.
+      if (type === 'bool') initial[f.key] = current === true ? '1' : '0'
+      else if (!f.is_secret && typeof current === 'string' && configData?.[f.key]?.source !== 'default') {
+        initial[f.key] = current
+      } else {
+        initial[f.key] = ''
+      }
     })
     setValues(initial)
     setEditing(true)
   }
 
   const handleSave = () => {
-    // Only send non-empty values
     const toSave = {}
     for (const [key, val] of Object.entries(values)) {
-      if (val.trim()) toSave[key] = val.trim()
+      const spec = fields.find(f => f.key === key)
+      if (!spec) continue
+      if (spec.type === 'bool') {
+        toSave[key] = val === '1' || val === 'true'
+      } else {
+        const trimmed = (val ?? '').trim()
+        if (trimmed) toSave[key] = trimmed
+      }
     }
-    if (Object.keys(toSave).length > 0) {
-      onSave(toSave)
-    }
+    if (Object.keys(toSave).length > 0) onSave(toSave)
     setEditing(false)
     setValues({})
   }
 
-  const allSet = section.keys.every(k => configData?.[k.key]?.set)
+  const allSet = fields.every(f => configData?.[f.key]?.set)
 
   const handleSpotifyConnect = async () => {
     try {
       const resp = await fetch('/api/wanted/import/spotify/auth/')
       const data = await resp.json()
-      if (data.url) {
-        window.open(data.url, '_blank', 'width=500,height=700')
-      }
-    } catch (e) {
-      // ignore
+      if (data.url) window.open(data.url, '_blank', 'width=500,height=700')
+    } catch (e) { /* noop */ }
+  }
+
+  const renderInput = (f) => {
+    const val = values[f.key] ?? ''
+    const onChange = (e) => setValues(v => ({ ...v, [f.key]: e.target.value }))
+    if (f.type === 'bool') {
+      return (
+        <select value={val} onChange={onChange}>
+          <option value="0">disabled</option>
+          <option value="1">enabled</option>
+        </select>
+      )
     }
+    if (f.type === 'text') {
+      return <textarea rows={4} value={val} onChange={onChange} placeholder={f.description} />
+    }
+    return (
+      <input
+        type={f.is_secret ? 'password' : 'text'}
+        value={val}
+        onChange={onChange}
+        placeholder={f.description || (f.default !== '' ? `default: ${f.default}` : '')}
+      />
+    )
   }
 
   return (
     <div className="config-section">
       <div className="config-section__header">
-        <h4 className="config-section__title">{section.title}</h4>
+        <h4 className="config-section__title">{meta.title}</h4>
         <div className="config-section__status-row">
           {allSet ? (
             <span className="config-badge config-badge--set">Configured</span>
           ) : (
             <span className="config-badge config-badge--unset">Not configured</span>
           )}
-          {section.hasConnect && spotifyStatus?.connected && (
+          {meta.hasConnect && spotifyStatus?.connected && (
             <span className="config-badge config-badge--connected">Connected</span>
           )}
         </div>
@@ -106,13 +172,18 @@ function ConfigSection({ section, configData, onSave, importStatus, spotifyStatu
 
       {!editing ? (
         <div className="config-fields-preview">
-          {section.keys.map(k => {
-            const info = configData?.[k.key]
+          {fields.map(f => {
+            const info = configData?.[f.key]
+            const showVal = info?.value === false
+              ? 'disabled'
+              : info?.value === true
+                ? 'enabled'
+                : info?.value || `default: ${f.default}`
             return (
-              <div key={k.key} className="config-field-row">
-                <span className="config-field-label">{k.label}</span>
+              <div key={f.key} className="config-field-row">
+                <span className="config-field-label">{labelFor(f.key)}</span>
                 <span className={`config-field-value ${info?.set ? '' : 'config-field-value--empty'}`}>
-                  {info?.set ? info.value : 'Not set'}
+                  {info?.set ? showVal : (f.default !== '' ? `default: ${f.default}` : 'Not set')}
                 </span>
               </div>
             )
@@ -121,7 +192,7 @@ function ConfigSection({ section, configData, onSave, importStatus, spotifyStatu
             <button className="btn btn-sm" onClick={startEdit}>
               {allSet ? 'Update' : 'Configure'}
             </button>
-            {section.hasConnect && allSet && !spotifyStatus?.connected && (
+            {meta.hasConnect && allSet && !spotifyStatus?.connected && (
               <button className="btn btn-sm btn-accent" onClick={handleSpotifyConnect}>
                 Connect Spotify
               </button>
@@ -130,15 +201,13 @@ function ConfigSection({ section, configData, onSave, importStatus, spotifyStatu
         </div>
       ) : (
         <div className="config-fields-edit">
-          {section.keys.map(k => (
-            <div key={k.key} className="form-group">
-              <label>{k.label}</label>
-              <input
-                type="text"
-                value={values[k.key] || ''}
-                onChange={e => setValues(v => ({ ...v, [k.key]: e.target.value }))}
-                placeholder={k.placeholder}
-              />
+          {fields.map(f => (
+            <div key={f.key} className="form-group">
+              <label>{labelFor(f.key)}</label>
+              {renderInput(f)}
+              {f.description && (
+                <small className="form-hint">{f.description}</small>
+              )}
             </div>
           ))}
           <div className="config-actions">
@@ -159,16 +228,8 @@ function AutomationSection() {
 
   if (isLoading) return null
 
-  const toggle = (key) => {
-    updateConfig.mutate({ [key]: !config?.[key] })
-  }
-
-  const setThreshold = (value) => {
-    updateConfig.mutate({ AUTOMATION_CONFIDENCE_THRESHOLD: parseInt(value) })
-  }
-
-  const pipeline = status?.pipeline || {}
-  const preview = status?.preview?.steps || {}
+  const toggle = (key) => updateConfig.mutate({ [key]: !config?.[key] })
+  const setThreshold = (value) => updateConfig.mutate({ AUTOMATION_CONFIDENCE_THRESHOLD: parseInt(value) })
 
   return (
     <div className="automation-section">
@@ -300,13 +361,18 @@ function SettingsPanel() {
   const { data: health } = useHealth()
   const { data: slskdHealth } = useSlskdHealth()
   const { data: configData } = useConfig()
-  const { data: importStatus } = useImportConfigStatus()
+  const { data: schemaData } = useConfigSchema()
   const { data: spotifyStatus } = useSpotifyStatus()
   const updateConfig = useUpdateConfig()
 
-  const handleSave = (values) => {
-    updateConfig.mutate(values)
-  }
+  const handleSave = (values) => updateConfig.mutate(values)
+
+  const sections = useMemo(() => {
+    if (!schemaData?.schema) return []
+    return CATEGORY_ORDER
+      .filter(cat => schemaData.schema[cat] && !CATEGORY_META[cat]?.hidden)
+      .map(cat => ({ category: cat, fields: schemaData.schema[cat] }))
+  }, [schemaData])
 
   return (
     <div className="settings-panel">
@@ -337,6 +403,14 @@ function SettingsPanel() {
                 <span className="setting-label">Music Root</span>
                 <span className="setting-value">{health.music_root}</span>
               </div>
+              <div className="setting-item">
+                <span className="setting-label">Soulseek Root</span>
+                <span className="setting-value">{health.soulseek_root}</span>
+              </div>
+              <div className="setting-item">
+                <span className="setting-label">TraxDB Root</span>
+                <span className="setting-value">{health.traxdb_root}</span>
+              </div>
             </>
           )}
         </div>
@@ -348,14 +422,18 @@ function SettingsPanel() {
       </div>
 
       <div className="settings-section">
-        <h3 className="section-title">Import Sources</h3>
+        <h3 className="section-title">Configuration</h3>
+        <p className="settings-hint">
+          Every API key, path, token, and tunable lives here. Values cascade:
+          database override → environment variable → schema default.
+        </p>
         <div className="config-sections">
-          {CONFIG_SECTIONS.map(section => (
+          {sections.map(section => (
             <ConfigSection
-              key={section.title}
-              section={section}
+              key={section.category}
+              category={section.category}
+              fields={section.fields}
               configData={configData}
-              importStatus={importStatus}
               spotifyStatus={spotifyStatus}
               onSave={handleSave}
             />
@@ -381,8 +459,8 @@ function SettingsPanel() {
       <div className="settings-section">
         <h3 className="section-title">About</h3>
         <p className="settings-about">
-          OCDJ v2.0 — Django + React + Docker rebuild.
-          Manages your wanted list, searches Soulseek, and organizes your music library.
+          OCDJ v2.0 — Django + React + Docker.
+          Manages your wanted list, searches Soulseek, recognizes mix tracks, and organizes your library.
         </p>
       </div>
     </div>

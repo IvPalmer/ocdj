@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Set
 
 from django import db
 
+from core.services.config import get_config
+
 from .pixeldrain import PixeldrainClient, is_pixeldrain_not_found
 
 logger = logging.getLogger(__name__)
@@ -66,8 +68,8 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
         op.status = 'running'
         op.save()
 
-        traxdb_root = os.environ.get('TRAXDB_ROOT', '/music/Electronic/ID3/traxdb')
-        pixeldrain_key = os.environ.get('PIXELDRAIN_API_KEY', '')
+        traxdb_root = get_config('TRAXDB_ROOT')
+        pixeldrain_key = get_config('PIXELDRAIN_API_KEY')
 
         if not pixeldrain_key:
             op.status = 'failed'
