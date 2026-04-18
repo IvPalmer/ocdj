@@ -70,3 +70,19 @@
   padding: 32px 48px;
   background: var(--bg);
 }
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+}
+
+.nav-group__label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 10px 16px 4px;
+  opacity: 0.55;
+}

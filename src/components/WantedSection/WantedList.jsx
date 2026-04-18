@@ -330,7 +330,7 @@ function WantedList() {
       {selectedIds.size > 0 && (
         <div className="bulk-actions">
           <span className="bulk-count">{selectedIds.size} selected</span>
-          <button className="btn btn-sm btn-accent" onClick={handleBulkAddToQueue}>Add to Queue</button>
+          <button className="btn btn-sm btn-accent" onClick={handleBulkAddToQueue}>Find All</button>
           <button className="btn btn-sm" onClick={() => handleBulkAction('pending')}>Set Pending</button>
           <button className="btn btn-sm btn-danger" onClick={() => handleBulkAction('delete')}>Delete</button>
         </div>
@@ -396,9 +396,9 @@ function WantedList() {
                     className={`btn btn-xs btn-accent${queuingId === item.id ? ' btn-xs--active' : ''}`}
                     onClick={() => handleAddToQueue(item.id)}
                     disabled={queuingId !== null}
-                    title="Add to Soulseek Queue"
+                    title="Search Soulseek for this track"
                   >
-                    {queuingId === item.id ? 'Adding...' : 'Queue'}
+                    {queuingId === item.id ? 'Finding...' : 'Find'}
                   </button>
                   <button
                     className="btn btn-xs btn-danger"
@@ -415,7 +415,15 @@ function WantedList() {
             {items.length === 0 && (
               <tr>
                 <td colSpan="8" className="empty-state">
-                  No items yet
+                  <div className="empty-state__inner">
+                    <div className="empty-state__title">Nothing wanted yet</div>
+                    <div className="empty-state__subtitle">Add tracks from a source or a mix:</div>
+                    <div className="empty-state__ctas">
+                      <a className="btn btn-sm btn-accent" href="#import">Import from Spotify / SoundCloud / YouTube</a>
+                      <a className="btn btn-sm" href="/traxdb">Browse TraxDB archive</a>
+                      <a className="btn btn-sm" href="/recognize">Recognize a mixtape</a>
+                    </div>
+                  </div>
                 </td>
               </tr>
             )}
