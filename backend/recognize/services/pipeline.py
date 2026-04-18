@@ -4,8 +4,8 @@ import shutil
 import threading
 
 from django import db
-from django.conf import settings
 
+from core.services.config import get_config
 from recognize.models import RecognizeJob
 from .downloader import download_audio
 from .description_parser import parse_tracklist_from_description
@@ -32,29 +32,30 @@ _active_jobs_lock = threading.Lock()
 #   - Bottleneck is database coverage (underground music), not scan density.
 #
 # Optimal balance: 20s ACR step + 8s Shazam gap fill + TrackID merge.
-SEGMENT_DURATION = 12       # seconds per segment (ACRCloud optimal: 10-12s)
-SEGMENT_STEP = 10           # seconds between segment starts (Shazam-only fallback)
-GAP_THRESHOLD = 20          # minimum unidentified gap to trigger Shazam fill
-GAP_SEGMENT_DURATION = 15   # longer segments for harder-to-identify regions
-GAP_SEGMENT_STEP = 8        # Shazam gap fill interval (free, but slow — 2s rate limit)
-MAX_GAP_SEGMENTS = 500      # practical cap (~17 min of Shazam processing)
-ACRCLOUD_SEGMENT_STEP = 20  # 20s step — denser adds noise, not real tracks
+# Values live in config store (core.services.config). Edit via Settings UI.
+
+def _tuning():
+    return {
+        'segment_duration': get_config('RECOGNIZE_SEGMENT_DURATION'),
+        'segment_step': get_config('RECOGNIZE_SEGMENT_STEP'),
+        'acrcloud_step': get_config('RECOGNIZE_ACRCLOUD_STEP'),
+        'gap_threshold': get_config('RECOGNIZE_GAP_THRESHOLD'),
+        'gap_segment_duration': get_config('RECOGNIZE_GAP_SEGMENT_DURATION'),
+        'gap_segment_step': get_config('RECOGNIZE_GAP_SEGMENT_STEP'),
+        'max_gap_segments': get_config('RECOGNIZE_MAX_GAP_SEGMENTS'),
+    }
 
 
 def run_recognize(job_id):
-    """Launch the recognition pipeline in a background thread."""
-    with _active_jobs_lock:
-        if job_id in _active_jobs:
-            logger.info(f'Job {job_id}: already has an active worker, skipping')
-            return
-        _active_jobs.add(job_id)
+    """Enqueue a recognition job on the Huey worker.
 
-    thread = threading.Thread(
-        target=_recognize_worker,
-        args=(job_id,),
-        daemon=True,
-    )
-    thread.start()
+    The worker container claims the task from the shared SQLite queue,
+    so the work survives backend restarts. The existing resume-from-
+    raw_results path inside _recognize_worker handles worker restarts.
+    """
+    from recognize.tasks import recognize_job
+    recognize_job(job_id)
+    logger.info(f'Job {job_id}: enqueued on Huey worker')
 
 
 def resume_stale_jobs():
@@ -145,32 +146,44 @@ def _recognize_worker(job_id):
         # Step 3: Segment + recognize
         job.status = 'recognizing'
         use_acrcloud = _has_acrcloud_credentials()
+        tuning = _tuning()
         logger.info(f'Job {job_id}: acrcloud={use_acrcloud}')
 
-        # On resume, reuse existing primary results instead of re-running
+        # On resume, reuse existing primary results instead of re-running — but
+        # only when the saved state looks self-consistent. Previously a resume
+        # with an audio file but empty/corrupt raw_results would silently skip
+        # the primary pass and produce a zero-result job.
         has_existing_results = (
             is_resume
-            and job.raw_results
-            and job.acrcloud_calls > 0
-            and any(r.get('engine') == 'acrcloud' for r in job.raw_results)
+            and isinstance(job.raw_results, list)
+            and len(job.raw_results) > 0
+            and (job.acrcloud_calls or 0) > 0
+            and any(isinstance(r, dict) and r.get('engine') == 'acrcloud'
+                    for r in job.raw_results)
         )
+        if is_resume and not has_existing_results:
+            logger.warning(
+                f'Job {job_id}: resume requested but saved results are empty/corrupt '
+                f'(raw_results={len(job.raw_results or [])}, '
+                f'acrcloud_calls={job.acrcloud_calls}). Re-running primary pass.'
+            )
 
         acrcloud_calls = job.acrcloud_calls or 0
 
         if has_existing_results:
             # Resume: skip primary pass, reuse saved ACRCloud results
             raw_results = list(job.raw_results)
-            primary_step = ACRCLOUD_SEGMENT_STEP
+            primary_step = tuning['acrcloud_step']
             job.segments_total = len(raw_results)
             job.segments_done = len(raw_results)
             job.save()
             logger.info(f'Job {job_id}: resuming with {len(raw_results)} existing results ({acrcloud_calls} ACRCloud calls)')
         elif use_acrcloud:
             # ACRCloud primary — wide step, fast (0.5s rate limit)
-            primary_step = ACRCLOUD_SEGMENT_STEP
+            primary_step = tuning['acrcloud_step']
             segments = segment_audio(
                 audio_path,
-                segment_duration=SEGMENT_DURATION,
+                segment_duration=tuning['segment_duration'],
                 step=primary_step,
             )
             job.segments_total = len(segments)
@@ -191,10 +204,10 @@ def _recognize_worker(job_id):
             job.save(update_fields=['raw_results', 'acrcloud_calls', 'updated'])
         else:
             # Shazam fallback when ACRCloud not configured
-            primary_step = SEGMENT_STEP
+            primary_step = tuning['segment_step']
             segments = segment_audio(
                 audio_path,
-                segment_duration=SEGMENT_DURATION,
+                segment_duration=tuning['segment_duration'],
                 step=primary_step,
             )
             job.segments_total = len(segments)
@@ -211,17 +224,17 @@ def _recognize_worker(job_id):
 
         # Step 4: Shazam gap fill (free) — covers what ACRCloud missed at finer intervals
         duration = job.duration_seconds or 0
-        gaps = find_gaps(raw_results, duration, min_gap=GAP_THRESHOLD, step=primary_step)
+        gaps = find_gaps(raw_results, duration, min_gap=tuning['gap_threshold'], step=primary_step)
 
         if gaps:
             gap_segs = segment_gaps(
                 audio_path, gaps,
-                segment_duration=GAP_SEGMENT_DURATION,
-                step=GAP_SEGMENT_STEP,
+                segment_duration=tuning['gap_segment_duration'],
+                step=tuning['gap_segment_step'],
             )
-            if gap_segs and len(gap_segs) > MAX_GAP_SEGMENTS:
-                logger.info(f'Capping gap segments from {len(gap_segs)} to {MAX_GAP_SEGMENTS}')
-                gap_segs = gap_segs[:MAX_GAP_SEGMENTS]
+            if gap_segs and len(gap_segs) > tuning['max_gap_segments']:
+                logger.info(f"Capping gap segments from {len(gap_segs)} to {tuning['max_gap_segments']}")
+                gap_segs = gap_segs[:tuning['max_gap_segments']]
 
             if gap_segs:
                 job.segments_total += len(gap_segs)
@@ -236,7 +249,18 @@ def _recognize_worker(job_id):
                 gap_results = shazam_recognize_segments(
                     gap_segs, on_progress=on_progress_pass2, timeout=10, retries=1,
                 )
-                raw_results.extend(gap_results)
+
+                # Dedup: an (engine, start_sec) pair should appear at most once.
+                # Without this the same segment can be counted twice if the gap
+                # scan re-covers ground an earlier pass had (which happens when
+                # primary_step and gap_segment_step produce overlapping frames),
+                # inflating segment_count and poisoning the clustering stage.
+                existing = {(r.get('engine'), r['start_sec']) for r in raw_results}
+                deduped_gap = [r for r in gap_results
+                               if (r.get('engine'), r['start_sec']) not in existing]
+                if len(deduped_gap) != len(gap_results):
+                    logger.info(f'Gap-fill dedup: {len(gap_results) - len(deduped_gap)} duplicates dropped')
+                raw_results.extend(deduped_gap)
                 raw_results.sort(key=lambda r: r['start_sec'])
 
                 # Save after gap fill so results survive restarts
@@ -248,7 +272,7 @@ def _recognize_worker(job_id):
         if candidates:
             verify_segs = segment_verification(
                 audio_path, candidates,
-                segment_duration=SEGMENT_DURATION,
+                segment_duration=tuning['segment_duration'],
                 offsets=(-7, -3, 3, 7),
             )
             if verify_segs and len(verify_segs) > 50:
@@ -383,15 +407,22 @@ def _merge_trackid_results(shazam_tracklist, trackid_tracklist):
                     break
             continue
 
-        # Check overlap with our strong results
-        # Only skip if >50% of the TrackID track is covered (DJ mixes have natural overlaps)
+        # Check overlap with our strong results.
+        # Skip only when the TrackID track largely coincides with one of our
+        # existing strong detections — i.e. it's almost certainly the same play
+        # we already identified, not a legitimate blend. For a true 10-30s DJ
+        # blend the overlap is small relative to both durations, so both tracks
+        # stay in the tracklist.
         tt_duration = max(tt['timestamp_end'] - tt['timestamp_start'], 1)
         overlaps = False
         for s_start, s_end in strong_ranges:
+            s_duration = max(s_end - s_start, 1)
             overlap_start = max(tt['timestamp_start'], s_start)
             overlap_end = min(tt['timestamp_end'], s_end)
             overlap = max(0, overlap_end - overlap_start)
-            if overlap > tt_duration * 0.5:
+            # Require the overlap to cover ≥70% of BOTH tracks before calling
+            # them the same play. Either direction being small → real blend.
+            if overlap >= tt_duration * 0.7 and overlap >= s_duration * 0.7:
                 overlaps = True
                 break
 
@@ -422,6 +453,18 @@ def _merge_trackid_results(shazam_tracklist, trackid_tracklist):
 
     if added:
         logger.info(f'Merged {added} TrackID.net tracks into tracklist')
+
+    # Hybrid confidence rerank: a track matched by multiple engines should
+    # outrank a single-engine high score. Cross-engine agreement is a much
+    # stronger signal than any one engine's internal score.
+    for t in merged:
+        n_engines = len(set(t.get('engines') or []))
+        if n_engines >= 2:
+            base = float(t.get('confidence_score') or 0)
+            # Boost toward 1.0 by how much is left × agreement factor
+            boosted = min(1.0, base + (1.0 - base) * (0.35 * (n_engines - 1)))
+            t['confidence_score'] = round(boosted, 3)
+            t['confidence'] = 'verified'
 
     merged.sort(key=lambda t: t['timestamp_start'])
     return merged

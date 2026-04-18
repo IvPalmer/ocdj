@@ -30,33 +30,61 @@ _session.headers.update({
 
 def set_cf_clearance(cookie_value, domain='.trackid.net'):
     """Set Cloudflare cf_clearance cookie (obtained via browser solve)."""
+    # Clear any previous cookie so rotation doesn't keep both values around.
+    try:
+        _session.cookies.clear(domain=domain, path='/', name='cf_clearance')
+    except KeyError:
+        pass
     _session.cookies.set('cf_clearance', cookie_value, domain=domain)
 
 
 def _load_cf_cookie():
-    """Try to load cf_clearance from config if not already set."""
-    if 'cf_clearance' not in _session.cookies.get_dict():
-        try:
-            from core.views import get_config
-            cookie = get_config('TRACKID_CF_CLEARANCE')
-            if cookie:
-                set_cf_clearance(cookie)
-        except Exception:
-            pass
+    """Sync cf_clearance from config.
+
+    Re-reads each call so rotating the cookie via Settings picks up without
+    a restart. Only touches the session when the configured value differs
+    from the currently-cached one.
+    """
+    try:
+        from core.services.config import get_config
+        cookie = get_config('TRACKID_CF_CLEARANCE')
+    except Exception:
+        return
+    if not cookie:
+        return
+    current = _session.cookies.get('cf_clearance')
+    if current != cookie:
+        set_cf_clearance(cookie)
+
+
+def _looks_like_cf_challenge(resp):
+    """True if the response is a Cloudflare wall (not the trackid.net API)."""
+    if resp.status_code in (403, 503):
+        return True
+    ctype = (resp.headers.get('Content-Type') or '').lower()
+    if 'text/html' in ctype and b'Just a moment' in (resp.content or b''):
+        return True
+    return False
 
 
 def _get(url, **kwargs):
     """HTTP GET with Cloudflare cookie bypass."""
     _load_cf_cookie()
     kwargs.setdefault('timeout', REQUEST_TIMEOUT)
-    return _session.get(url, **kwargs)
+    resp = _session.get(url, **kwargs)
+    if _looks_like_cf_challenge(resp):
+        logger.warning('TrackID CF challenge hit; cf_clearance likely stale. Refresh via Settings.')
+    return resp
 
 
 def _post(url, **kwargs):
     """HTTP POST with Cloudflare cookie bypass."""
     _load_cf_cookie()
     kwargs.setdefault('timeout', REQUEST_TIMEOUT)
-    return _session.post(url, **kwargs)
+    resp = _session.post(url, **kwargs)
+    if _looks_like_cf_challenge(resp):
+        logger.warning('TrackID CF challenge hit; cf_clearance likely stale. Refresh via Settings.')
+    return resp
 
 
 def _clean_url(url):

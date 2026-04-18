@@ -10,6 +10,7 @@ urlpatterns = [
     path('jobs/<int:pk>/rerun/', views.rerun_job, name='recognize-rerun-job'),
     path('jobs/<int:pk>/delete/', views.delete_job, name='recognize-delete-job'),
     path('jobs/<int:pk>/recluster/', views.recluster_job, name='recognize-recluster-job'),
+    path('jobs/<int:pk>/tracks/<int:idx>/', views.update_track, name='recognize-update-track'),
     path('trackid/lookup/', views.trackid_lookup, name='recognize-trackid-lookup'),
     path('acrcloud-usage/', views.acrcloud_usage, name='recognize-acrcloud-usage'),
 ]

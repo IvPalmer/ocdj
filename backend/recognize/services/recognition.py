@@ -118,9 +118,20 @@ def recognize_segments(segments, on_progress=None, timeout=REQUEST_TIMEOUT, retr
         progress_thread = threading.Thread(target=_report_progress, daemon=True)
         progress_thread.start()
 
+    # Don't use asyncio.run() — calling it twice in the same thread (e.g.
+    # primary Shazam pass followed by a gap-fill pass) cannot reuse the same
+    # default loop and has blown up with RuntimeError in practice. Create a
+    # fresh loop per call and tear it down explicitly.
+    loop = asyncio.new_event_loop()
     try:
-        results = asyncio.run(_recognize_all(segments, progress_counter, timeout=timeout, retries=retries))
+        results = loop.run_until_complete(
+            _recognize_all(segments, progress_counter, timeout=timeout, retries=retries)
+        )
     finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
         stop_event.set()
         if on_progress:
             progress_thread.join(timeout=5)

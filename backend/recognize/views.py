@@ -172,6 +172,43 @@ def rerun_job(request, pk):
     return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
 
 
+@api_view(['PATCH'])
+def update_track(request, pk, idx):
+    """Manual override for a single track in a completed job's tracklist.
+
+    Body accepts any of: artist, title, album, label, timestamp_start,
+    timestamp_end. Sets `verified=True` and `manual=True` on the row so a
+    future re-cluster pass leaves it alone.
+    """
+    try:
+        job = RecognizeJob.objects.get(pk=pk)
+    except RecognizeJob.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if idx < 0 or idx >= len(job.tracklist):
+        return Response({'error': 'Track index out of range'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    allowed = {'artist', 'title', 'album', 'label',
+               'timestamp_start', 'timestamp_end'}
+    patch = {k: v for k, v in request.data.items() if k in allowed}
+    if not patch:
+        return Response({'error': 'No overridable fields in payload'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    track = dict(job.tracklist[idx])
+    track.update(patch)
+    track['manual'] = True
+    track['verified'] = True
+    track['confidence'] = 'verified'
+    track['confidence_score'] = 1.0
+
+    job.tracklist[idx] = track
+    job.save(update_fields=['tracklist', 'updated'])
+
+    return Response({'track': track, 'index': idx})
+
+
 @api_view(['DELETE'])
 def delete_job(request, pk):
     """Delete a recognition job."""
@@ -211,6 +248,20 @@ def recluster_job(request, pk):
         logger.warning(f'TrackID.net lookup failed during recluster for job {pk}: {e}')
 
     tracklist = dedup_tracklist(tracklist)
+
+    # Preserve user overrides. A track the user edited via update_track is
+    # marked `manual=True`; drop any re-clustered row that overlaps its
+    # timestamp and splice the manual one back in.
+    manual_tracks = [t for t in (job.tracklist or []) if t.get('manual')]
+    if manual_tracks:
+        def _overlaps(a, b):
+            return not (a.get('timestamp_end', 0) <= b.get('timestamp_start', 0)
+                        or a.get('timestamp_start', 0) >= b.get('timestamp_end', 0))
+        survivors = [t for t in tracklist
+                     if not any(_overlaps(t, m) for m in manual_tracks)]
+        survivors.extend(manual_tracks)
+        survivors.sort(key=lambda t: t.get('timestamp_start', 0))
+        tracklist = survivors
 
     # Update engine based on merged sources
     engines_used = set()
