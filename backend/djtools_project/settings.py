@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'django_filters',
+    'huey.contrib.djhuey',
 
     # Project apps
     'core',
@@ -175,3 +176,30 @@ YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
 # SoundCloud API
 SC_CLIENT_ID = os.getenv('SC_CLIENT_ID', '')
 SC_CLIENT_SECRET = os.getenv('SC_CLIENT_SECRET', '')
+
+# ── Huey (background worker; jobs survive container restart) ──
+#
+# SqliteHuey persists pending/running task state to a file on a shared
+# docker volume. The backend container enqueues; the worker container
+# (huey_worker in docker-compose) consumes. Tasks use db_task so each
+# invocation lives in the task DB and can be re-claimed after a crash.
+HUEY_DB_PATH = os.getenv('HUEY_DB_PATH', '/app/huey/ocdj_huey.sqlite3')
+os.makedirs(os.path.dirname(HUEY_DB_PATH), exist_ok=True)
+
+HUEY = {
+    'huey_class': 'huey.SqliteHuey',
+    'name': 'ocdj',
+    'filename': HUEY_DB_PATH,
+    'results': True,
+    'store_none': False,
+    'immediate': False,  # run tasks async via the worker process
+    'utc': True,
+    'consumer': {
+        'workers': int(os.getenv('HUEY_WORKERS', '2')),
+        'worker_type': 'thread',  # tasks are I/O-heavy (HTTP, disk, ffmpeg)
+        'max_delay': 10.0,
+        'flush_locks': True,
+        'scheduler_interval': 60,
+        'periodic': True,
+    },
+}

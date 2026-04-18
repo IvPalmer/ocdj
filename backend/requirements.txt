@@ -34,3 +34,6 @@ musicbrainzngs>=0.7.1
 # Recognition (Recognize module)
 shazamio>=0.7.0
 pydub>=0.25.1
+
+# Background worker (jobs survive container restart)
+huey>=2.5.1

@@ -71,9 +71,49 @@ services:
       - ./tools:/app/tools
       - /Users/palmer/Music/Musicas:/music
       - static_volume:/app/staticfiles
+      - huey_volume:/app/huey
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py runserver --noreload 0.0.0.0:8002"
+
+  # Huey background worker — runs long-lived tasks (recognize, traxdb)
+  # that must survive backend container restart. Same image as backend;
+  # reads/writes the shared huey_volume SQLite queue.
+  worker:
+    build: ./backend
+    restart: always
+    depends_on:
+      - db
+    environment:
+      - DEBUG=1
+      - POSTGRES_DB=djtools
+      - POSTGRES_USER=djtools_user
+      - POSTGRES_PASSWORD=djtools_password
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - SLSKD_BASE_URL=http://slskd:5030
+      - SLSKD_API_KEY=${SLSKD_API_KEY}
+      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY}
+      - MUSIC_ROOT=/music
+      - SOULSEEK_DOWNLOAD_ROOT=/music/Electronic/ID3/soulseek
+      - TRAXDB_ROOT=/music/Electronic/ID3/traxdb
+      - TRAXDB_START_URL=${TRAXDB_START_URL:-}
+      - PIXELDRAIN_API_KEY=${PIXELDRAIN_API_KEY:-}
+      - TRAXDB_COOKIES=${TRAXDB_COOKIES:-}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - SPOTIFY_REDIRECT_URI=${SPOTIFY_REDIRECT_URI:-http://localhost:8002/api/wanted/import/spotify/callback/}
+      - DISCOGS_PERSONAL_TOKEN=${DISCOGS_PERSONAL_TOKEN:-}
+      - DISCOGS_USERNAME=${DISCOGS_USERNAME:-}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - SC_CLIENT_ID=${SC_CLIENT_ID:-}
+      - SC_CLIENT_SECRET=${SC_CLIENT_SECRET:-}
+    volumes:
+      - ./backend:/app
+      - ./tools:/app/tools
+      - /Users/palmer/Music/Musicas:/music
+      - huey_volume:/app/huey
+    command: python manage.py run_huey
 
   # React Frontend (dev mode)
   frontend:
@@ -93,3 +133,4 @@ volumes:
   postgres_data:
   static_volume:
   node_modules:
+  huey_volume:
