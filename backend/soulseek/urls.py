@@ -8,6 +8,8 @@ router.register(r'presets', views.QualityPresetViewSet, basename='quality-preset
 
 urlpatterns = [
     path('health/', views.slskd_health, name='slskd-health'),
+    path('connect/', views.slskd_connect, name='slskd-connect'),
+    path('disconnect/', views.slskd_disconnect, name='slskd-disconnect'),
     path('search/', views.search, name='slskd-search'),
     path('search/results/', views.search_results, name='slskd-search-results'),
     path('search/recent/', views.recent_searches, name='slskd-recent-searches'),

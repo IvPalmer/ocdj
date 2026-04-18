@@ -45,6 +45,27 @@ class SlskdClient:
             logger.error(f"slskd health check failed: {e}")
             return None
 
+    def connect_soulseek(self):
+        """Ask slskd to log in to the Soulseek P2P server using its
+        configured `soulseek` credentials. Returns (ok, message).
+        """
+        try:
+            r = self.session.put(self._url('/server'), timeout=15)
+            if r.status_code in (200, 204):
+                return True, 'connected'
+            return False, f'slskd returned {r.status_code}: {r.text[:200]}'
+        except Exception as e:
+            return False, str(e)
+
+    def disconnect_soulseek(self):
+        try:
+            r = self.session.delete(self._url('/server'), timeout=15)
+            if r.status_code in (200, 204):
+                return True, 'disconnected'
+            return False, f'slskd returned {r.status_code}: {r.text[:200]}'
+        except Exception as e:
+            return False, str(e)
+
     def search(self, query, timeout=15000, retries=3):
         """Start a search and return the search ID. Retries on 429."""
         for attempt in range(retries):

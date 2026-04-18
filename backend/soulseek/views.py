@@ -296,6 +296,25 @@ def slskd_health(request):
 
 
 @api_view(['POST'])
+def slskd_connect(request):
+    """Tell slskd to log in to the Soulseek P2P network."""
+    client = SlskdClient()
+    ok, msg = client.connect_soulseek()
+    if ok:
+        return Response({'ok': True, 'message': msg})
+    return Response({'ok': False, 'error': msg}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['POST'])
+def slskd_disconnect(request):
+    client = SlskdClient()
+    ok, msg = client.disconnect_soulseek()
+    if ok:
+        return Response({'ok': True, 'message': msg})
+    return Response({'ok': False, 'error': msg}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+@api_view(['POST'])
 def search(request):
     """
     Search slskd. All paths are now async via SearchQueueItem:

@@ -24,7 +24,8 @@ const STATUS_ORDER = [
 ]
 
 function SoulseekPanel() {
-  const { data: health } = useSlskdHealth()
+  const { data: health, refetch: refetchHealth } = useSlskdHealth()
+  const [connecting, setConnecting] = useState(false)
   const { data: downloadsData } = useDownloadsStatus()
   const { data: queueData } = useSearchQueue()
   const searchMutation = useSearch()
@@ -166,6 +167,27 @@ function SoulseekPanel() {
         <div className={`slskd-status ${connected ? (loggedIn ? 'slskd-status--ok' : 'slskd-status--warn') : 'slskd-status--error'}`}>
           <span className="status-dot" />
           {!connected ? 'Disconnected' : loggedIn ? 'Online' : 'Not logged in'}
+          {connected && !loggedIn && (
+            <button
+              className="slskd-link slskd-link--button"
+              disabled={connecting}
+              onClick={async () => {
+                setConnecting(true)
+                try {
+                  const r = await fetch('/api/soulseek/connect/', { method: 'POST' })
+                  const data = await r.json()
+                  if (!r.ok) alert('Login failed: ' + (data.error || 'unknown'))
+                } catch (e) {
+                  alert('Login failed: ' + e.message)
+                } finally {
+                  setConnecting(false)
+                  refetchHealth()
+                }
+              }}
+            >
+              {connecting ? 'Logging in…' : 'Login'}
+            </button>
+          )}
           {connected && (
             <a href="http://localhost:5030" target="_blank" rel="noopener noreferrer" className="slskd-link">
               Web UI
