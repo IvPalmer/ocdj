@@ -8,6 +8,9 @@ tools/**/config.json
 tools/**/traxdb_cookies.txt
 backend/.secret_key
 backend/.spotify_cache
+backend/.cache
+backend/huey/
+/tmp/ocdj-sidecar*
 
 # Local artifacts
 logs/

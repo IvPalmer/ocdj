@@ -1,0 +1,629 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		473B63D22F65A93F0091F18A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473B63D12F65A93F0091F18A /* AppDelegate.swift */; };
+		473B63D62F65A93F0091F18A /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 473B63D42F65A93F0091F18A /* Main.html */; };
+		473B63D82F65A93F0091F18A /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 473B63D72F65A93F0091F18A /* Icon.png */; };
+		473B63DA2F65A93F0091F18A /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 473B63D92F65A93F0091F18A /* Style.css */; };
+		473B63DC2F65A93F0091F18A /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = 473B63DB2F65A93F0091F18A /* Script.js */; };
+		473B63DE2F65A93F0091F18A /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473B63DD2F65A93F0091F18A /* ViewController.swift */; };
+		473B63E12F65A93F0091F18A /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 473B63DF2F65A93F0091F18A /* Main.storyboard */; };
+		473B63E32F65A9410091F18A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 473B63E22F65A9410091F18A /* Assets.xcassets */; };
+		473B63EA2F65A9410091F18A /* OCDJ Standalone Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 473B63E92F65A9410091F18A /* OCDJ Standalone Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		473B63EF2F65A9410091F18A /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473B63EE2F65A9410091F18A /* SafariWebExtensionHandler.swift */; };
+		473B64042F65A9420091F18A /* background in Resources */ = {isa = PBXBuildFile; fileRef = 473B63FB2F65A9420091F18A /* background */; };
+		473B64052F65A9420091F18A /* options in Resources */ = {isa = PBXBuildFile; fileRef = 473B63FC2F65A9420091F18A /* options */; };
+		473B64062F65A9420091F18A /* popup in Resources */ = {isa = PBXBuildFile; fileRef = 473B63FD2F65A9420091F18A /* popup */; };
+		473B64072F65A9420091F18A /* content in Resources */ = {isa = PBXBuildFile; fileRef = 473B63FE2F65A9420091F18A /* content */; };
+		473B64082F65A9420091F18A /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 473B63FF2F65A9420091F18A /* README.md */; };
+		473B64092F65A9420091F18A /* styles in Resources */ = {isa = PBXBuildFile; fileRef = 473B64002F65A9420091F18A /* styles */; };
+		473B640A2F65A9420091F18A /* side-panel in Resources */ = {isa = PBXBuildFile; fileRef = 473B64012F65A9420091F18A /* side-panel */; };
+		473B640B2F65A9420091F18A /* icons in Resources */ = {isa = PBXBuildFile; fileRef = 473B64022F65A9420091F18A /* icons */; };
+		473B640C2F65A9420091F18A /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 473B64032F65A9420091F18A /* manifest.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		473B63EB2F65A9410091F18A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 473B63C62F65A93F0091F18A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 473B63E82F65A9410091F18A;
+			remoteInfo = "OCDJ Standalone Extension";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		473B63F62F65A9410091F18A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				473B63EA2F65A9410091F18A /* OCDJ Standalone Extension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		473B63CE2F65A93F0091F18A /* OCDJ Standalone.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OCDJ Standalone.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		473B63D12F65A93F0091F18A /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		473B63D52F65A93F0091F18A /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
+		473B63D72F65A93F0091F18A /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
+		473B63D92F65A93F0091F18A /* Style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = Style.css; sourceTree = "<group>"; };
+		473B63DB2F65A93F0091F18A /* Script.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Script.js; sourceTree = "<group>"; };
+		473B63DD2F65A93F0091F18A /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		473B63E02F65A93F0091F18A /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		473B63E22F65A9410091F18A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		473B63E42F65A9410091F18A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		473B63E92F65A9410091F18A /* OCDJ Standalone Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "OCDJ Standalone Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		473B63EE2F65A9410091F18A /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		473B63F02F65A9410091F18A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		473B63FB2F65A9420091F18A /* background */ = {isa = PBXFileReference; lastKnownFileType = folder; name = background; path = "../../../ocdj-helper-safari/background"; sourceTree = "<group>"; };
+		473B63FC2F65A9420091F18A /* options */ = {isa = PBXFileReference; lastKnownFileType = folder; name = options; path = "../../../ocdj-helper-safari/options"; sourceTree = "<group>"; };
+		473B63FD2F65A9420091F18A /* popup */ = {isa = PBXFileReference; lastKnownFileType = folder; name = popup; path = "../../../ocdj-helper-safari/popup"; sourceTree = "<group>"; };
+		473B63FE2F65A9420091F18A /* content */ = {isa = PBXFileReference; lastKnownFileType = folder; name = content; path = "../../../ocdj-helper-safari/content"; sourceTree = "<group>"; };
+		473B63FF2F65A9420091F18A /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = "../../../ocdj-helper-safari/README.md"; sourceTree = "<group>"; };
+		473B64002F65A9420091F18A /* styles */ = {isa = PBXFileReference; lastKnownFileType = folder; name = styles; path = "../../../ocdj-helper-safari/styles"; sourceTree = "<group>"; };
+		473B64012F65A9420091F18A /* side-panel */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "side-panel"; path = "../../../ocdj-helper-safari/side-panel"; sourceTree = "<group>"; };
+		473B64022F65A9420091F18A /* icons */ = {isa = PBXFileReference; lastKnownFileType = folder; name = icons; path = "../../../ocdj-helper-safari/icons"; sourceTree = "<group>"; };
+		473B64032F65A9420091F18A /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = manifest.json; path = "../../../ocdj-helper-safari/manifest.json"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		473B63CB2F65A93F0091F18A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		473B63E62F65A9410091F18A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		473B63C52F65A93F0091F18A = {
+			isa = PBXGroup;
+			children = (
+				473B63D02F65A93F0091F18A /* OCDJ Standalone */,
+				473B63ED2F65A9410091F18A /* OCDJ Standalone Extension */,
+				473B63CF2F65A93F0091F18A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		473B63CF2F65A93F0091F18A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				473B63CE2F65A93F0091F18A /* OCDJ Standalone.app */,
+				473B63E92F65A9410091F18A /* OCDJ Standalone Extension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		473B63D02F65A93F0091F18A /* OCDJ Standalone */ = {
+			isa = PBXGroup;
+			children = (
+				473B63D12F65A93F0091F18A /* AppDelegate.swift */,
+				473B63DD2F65A93F0091F18A /* ViewController.swift */,
+				473B63DF2F65A93F0091F18A /* Main.storyboard */,
+				473B63E22F65A9410091F18A /* Assets.xcassets */,
+				473B63E42F65A9410091F18A /* Info.plist */,
+				473B63D32F65A93F0091F18A /* Resources */,
+			);
+			path = "OCDJ Standalone";
+			sourceTree = "<group>";
+		};
+		473B63D32F65A93F0091F18A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				473B63D42F65A93F0091F18A /* Main.html */,
+				473B63D72F65A93F0091F18A /* Icon.png */,
+				473B63D92F65A93F0091F18A /* Style.css */,
+				473B63DB2F65A93F0091F18A /* Script.js */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		473B63ED2F65A9410091F18A /* OCDJ Standalone Extension */ = {
+			isa = PBXGroup;
+			children = (
+				473B63FA2F65A9420091F18A /* Resources */,
+				473B63EE2F65A9410091F18A /* SafariWebExtensionHandler.swift */,
+				473B63F02F65A9410091F18A /* Info.plist */,
+			);
+			path = "OCDJ Standalone Extension";
+			sourceTree = "<group>";
+		};
+		473B63FA2F65A9420091F18A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				473B63FB2F65A9420091F18A /* background */,
+				473B63FC2F65A9420091F18A /* options */,
+				473B63FD2F65A9420091F18A /* popup */,
+				473B63FE2F65A9420091F18A /* content */,
+				473B63FF2F65A9420091F18A /* README.md */,
+				473B64002F65A9420091F18A /* styles */,
+				473B64012F65A9420091F18A /* side-panel */,
+				473B64022F65A9420091F18A /* icons */,
+				473B64032F65A9420091F18A /* manifest.json */,
+			);
+			name = Resources;
+			path = "OCDJ Standalone Extension";
+			sourceTree = SOURCE_ROOT;
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		473B63CD2F65A93F0091F18A /* OCDJ Standalone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 473B63F72F65A9410091F18A /* Build configuration list for PBXNativeTarget "OCDJ Standalone" */;
+			buildPhases = (
+				473B63CA2F65A93F0091F18A /* Sources */,
+				473B63CB2F65A93F0091F18A /* Frameworks */,
+				473B63CC2F65A93F0091F18A /* Resources */,
+				473B63F62F65A9410091F18A /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				473B63EC2F65A9410091F18A /* PBXTargetDependency */,
+			);
+			name = "OCDJ Standalone";
+			packageProductDependencies = (
+			);
+			productName = "OCDJ Standalone";
+			productReference = 473B63CE2F65A93F0091F18A /* OCDJ Standalone.app */;
+			productType = "com.apple.product-type.application";
+		};
+		473B63E82F65A9410091F18A /* OCDJ Standalone Extension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 473B63F32F65A9410091F18A /* Build configuration list for PBXNativeTarget "OCDJ Standalone Extension" */;
+			buildPhases = (
+				473B63E52F65A9410091F18A /* Sources */,
+				473B63E62F65A9410091F18A /* Frameworks */,
+				473B63E72F65A9410091F18A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "OCDJ Standalone Extension";
+			packageProductDependencies = (
+			);
+			productName = "OCDJ Standalone Extension";
+			productReference = 473B63E92F65A9410091F18A /* OCDJ Standalone Extension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		473B63C62F65A93F0091F18A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					473B63CD2F65A93F0091F18A = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					473B63E82F65A9410091F18A = {
+						CreatedOnToolsVersion = 26.2;
+					};
+				};
+			};
+			buildConfigurationList = 473B63C92F65A93F0091F18A /* Build configuration list for PBXProject "OCDJ Standalone" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 473B63C52F65A93F0091F18A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 473B63CF2F65A93F0091F18A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				473B63CD2F65A93F0091F18A /* OCDJ Standalone */,
+				473B63E82F65A9410091F18A /* OCDJ Standalone Extension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		473B63CC2F65A93F0091F18A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				473B63D82F65A93F0091F18A /* Icon.png in Resources */,
+				473B63E12F65A93F0091F18A /* Main.storyboard in Resources */,
+				473B63DC2F65A93F0091F18A /* Script.js in Resources */,
+				473B63D62F65A93F0091F18A /* Main.html in Resources */,
+				473B63E32F65A9410091F18A /* Assets.xcassets in Resources */,
+				473B63DA2F65A93F0091F18A /* Style.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		473B63E72F65A9410091F18A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				473B64062F65A9420091F18A /* popup in Resources */,
+				473B640B2F65A9420091F18A /* icons in Resources */,
+				473B64042F65A9420091F18A /* background in Resources */,
+				473B64082F65A9420091F18A /* README.md in Resources */,
+				473B640C2F65A9420091F18A /* manifest.json in Resources */,
+				473B64072F65A9420091F18A /* content in Resources */,
+				473B64092F65A9420091F18A /* styles in Resources */,
+				473B64052F65A9420091F18A /* options in Resources */,
+				473B640A2F65A9420091F18A /* side-panel in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		473B63CA2F65A93F0091F18A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				473B63DE2F65A93F0091F18A /* ViewController.swift in Sources */,
+				473B63D22F65A93F0091F18A /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		473B63E52F65A9410091F18A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				473B63EF2F65A9410091F18A /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		473B63EC2F65A9410091F18A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 473B63E82F65A9410091F18A /* OCDJ Standalone Extension */;
+			targetProxy = 473B63EB2F65A9410091F18A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		473B63D42F65A93F0091F18A /* Main.html */ = {
+			isa = PBXVariantGroup;
+			children = (
+				473B63D52F65A93F0091F18A /* Base */,
+			);
+			name = Main.html;
+			sourceTree = "<group>";
+		};
+		473B63DF2F65A93F0091F18A /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				473B63E02F65A93F0091F18A /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		473B63F12F65A9410091F18A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		473B63F22F65A9410091F18A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		473B63F42F65A9410091F18A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Standalone Extension/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Standalone Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ocdj.OCDJ-Standalone.Extension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		473B63F52F65A9410091F18A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Standalone Extension/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Standalone Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ocdj.OCDJ-Standalone.Extension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		473B63F82F65A9410091F18A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Standalone/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Standalone";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJ-Standalone";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		473B63F92F65A9410091F18A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "OCDJ Standalone/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "OCDJ Standalone";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJ-Standalone";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		473B63C92F65A93F0091F18A /* Build configuration list for PBXProject "OCDJ Standalone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				473B63F12F65A9410091F18A /* Debug */,
+				473B63F22F65A9410091F18A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		473B63F32F65A9410091F18A /* Build configuration list for PBXNativeTarget "OCDJ Standalone Extension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				473B63F42F65A9410091F18A /* Debug */,
+				473B63F52F65A9410091F18A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		473B63F72F65A9410091F18A /* Build configuration list for PBXNativeTarget "OCDJ Standalone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				473B63F82F65A9410091F18A /* Debug */,
+				473B63F92F65A9410091F18A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 473B63C62F65A93F0091F18A /* Project object */;
+}
