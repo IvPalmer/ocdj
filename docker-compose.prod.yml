@@ -48,7 +48,7 @@ services:
       SLSKD_SLSK_PASSWORD: ${SOULSEEK_PASSWORD}
     volumes:
       - slskd_app:/app
-      - /srv/ocdj/pipeline/01_downloaded:/downloads
+      - /srv/ocdj/pipeline/01_downloaded:/app/downloads
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5030 || exit 1"]
       interval: 30s
