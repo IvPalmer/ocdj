@@ -94,6 +94,7 @@ services:
       MUSIC_ROOT: /srv/ocdj/pipeline
       SOULSEEK_DOWNLOAD_ROOT: /srv/ocdj/pipeline
       TRAXDB_ROOT: /srv/ocdj/traxdb
+      OCDJ_PUBLISH_ROOT: /srv/ocdj/publish
       # Slskd
       SLSKD_BASE_URL: http://slskd:5030
       SLSKD_API_KEY: ${SLSKD_API_KEY}
@@ -162,6 +163,7 @@ services:
       MUSIC_ROOT: /srv/ocdj/pipeline
       SOULSEEK_DOWNLOAD_ROOT: /srv/ocdj/pipeline
       TRAXDB_ROOT: /srv/ocdj/traxdb
+      OCDJ_PUBLISH_ROOT: /srv/ocdj/publish
       SLSKD_BASE_URL: http://slskd:5030
       SLSKD_API_KEY: ${SLSKD_API_KEY}
       ACOUSTID_API_KEY: ${ACOUSTID_API_KEY:-}

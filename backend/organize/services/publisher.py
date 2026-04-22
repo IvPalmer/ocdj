@@ -16,11 +16,24 @@ from django.utils import timezone
 import mutagen
 from mutagen.id3 import ID3, GRP1
 
-from .pipeline import STAGE_FOLDERS, ensure_pipeline_folders, get_pipeline_root
+from .pipeline import ensure_pipeline_folders, get_pipeline_root
 
 logger = logging.getLogger(__name__)
 
 GROUPING_PREFIX = 'ocdj:'
+
+
+def get_publish_root():
+    """Where publisher drops 06_publish/<id>/ subtrees. Separate from the pipeline
+    so the drain daemon has a small bind-mount surface to rsync from.
+
+    VPS: OCDJ_PUBLISH_ROOT=/srv/ocdj/publish (set in compose).
+    Mac dev: unset → falls back under the pipeline root for locality.
+    """
+    return os.environ.get(
+        'OCDJ_PUBLISH_ROOT',
+        os.path.join(get_pipeline_root(), '06_publish'),
+    )
 
 
 def _write_grouping_tag(filepath, pipeline_item_id):
@@ -82,8 +95,8 @@ def publish_pipeline_item(item):
     sha = _compute_sha256(src)
 
     ensure_pipeline_folders()
-    root = get_pipeline_root()
-    dest_dir = os.path.join(root, STAGE_FOLDERS['published'], str(item.id))
+    publish_root = get_publish_root()
+    dest_dir = os.path.join(publish_root, str(item.id))
     os.makedirs(dest_dir, exist_ok=True)
     basename = os.path.basename(src)
     dest = os.path.join(dest_dir, basename)
