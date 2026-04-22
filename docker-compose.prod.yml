@@ -119,6 +119,7 @@ services:
       # VPS-mode flags
       OCDJ_AUTOPUBLISH: "1"
       DRAIN_TOKEN: ${DRAIN_TOKEN}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     volumes:
       - /srv/ocdj/pipeline:/srv/ocdj/pipeline
       - /srv/ocdj/publish:/srv/ocdj/publish
@@ -183,6 +184,7 @@ services:
       ACR_ACCESS_SECRET: ${ACR_ACCESS_SECRET:-}
       ACR_HOST: ${ACR_HOST:-}
       OCDJ_AUTOPUBLISH: "1"
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     volumes:
       - /srv/ocdj/pipeline:/srv/ocdj/pipeline
       - /srv/ocdj/publish:/srv/ocdj/publish

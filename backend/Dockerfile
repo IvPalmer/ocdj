@@ -5,10 +5,20 @@ LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 WORKDIR /app
 
-# System deps for audio processing (chromaprint for AcoustID) + rsync server-side
+# System deps:
+#  - libchromaprint-tools (AcoustID fingerprinting) + ffmpeg (convert stage)
+#  - Node + @anthropic-ai/claude-code: the Claude Agent SDK spawns the
+#    `claude` CLI subprocess, so the CLI binary must be on PATH. Auth comes
+#    from CLAUDE_CODE_OAUTH_TOKEN env (generated via `claude setup-token`
+#    on a Max-authenticated Mac).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libchromaprint-tools \
     ffmpeg \
+    curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

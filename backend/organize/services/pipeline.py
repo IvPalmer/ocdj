@@ -298,6 +298,20 @@ def process_pipeline_item(item_id):
                 item.save(update_fields=['stage', 'error_message'])
                 return
 
+        # Stage 1.5: Agent-enrich if Discogs/MusicBrainz couldn't fix
+        # garbage file tags. Gated on env (CLAUDE_CODE_OAUTH_TOKEN) and
+        # a cheap heuristic so Opus isn't invoked on already-clean rows.
+        if item.stage == 'tagged':
+            try:
+                from .agent_enrich import looks_like_garbage, enrich_pipeline_item
+                if looks_like_garbage(item):
+                    enriched = enrich_pipeline_item(item)
+                    if enriched:
+                        item.refresh_from_db()
+            except Exception as e:
+                # Never fail the pipeline because the agent step misbehaved.
+                logger.warning(f'agent enrich skipped for item {item_id}: {e}')
+
         # Stage 2: Rename
         if item.stage == 'tagged':
             item.stage = 'renaming'
