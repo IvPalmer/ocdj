@@ -212,6 +212,7 @@ services:
       retries: 3
     labels:
       - traefik.enable=true
+      - traefik.docker.network=dokploy-network
       - traefik.http.routers.ocdj.rule=Host(`ocdj.grooveops.dev`)
       - traefik.http.routers.ocdj.entrypoints=websecure
       - traefik.http.routers.ocdj.tls.certresolver=letsencrypt
