@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/organize/', include('organize.urls')),
     path('api/dig/', include('dig.urls')),
     path('api/library/', include('library.urls')),
+    path('api/drain/', include('drain.urls')),
 ]
 
 if settings.DEBUG:

@@ -25,10 +25,19 @@ SECRET_KEY = _default_secret
 
 DEBUG = os.getenv('DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
 
 if DEBUG:
     ALLOWED_HOSTS = ['*']
+
+# CSRF: explicit trusted origins in production (Django 4+ requires scheme).
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
+]
+
+# Running behind nginx/traefik — respect X-Forwarded-Proto so Django knows requests are HTTPS.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -53,6 +62,7 @@ INSTALLED_APPS = [
     'organize',
     'dig',
     'library',
+    'drain',
 ]
 
 MIDDLEWARE = [

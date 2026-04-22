@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q, F
 from soulseek.models import Download
 from wanted.models import WantedItem
 
@@ -15,6 +16,15 @@ class PipelineItem(models.Model):
         ('converting', 'Converting'),
         ('converted', 'Converted'),
         ('ready', 'Ready'),
+        ('published', 'Published'),
+        ('failed', 'Failed'),
+    ]
+
+    ARCHIVE_STATE_CHOICES = [
+        ('on_workbench', 'On workbench'),
+        ('publishable', 'Publishable'),
+        ('draining', 'Draining'),
+        ('archived', 'Archived'),
         ('failed', 'Failed'),
     ]
 
@@ -64,11 +74,48 @@ class PipelineItem(models.Model):
         blank=True,
     )
 
+    # Archive / drain state machine (VPS → Mac iTunes drain)
+    archive_state = models.CharField(
+        max_length=20,
+        choices=ARCHIVE_STATE_CHOICES,
+        default='on_workbench',
+    )
+    sha256 = models.CharField(max_length=64, blank=True, default='')
+    work_path = models.CharField(max_length=1000, blank=True, default='')
+    music_persistent_id = models.CharField(max_length=32, blank=True, default='')
+    published_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    drain_attempts = models.IntegerField(default=0)
+    draining_until = models.DateTimeField(null=True, blank=True)
+
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    ~Q(archive_state__in=['publishable', 'draining'])
+                    | ~Q(work_path='')
+                ),
+                name='workpath_set_when_publishable_or_draining',
+            ),
+            models.CheckConstraint(
+                check=(
+                    ~Q(archive_state='archived')
+                    | (Q(work_path='') & Q(archived_at__isnull=False) & ~Q(music_persistent_id=''))
+                ),
+                name='archived_means_vps_bytes_gone',
+            ),
+            models.CheckConstraint(
+                check=(
+                    ~Q(archive_state__in=['publishable', 'draining', 'archived'])
+                    | ~Q(sha256='')
+                ),
+                name='sha256_set_once_publishable',
+            ),
+        ]
 
     def __str__(self):
         if self.artist and self.title:

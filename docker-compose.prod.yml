@@ -1,0 +1,236 @@
+# ocdj — VPS deploy (Dokploy compose app).
+# Not for local dev — local dev stays `docker compose up` with the dev compose.
+# Env file managed by Dokploy UI. Secrets read from /home/ubuntu/ocdj/.env.
+#
+# Architecture (see wiki/decisions/2026-04-22-ocdj-architecture.md):
+#   VPS = workbench + publisher. Mac = iTunes ingest. iTunes Match = delivery.
+#
+# Host bind mounts:
+#   /srv/ocdj/pipeline  → 01_downloaded .. 05_ready stages (backend rw)
+#   /srv/ocdj/publish   → 06_publish stage; Mac drain daemon rsyncs from here
+#
+# Drain: Mac LaunchAgent SSHs to ubuntu@main-instance and rsyncs publish/<id>/
+# then hits /api/drain/... to confirm and VPS removes bytes.
+
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: djtools
+      POSTGRES_USER: djtools_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "djtools_user", "-d", "djtools"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  slskd:
+    image: slskd/slskd:0.24.5
+    restart: unless-stopped
+    environment:
+      SLSKD_REMOTE_CONFIGURATION: "true"
+      SLSKD_HTTP_PORT: 5030
+      SLSKD_SLSK_LISTEN_PORT: 50300
+      SLSKD_SLSK_USERNAME: ${SOULSEEK_USERNAME}
+      SLSKD_SLSK_PASSWORD: ${SOULSEEK_PASSWORD}
+    volumes:
+      - slskd_app:/app
+      - /srv/ocdj/pipeline/01_downloaded:/downloads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5030 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    ports:
+      # Soulseek P2P listen port — must be reachable from peers
+      - "50300:50300"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      slskd:
+        condition: service_started
+    environment:
+      # Django
+      DEBUG: "0"
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-ocdj.grooveops.dev,backend,localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-https://ocdj.grooveops.dev}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://ocdj.grooveops.dev}
+      SECRET_KEY: ${SECRET_KEY}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      # Postgres
+      POSTGRES_DB: djtools
+      POSTGRES_USER: djtools_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      # Pipeline paths — match bind mounts below
+      MUSIC_ROOT: /srv/ocdj/pipeline
+      SOULSEEK_DOWNLOAD_ROOT: /srv/ocdj/pipeline
+      TRAXDB_ROOT: /srv/ocdj/traxdb
+      # Slskd
+      SLSKD_BASE_URL: http://slskd:5030
+      SLSKD_API_KEY: ${SLSKD_API_KEY}
+      # External APIs (reuse Mac .env values)
+      ACOUSTID_API_KEY: ${ACOUSTID_API_KEY:-}
+      TRAXDB_START_URL: ${TRAXDB_START_URL:-}
+      PIXELDRAIN_API_KEY: ${PIXELDRAIN_API_KEY:-}
+      TRAXDB_COOKIES: ${TRAXDB_COOKIES:-}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-https://ocdj.grooveops.dev/api/wanted/import/spotify/callback/}
+      DISCOGS_PERSONAL_TOKEN: ${DISCOGS_PERSONAL_TOKEN:-}
+      DISCOGS_USERNAME: ${DISCOGS_USERNAME:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      SC_CLIENT_ID: ${SC_CLIENT_ID:-}
+      SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
+      # Recognize (ACRCloud)
+      ACR_ACCESS_KEY: ${ACR_ACCESS_KEY:-}
+      ACR_ACCESS_SECRET: ${ACR_ACCESS_SECRET:-}
+      ACR_HOST: ${ACR_HOST:-}
+      # VPS-mode flags
+      OCDJ_AUTOPUBLISH: "1"
+      DRAIN_TOKEN: ${DRAIN_TOKEN}
+    volumes:
+      - /srv/ocdj/pipeline:/srv/ocdj/pipeline
+      - /srv/ocdj/publish:/srv/ocdj/publish
+      - /srv/ocdj/traxdb:/srv/ocdj/traxdb
+      - static_volume:/app/staticfiles
+      - huey_volume:/app/huey
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8002/api/core/health/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  worker:
+    build:
+      context: ./backend
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    command: python manage.py run_huey
+    environment:
+      DEBUG: "0"
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-ocdj.grooveops.dev,backend,localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-https://ocdj.grooveops.dev}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://ocdj.grooveops.dev}
+      SECRET_KEY: ${SECRET_KEY}
+      GIT_SHA: ${GIT_SHA:-unknown}
+      POSTGRES_DB: djtools
+      POSTGRES_USER: djtools_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      MUSIC_ROOT: /srv/ocdj/pipeline
+      SOULSEEK_DOWNLOAD_ROOT: /srv/ocdj/pipeline
+      TRAXDB_ROOT: /srv/ocdj/traxdb
+      SLSKD_BASE_URL: http://slskd:5030
+      SLSKD_API_KEY: ${SLSKD_API_KEY}
+      ACOUSTID_API_KEY: ${ACOUSTID_API_KEY:-}
+      TRAXDB_START_URL: ${TRAXDB_START_URL:-}
+      PIXELDRAIN_API_KEY: ${PIXELDRAIN_API_KEY:-}
+      TRAXDB_COOKIES: ${TRAXDB_COOKIES:-}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SPOTIFY_REDIRECT_URI: ${SPOTIFY_REDIRECT_URI:-https://ocdj.grooveops.dev/api/wanted/import/spotify/callback/}
+      DISCOGS_PERSONAL_TOKEN: ${DISCOGS_PERSONAL_TOKEN:-}
+      DISCOGS_USERNAME: ${DISCOGS_USERNAME:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      SC_CLIENT_ID: ${SC_CLIENT_ID:-}
+      SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
+      ACR_ACCESS_KEY: ${ACR_ACCESS_KEY:-}
+      ACR_ACCESS_SECRET: ${ACR_ACCESS_SECRET:-}
+      ACR_HOST: ${ACR_HOST:-}
+      OCDJ_AUTOPUBLISH: "1"
+    volumes:
+      - /srv/ocdj/pipeline:/srv/ocdj/pipeline
+      - /srv/ocdj/publish:/srv/ocdj/publish
+      - /srv/ocdj/traxdb:/srv/ocdj/traxdb
+      - huey_volume:/app/huey
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ocdj.rule=Host(`ocdj.grooveops.dev`)
+      - traefik.http.routers.ocdj.entrypoints=websecure
+      - traefik.http.routers.ocdj.tls.certresolver=letsencrypt
+      - traefik.http.services.ocdj.loadbalancer.server.port=80
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+      - dokploy-network
+
+volumes:
+  postgres_data:
+  slskd_app:
+  static_volume:
+  huey_volume:
+
+networks:
+  internal:
+    driver: bridge
+  dokploy-network:
+    external: true

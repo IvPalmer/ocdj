@@ -40,6 +40,7 @@ STAGE_FOLDERS = {
     'renamed': '03_renamed',
     'converted': '04_converted',
     'ready': '05_ready',
+    'published': '06_publish',
 }
 
 
@@ -347,6 +348,17 @@ def process_pipeline_item(item_id):
             if item.wanted_item:
                 item.wanted_item.status = 'organized'
                 item.wanted_item.save(update_fields=['status'])
+
+            # Stage 5: VPS mode — auto-publish into 06_publish/<id>/ so the
+            # Mac drain daemon can fetch. No-op on Mac dev.
+            if os.environ.get('OCDJ_AUTOPUBLISH') == '1':
+                try:
+                    from .publisher import publish_pipeline_item
+                    publish_pipeline_item(item)
+                except Exception as e:
+                    logger.error(f'Auto-publish failed for item {item_id}: {e}')
+                    # Leave item at stage=ready, archive_state=on_workbench.
+                    # Publish can be retried manually via API.
     except Exception as e:
         logger.error(f"Pipeline processing failed for item {item_id}: {e}")
         try:
