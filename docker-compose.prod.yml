@@ -49,7 +49,7 @@ services:
       - slskd_app:/app
       - /srv/ocdj/pipeline/01_downloaded:/downloads
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:5030 || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5030 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -125,7 +125,7 @@ services:
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8002/api/core/health/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8002/api/core/health/ || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 40s
@@ -205,7 +205,7 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 15s
