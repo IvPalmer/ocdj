@@ -14,6 +14,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 import mutagen
+from mutagen.aiff import AIFF
 from mutagen.id3 import ID3, GRP1
 
 from .pipeline import ensure_pipeline_folders, get_pipeline_root
@@ -37,21 +38,34 @@ def get_publish_root():
 
 
 def _write_grouping_tag(filepath, pipeline_item_id):
-    """Write `ocdj:<id>` into the file's grouping/GRP1 frame.
+    """Write `ocdj:<id>` into the file's GRP1 grouping frame.
 
-    Works for ID3-tagged containers (MP3, AIFF). Mutagen auto-selects. If the
-    container doesn't support GRP1 (rare for our AIFF/MP3 outputs), log and
-    continue — drain will add without idempotency in that case.
+    Container-aware: AIFF embeds ID3 as an IFF chunk (`mutagen.aiff.AIFF`),
+    MP3 / others use raw `ID3`. Using bare `ID3(path)` on an AIFF without an
+    existing chunk *prepends* an ID3 blob which corrupts the AIFF.
+
+    If the container doesn't support GRP1, log and continue — the drain
+    daemon will then add without idempotent dedupe for that file.
     """
     value = f'{GROUPING_PREFIX}{pipeline_item_id}'
+    ext = os.path.splitext(filepath)[1].lower()
     try:
-        try:
-            tags = ID3(filepath)
-        except mutagen.id3.ID3NoHeaderError:
-            tags = ID3()
-        tags.delall('GRP1')
-        tags.add(GRP1(encoding=3, text=[value]))
-        tags.save(filepath)
+        if ext in ('.aiff', '.aif'):
+            audio = AIFF(filepath)
+            if audio.tags is None:
+                audio.add_tags()
+            tags = audio.tags
+            tags.delall('GRP1')
+            tags.add(GRP1(encoding=3, text=[value]))
+            audio.save()
+        else:
+            try:
+                tags = ID3(filepath)
+            except mutagen.id3.ID3NoHeaderError:
+                tags = ID3()
+            tags.delall('GRP1')
+            tags.add(GRP1(encoding=3, text=[value]))
+            tags.save(filepath)
     except Exception as exc:
         logger.warning(
             f'publisher: could not write grouping tag to {filepath}: {exc}'
