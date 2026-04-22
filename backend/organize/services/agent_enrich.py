@@ -121,10 +121,11 @@ async def _query_async(prompt: str, timeout_seconds: int = 60) -> str | None:
         query,
     )
 
+    # No tools → no permission prompts possible → no need for bypassPermissions
+    # (the CLI forbids bypass under root which is our container's default uid).
     options = ClaudeAgentOptions(
         max_turns=1,
         system_prompt=_SYSTEM_PROMPT,
-        permission_mode='bypassPermissions',
         allowed_tools=[],
     )
 
