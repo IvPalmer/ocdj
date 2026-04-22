@@ -41,6 +41,7 @@ services:
     restart: unless-stopped
     environment:
       SLSKD_REMOTE_CONFIGURATION: "true"
+      SLSKD_NO_AUTH: "true"  # internal compose network only — not exposed externally
       SLSKD_HTTP_PORT: 5030
       SLSKD_SLSK_LISTEN_PORT: 50300
       SLSKD_SLSK_USERNAME: ${SOULSEEK_USERNAME}
