@@ -217,6 +217,7 @@ def convert_file(source_path, target_format):
         cmd,
         capture_output=True,
         text=True,
+        errors='replace',  # some source files' ffmpeg stderr contains non-UTF8 bytes
         timeout=600,
     )
 
