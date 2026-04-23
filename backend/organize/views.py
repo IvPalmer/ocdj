@@ -3,7 +3,8 @@ import threading
 import mimetypes
 import os
 
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework import status as http_status
 from django.conf import settings
@@ -17,7 +18,7 @@ from .models import PipelineItem
 from .serializers import PipelineItemSerializer
 
 
-_DOWNLOAD_URL_TTL_SECONDS = 600  # 10 min
+_DOWNLOAD_URL_TTL_SECONDS = 120  # codex: short TTL shrinks leak window, mint-on-click keeps UX fine
 
 
 def _download_signer() -> TimestampSigner:
@@ -468,12 +469,15 @@ def pipeline_download_url(request, pk):
     signed_path = reverse('pipeline-download-signed', args=[token])
     expires_at = timezone.now() + timezone.timedelta(seconds=_DOWNLOAD_URL_TTL_SECONDS)
 
-    return Response({
+    resp = Response({
         'url': signed_path,
         'expires_at': expires_at.isoformat(),
         'ttl_seconds': _DOWNLOAD_URL_TTL_SECONDS,
         'filename': os.path.basename(path),
     })
+    # Signed URLs are per-request bearer tokens — never cache.
+    resp['Cache-Control'] = 'private, no-store, max-age=0'
+    return resp
 
 
 @api_view(['GET'])
@@ -527,6 +531,11 @@ def pipeline_download_signed(request, token):
         filename=filename,
         content_type=content_type or 'application/octet-stream',
     )
+    # No caching, no leaky referrer if the tokenized URL ever becomes
+    # the current document URL.
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Referrer-Policy'] = 'no-referrer'
+    response['X-Content-Type-Options'] = 'nosniff'
     return response
 
 
@@ -568,4 +577,128 @@ def pipeline_send_home(request, pk):
         'id': published.id,
         'archive_state': published.archive_state,
         'work_path': published.work_path,
+    })
+
+
+# ─── Ad-hoc uploads — feed the pipeline tracks not from slskd ─────────────
+
+_AUDIO_EXTS = {'.mp3', '.flac', '.wav', '.aiff', '.aif', '.m4a', '.ogg'}
+
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def pipeline_upload(request):
+    """Accept one or many audio files as multipart/form-data.
+
+    Each file lands in 01_downloaded/ and becomes a PipelineItem at
+    stage='downloaded'. The caller can optionally pass ?autoprocess=1 to
+    kick off `process_all_pending` once all files land. Called from the
+    Organize page drag-drop / picker AND from the Mac folder-watch daemon
+    (which SSH-writes files then hits this endpoint with a manifest-only
+    POST to trigger processing).
+    """
+    from .services.pipeline import (
+        STAGE_FOLDERS, get_pipeline_root, ensure_pipeline_folders,
+        process_all_pending, try_claim_processing_all, release_processing_all,
+    )
+    files = request.FILES.getlist('files') or (
+        [request.FILES['file']] if 'file' in request.FILES else []
+    )
+    if not files:
+        return Response(
+            {'error': 'no files in multipart payload (expected "files" or "file")'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    ensure_pipeline_folders()
+    dest_dir = os.path.join(get_pipeline_root(), STAGE_FOLDERS['downloaded'])
+
+    created = []
+    skipped = []
+    for f in files:
+        ext = os.path.splitext(f.name)[1].lower()
+        if ext not in _AUDIO_EXTS:
+            skipped.append({'name': f.name, 'reason': f'unsupported extension {ext}'})
+            continue
+
+        # Collision handling: append _<n> until we find a free slot.
+        basename = f.name
+        dest_path = os.path.join(dest_dir, basename)
+        counter = 1
+        while os.path.exists(dest_path):
+            stem, ext_ = os.path.splitext(f.name)
+            dest_path = os.path.join(dest_dir, f'{stem}_{counter}{ext_}')
+            counter += 1
+
+        with open(dest_path, 'wb') as out:
+            for chunk in f.chunks():
+                out.write(chunk)
+
+        item = PipelineItem.objects.create(
+            original_filename=os.path.basename(dest_path),
+            current_path=dest_path,
+            stage='downloaded',
+            archive_state='on_workbench',
+            metadata_source='manual',
+        )
+        created.append({'id': item.id, 'filename': os.path.basename(dest_path)})
+
+    autoprocess = request.query_params.get('autoprocess') == '1' or request.data.get('autoprocess') in (True, '1', 'true')
+    kicked = False
+    if autoprocess and created:
+        if try_claim_processing_all():
+            import threading
+            def _run():
+                try:
+                    process_all_pending(already_claimed=True)
+                except Exception:
+                    release_processing_all()
+                    raise
+            threading.Thread(target=_run, daemon=True).start()
+            kicked = True
+
+    return Response({
+        'created': created,
+        'skipped': skipped,
+        'pipeline_kicked': kicked,
+    }, status=http_status.HTTP_201_CREATED if created else http_status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+def pipeline_kick(request):
+    """Trigger process_all_pending without uploading anything.
+
+    Used by the Mac folder-watch daemon: it writes files directly to VPS
+    `/srv/ocdj/pipeline/01_downloaded/` via SSH+rsync (no HTTP upload to
+    avoid re-encoding multipart for multi-GB days), then hits this to
+    start processing. Also hit by the Upload-UI after a scan run.
+
+    Returns 409 if a pipeline run is already in progress.
+    """
+    from .services.pipeline import (
+        scan_completed_downloads,
+        process_all_pending, try_claim_processing_all, release_processing_all,
+    )
+    created = scan_completed_downloads()
+    items = PipelineItem.objects.filter(stage='downloaded')
+    count = items.count()
+    if count == 0:
+        return Response({'message': 'nothing pending', 'scanned_created': created, 'count': 0})
+    if not try_claim_processing_all():
+        return Response(
+            {'error': 'pipeline already running', 'scanned_created': created},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+    import threading
+    def _run():
+        try:
+            process_all_pending(already_claimed=True)
+        except Exception:
+            release_processing_all()
+            raise
+    threading.Thread(target=_run, daemon=True).start()
+    return Response({
+        'message': f'kicked processing for {count} items',
+        'scanned_created': created,
+        'count': count,
     })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
   useProcessSingle, useRetryItem, useSkipStage, useScanDownloads,
@@ -31,6 +31,68 @@ const EDITABLE_FIELDS = [
 ]
 
 const DOWNLOADABLE_STATES = new Set(['on_workbench', 'publishable', 'draining'])
+
+const AUDIO_EXTS = new Set(['mp3', 'flac', 'wav', 'aiff', 'aif', 'm4a', 'ogg'])
+
+
+function UploadButton({ onDone }) {
+  const [working, setWorking] = useState(false)
+  const [status, setStatus] = useState(null)
+  const inputRef = useRef(null)
+
+  const upload = async (fileList) => {
+    const files = Array.from(fileList || [])
+      .filter(f => AUDIO_EXTS.has(f.name.split('.').pop().toLowerCase()))
+    if (files.length === 0) {
+      setStatus('no audio files')
+      return
+    }
+    setWorking(true)
+    setStatus(`uploading ${files.length}…`)
+    const form = new FormData()
+    files.forEach(f => form.append('files', f))
+    try {
+      const resp = await fetch('/api/organize/pipeline/upload/?autoprocess=1', {
+        method: 'POST',
+        body: form,
+      })
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}))
+        setStatus(`failed: ${body.error || resp.status}`)
+        return
+      }
+      const data = await resp.json()
+      setStatus(`created ${data.created.length}, skipped ${data.skipped.length}`)
+      if (onDone) onDone(data)
+    } catch (e) {
+      setStatus(`error: ${e}`)
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept=".mp3,.flac,.wav,.aiff,.aif,.m4a,.ogg,audio/*"
+        style={{ display: 'none' }}
+        onChange={(e) => upload(e.target.files)}
+      />
+      <button
+        className="btn btn-sm"
+        onClick={() => inputRef.current?.click()}
+        disabled={working}
+        title={status || 'Upload audio files into the pipeline'}
+      >
+        {working ? 'Uploading…' : 'Upload'}
+      </button>
+      {status && !working && <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 8 }}>{status}</span>}
+    </>
+  )
+}
 
 
 function DownloadButton({ item }) {
@@ -73,9 +135,16 @@ function DownloadButton({ item }) {
         return
       }
       const data = await resp.json()
-      // Navigate the browser to the signed URL — Django FileResponse streams;
-      // browser pops the download UI.
-      window.location.assign(data.url)
+      // Use a temporary anchor click instead of window.location.assign —
+      // doesn't pollute SPA history, plays nicer on iOS Safari, lets the
+      // `download` attribute hint the filename to the browser.
+      const a = document.createElement('a')
+      a.href = data.url
+      a.download = data.filename || ''
+      a.rel = 'noreferrer'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -277,6 +346,7 @@ function OrganizePanel() {
       <div className="organize-header">
         <h2 className="page-title">Organize</h2>
         <div className="organize-header__actions">
+          <UploadButton onDone={() => scanDownloads.mutate()} />
           <button
             className="btn btn-sm"
             onClick={() => scanDownloads.mutate()}

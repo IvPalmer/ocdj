@@ -17,5 +17,7 @@ urlpatterns = [
     path('pipeline/<int:pk>/download-url/', views.pipeline_download_url, name='pipeline-download-url'),
     path('pipeline/<int:pk>/send-home/', views.pipeline_send_home, name='pipeline-send-home'),
     path('download/<str:token>/', views.pipeline_download_signed, name='pipeline-download-signed'),
+    path('pipeline/upload/', views.pipeline_upload, name='pipeline-upload'),
+    path('pipeline/kick/', views.pipeline_kick, name='pipeline-kick'),
     path('conversion-rules/', views.conversion_rules, name='conversion-rules'),
 ]
