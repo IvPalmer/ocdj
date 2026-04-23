@@ -238,15 +238,19 @@ def write_tags(filepath, metadata):
 
         ext = os.path.splitext(filepath)[1].lower()
 
-        if ext in ('.mp3', '.aiff', '.aif'):
-            # ID3 tags
+        if ext in ('.mp3', '.aiff', '.aif', '.wav'):
+            # ID3 tags. mutagen.File(easy=True) doesn't wrap WAV, so we
+            # always open the container-specific class here, which supports
+            # raw ID3 frames for all three wrappers (MP3 / AIFF / WAVE).
+            if ext == '.mp3':
+                audio = MP3(filepath)
+            elif ext in ('.aiff', '.aif'):
+                audio = AIFF(filepath)
+            else:  # .wav
+                from mutagen.wave import WAVE
+                audio = WAVE(filepath)
             if audio.tags is None:
-                if ext == '.mp3':
-                    audio = MP3(filepath)
-                    audio.add_tags()
-                elif ext in ('.aiff', '.aif'):
-                    audio = AIFF(filepath)
-                    audio.add_tags()
+                audio.add_tags()
 
             tags = audio.tags
             if metadata.get('artist'):
