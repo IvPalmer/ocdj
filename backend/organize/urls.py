@@ -14,5 +14,8 @@ urlpatterns = [
     path('pipeline/<int:pk>/retry/', views.pipeline_retry, name='pipeline-retry'),
     path('pipeline/<int:pk>/skip/', views.pipeline_skip, name='pipeline-skip'),
     path('pipeline/<int:pk>/retag/', views.pipeline_retag, name='pipeline-retag'),
+    path('pipeline/<int:pk>/download-url/', views.pipeline_download_url, name='pipeline-download-url'),
+    path('pipeline/<int:pk>/send-home/', views.pipeline_send_home, name='pipeline-send-home'),
+    path('download/<str:token>/', views.pipeline_download_signed, name='pipeline-download-signed'),
     path('conversion-rules/', views.conversion_rules, name='conversion-rules'),
 ]

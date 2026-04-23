@@ -30,6 +30,72 @@ const EDITABLE_FIELDS = [
   { key: 'track_number', label: 'Track #' },
 ]
 
+const DOWNLOADABLE_STATES = new Set(['on_workbench', 'publishable', 'draining'])
+
+
+function DownloadButton({ item }) {
+  const [working, setWorking] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const archived = item.archive_state === 'archived'
+  const show = item.stage === 'ready' || item.stage === 'published' || archived
+  if (!show) return null
+
+  if (archived) {
+    return (
+      <span
+        className="btn btn-xs"
+        title="This track is on your home Mac; download no longer available"
+        style={{ opacity: 0.6, cursor: 'default' }}
+      >
+        at home
+      </span>
+    )
+  }
+
+  if (!DOWNLOADABLE_STATES.has(item.archive_state)) return null
+
+  const onClick = async () => {
+    setErr(null)
+    setWorking(true)
+    try {
+      const resp = await fetch(`/api/organize/pipeline/${item.id}/download-url/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (resp.status === 410) {
+        setErr('already on your home Mac')
+        return
+      }
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}))
+        setErr(body.error || `HTTP ${resp.status}`)
+        return
+      }
+      const data = await resp.json()
+      // Navigate the browser to the signed URL — Django FileResponse streams;
+      // browser pops the download UI.
+      window.location.assign(data.url)
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <button
+      className="btn btn-xs"
+      onClick={onClick}
+      disabled={working}
+      title={err || 'Stream file to this device'}
+    >
+      {working ? '…' : err ? 'retry' : 'Download'}
+    </button>
+  )
+}
+
+
 function StageCard({ stage, count, isActive, onClick }) {
   const isProcessing = stage.key === 'tagging' || stage.key === 'renaming' || stage.key === 'converting'
   return (
@@ -341,6 +407,7 @@ function OrganizePanel() {
                       Skip
                     </button>
                   )}
+                  <DownloadButton item={item} />
                 </span>
               </div>
               )

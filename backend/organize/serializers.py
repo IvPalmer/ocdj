@@ -11,6 +11,9 @@ class PipelineItemSerializer(serializers.ModelSerializer):
             'artist', 'title', 'album', 'label', 'catalog_number',
             'genre', 'year', 'track_number', 'has_artwork',
             'stage', 'error_message', 'metadata_source',
+            'archive_state', 'sha256', 'work_path',
+            'music_persistent_id', 'published_at', 'archived_at',
+            'drain_attempts',
             'created', 'updated',
         ]
         read_only_fields = ['created', 'updated']

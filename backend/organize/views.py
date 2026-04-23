@@ -1,14 +1,32 @@
 import threading
 
+import mimetypes
 import os
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status as http_status
+from django.conf import settings
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Count
+from django.http import FileResponse
+from django.urls import reverse
+from django.utils import timezone
 
 from .models import PipelineItem
 from .serializers import PipelineItemSerializer
+
+
+_DOWNLOAD_URL_TTL_SECONDS = 600  # 10 min
+
+
+def _download_signer() -> TimestampSigner:
+    """TimestampSigner scoped to the download-url feature.
+
+    salt namespaces the signature so a token minted for one purpose
+    can't be replayed against another signed endpoint later.
+    """
+    return TimestampSigner(salt='organize.download-url.v1')
 
 
 @api_view(['GET'])
@@ -410,3 +428,144 @@ def conversion_rules(request):
     rules_text = get_config('ORGANIZE_CONVERSION_RULES') or DEFAULT_RULES
     parsed = parse_rules(rules_text)
     return Response({'rules': rules_text, 'parsed_count': len(parsed)})
+
+
+# ─── Travel-mode downloads ────────────────────────────────────────────────
+# Issue a short-lived HMAC-signed URL that streams the file without
+# requiring a login. Enumerable /pipeline/<id>/download/ would be
+# scrape-friendly; signed tokens keep this safe until CF Access is added.
+
+@api_view(['POST'])
+def pipeline_download_url(request, pk):
+    """Issue a signed URL the caller can hand to the browser (or `curl -O`).
+
+    Returns 410 Gone when bytes have already been drained to the home Mac —
+    the only copy now lives in Music.app and can't be re-served.
+    """
+    try:
+        item = PipelineItem.objects.get(pk=pk)
+    except PipelineItem.DoesNotExist:
+        return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    if item.archive_state == 'archived':
+        return Response(
+            {
+                'error': 'archived',
+                'message': 'file is on your home Mac; download not available',
+                'music_persistent_id': item.music_persistent_id,
+            },
+            status=http_status.HTTP_410_GONE,
+        )
+
+    path = item.work_path or item.current_path
+    if not path or not os.path.exists(path):
+        return Response(
+            {'error': 'file missing on server'},
+            status=http_status.HTTP_404_NOT_FOUND,
+        )
+
+    token = _download_signer().sign(str(item.id))
+    signed_path = reverse('pipeline-download-signed', args=[token])
+    expires_at = timezone.now() + timezone.timedelta(seconds=_DOWNLOAD_URL_TTL_SECONDS)
+
+    return Response({
+        'url': signed_path,
+        'expires_at': expires_at.isoformat(),
+        'ttl_seconds': _DOWNLOAD_URL_TTL_SECONDS,
+        'filename': os.path.basename(path),
+    })
+
+
+@api_view(['GET'])
+def pipeline_download_signed(request, token):
+    """Verify the signed token + stream the file. Safe against scraping.
+
+    A race where drain archives the row between signing and streaming is
+    caught here: we re-read DB state before opening the file. Open fd on
+    an unlinked inode still streams to completion for in-flight downloads
+    that started before the archive.
+    """
+    try:
+        item_id = _download_signer().unsign(token, max_age=_DOWNLOAD_URL_TTL_SECONDS)
+    except SignatureExpired:
+        return Response(
+            {'error': 'link expired; request a new one'},
+            status=http_status.HTTP_410_GONE,
+        )
+    except BadSignature:
+        return Response(
+            {'error': 'invalid or tampered link'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        item = PipelineItem.objects.get(pk=int(item_id))
+    except (ValueError, PipelineItem.DoesNotExist):
+        return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    if item.archive_state == 'archived':
+        return Response(
+            {
+                'error': 'archived',
+                'message': 'file is on your home Mac; download not available',
+            },
+            status=http_status.HTTP_410_GONE,
+        )
+
+    path = item.work_path or item.current_path
+    if not path or not os.path.exists(path):
+        return Response(
+            {'error': 'file missing on server'},
+            status=http_status.HTTP_404_NOT_FOUND,
+        )
+
+    filename = os.path.basename(path)
+    content_type, _ = mimetypes.guess_type(filename)
+    response = FileResponse(
+        open(path, 'rb'),
+        as_attachment=True,
+        filename=filename,
+        content_type=content_type or 'application/octet-stream',
+    )
+    return response
+
+
+@api_view(['POST'])
+def pipeline_send_home(request, pk):
+    """Manually publish a ready track so the drain daemon picks it up.
+
+    Only needed when auto-publish is disabled. Idempotent: returns 200
+    with existing state if the item is already past 'publishable'.
+    """
+    try:
+        item = PipelineItem.objects.get(pk=pk)
+    except PipelineItem.DoesNotExist:
+        return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    if item.archive_state in ('publishable', 'draining', 'archived'):
+        return Response({
+            'id': item.id,
+            'archive_state': item.archive_state,
+            'idempotent': True,
+        })
+
+    if item.stage != 'ready':
+        return Response(
+            {'error': f'cannot publish from stage={item.stage}'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
+    from .services.publisher import publish_pipeline_item
+    try:
+        published = publish_pipeline_item(item)
+    except Exception as exc:
+        return Response(
+            {'error': f'publish failed: {exc}'},
+            status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    return Response({
+        'id': published.id,
+        'archive_state': published.archive_state,
+        'work_path': published.work_path,
+    })
