@@ -31,30 +31,38 @@ _TRACKNUM_RE = re.compile(r'\b\d{2}\b')
 
 
 def looks_like_garbage(item) -> bool:
-    """Return True if the item still has raw-file tags of the compilation-rip kind."""
-    if item.metadata_source and item.metadata_source != 'file':
-        # Discogs / MusicBrainz / manual already produced usable metadata.
+    """Return True if this item needs the agent to clean up its metadata.
+
+    Covers two distinct garbage patterns:
+      1. Compilation-rip tags — artist/album pasted with the comp name, track
+         number baked into the title, etc.
+      2. No tags at all, but the filename has structure (e.g. WAVs from a
+         WeTransfer zip where only the filename carries artist/title).
+    """
+    if item.metadata_source and item.metadata_source not in ('file', 'manual'):
+        # Discogs / MusicBrainz already produced usable metadata.
         return False
 
     title = (item.title or '').strip()
     artist = (item.artist or '').strip()
+    fname = os.path.basename(item.original_filename or item.current_path or '')
+    fstem = os.path.splitext(fname)[0]
 
+    # Pattern 2 — empty tags, structured filename worth parsing.
     if not title and not artist:
+        # Needs a meaningful ' - ' split (ignore single-word titles like
+        # 'Alias.wav' where the agent has nothing to work with).
+        if ' - ' in fstem:
+            return True
         return False
 
-    # Compilation CDs: 'CD 1 - 08 - Shatrax - ...' in the title.
+    # Pattern 1 — compilation garbage.
     if _CD_RE.search(title):
         return True
-
-    # Track title has 3+ ' - ' separators → probably 'Track# - Artist - Title - Remix'.
     if title.count(' - ') >= 3:
         return True
-
-    # Artist field looks like a comp name ('VA - Foo' or contains 'Various').
     if artist.lower().startswith('va - ') or 'various' in artist.lower():
         return True
-
-    # Artist literally equals the album/compilation name (common rip mistake).
     if item.album and artist.strip() == item.album.strip():
         return True
 
@@ -63,10 +71,14 @@ def looks_like_garbage(item) -> bool:
 
 _SYSTEM_PROMPT = """You are a metadata parser for a DJ's music library pipeline.
 
-You receive one track whose raw file tags were written by a Soulseek ripper
-that tagged an entire compilation rather than the individual track. Your job:
-parse the filename + current (garbage) tag fields and return the CORRECT
-individual-track metadata as a single JSON object.
+You receive one track with one of these defects:
+ (a) raw file tags written by a Soulseek ripper that tagged an entire
+     compilation rather than the individual track, or
+ (b) no usable file tags at all (common for WAV files), but a filename
+     that encodes artist + title + occasionally label/remix.
+
+Your job: parse the filename + any existing tag fields and return the
+CORRECT individual-track metadata as a single JSON object.
 
 Rules:
 - Return ONLY valid JSON. No prose. No code fences. No explanation.
@@ -214,6 +226,25 @@ def enrich_pipeline_item(item) -> bool:
     item.metadata_source = 'manual'
     update_fields.append('metadata_source')
     item.save(update_fields=update_fields + ['updated'])
+
+    # Persist the corrected metadata into the audio file itself so downstream
+    # (rename → convert → drain → Music.app) sees clean embedded tags, not just
+    # DB-level corrections. Never fatal.
+    try:
+        from .tagger import write_tags
+        write_tags(item.current_path, {
+            'artist': item.artist,
+            'title': item.title,
+            'album': item.album,
+            'label': item.label,
+            'catalog_number': item.catalog_number,
+            'genre': item.genre,
+            'year': item.year,
+            'track_number': item.track_number,
+        })
+    except Exception as tag_exc:
+        logger.warning('agent_enrich: write_tags failed for item %s: %s', item.id, tag_exc)
+
     logger.info(
         'agent_enrich: item %s updated (confidence=%s, fields=%s)',
         item.id, parsed.get('confidence'), update_fields,
