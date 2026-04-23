@@ -34,9 +34,11 @@ for fmt, exts in FORMAT_EXTENSIONS.items():
 
 # FFmpeg codec args per output format
 FFMPEG_CODEC_ARGS = {
-    'aiff': ['-c:a', 'pcm_s16be'],
-    'wav': ['-c:a', 'pcm_s16le'],
-    'flac': ['-c:a', 'flac'],
+    # 24-bit AIFF/WAV is the DJ standard. pcm_s24be pads 16-bit sources
+    # losslessly and keeps 24-bit sources at full depth.
+    'aiff': ['-c:a', 'pcm_s24be'],
+    'wav': ['-c:a', 'pcm_s24le'],
+    'flac': ['-c:a', 'flac', '-sample_fmt', 's32'],
     'mp3': ['-c:a', 'libmp3lame', '-b:a', '320k'],
 }
 
