@@ -64,6 +64,7 @@ services:
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
       - SC_CLIENT_ID=${SC_CLIENT_ID:-}
       - SC_CLIENT_SECRET=${SC_CLIENT_SECRET:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
     ports:
       - "8002:8002"
     volumes:
@@ -108,6 +109,7 @@ services:
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
       - SC_CLIENT_ID=${SC_CLIENT_ID:-}
       - SC_CLIENT_SECRET=${SC_CLIENT_SECRET:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
     volumes:
       - ./backend:/app
       - ./tools:/app/tools
