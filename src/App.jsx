@@ -5,6 +5,7 @@ import WantedList from './components/WantedSection/WantedList'
 import SoulseekPanel from './components/SoulseekSection/SoulseekPanel'
 import TraxDBPanel from './components/TraxDBSection/TraxDBPanel'
 import RecognizePanel from './components/RecognizeSection/RecognizePanel'
+import CratematePanel from './components/CratemateSection/CratematePanel'
 import OrganizePanel from './components/OrganizeSection/OrganizePanel'
 import LibraryPanel from './components/LibrarySection/LibraryPanel'
 import SettingsPanel from './components/SettingsSection/SettingsPanel'
@@ -21,6 +22,7 @@ function App() {
         <Route path="/soulseek" element={<SoulseekPanel />} />
         <Route path="/traxdb" element={<TraxDBPanel />} />
         <Route path="/recognize" element={<RecognizePanel />} />
+        <Route path="/cratemate" element={<CratematePanel />} />
         <Route path="/organize" element={<OrganizePanel />} />
         <Route path="/library" element={<LibraryPanel />} />
         <Route path="/agent" element={<AgentPanel />} />

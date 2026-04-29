@@ -41,3 +41,14 @@ huey>=2.5.1
 # In-pipeline agent — enriches garbage-tagged metadata via Max subscription.
 # Requires CLAUDE_CODE_OAUTH_TOKEN env (generated once via `claude setup-token`).
 claude-agent-sdk>=0.1.0
+
+# Cratemate module (album-cover identification + multi-platform enrichment).
+# V1 ships Gemini Vision only — torch/torchvision/google-cloud-vision/streamlit
+# deferred to V2 per docs/plans/INGEST-CRATE-MATE-AS-MODULE.md Phase 0.
+google-generativeai>=0.8.0
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.25.0
+Pillow>=10.0.0
+aiohttp>=3.9.0
+# spotipy / musicbrainzngs / beautifulsoup4 / lxml / python3-discogs-client
+# are already pinned above for wanted/organize — cratemate reuses them.

@@ -16,6 +16,7 @@ const NAV_GROUPS = [
     label: 'Capture',
     items: [
       { to: '/recognize', label: 'Recognize' },
+      { to: '/cratemate', label: 'Crate-Mate' },
       { to: '/traxdb', label: 'TraxDB' },
     ],
   },
