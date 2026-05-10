@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _hybrid_searcher():
-    """Lazy import — heavy graph (PIL + google-generativeai + fuzzywuzzy)
+    """Lazy import — heavy graph (PIL + claude-agent-sdk + fuzzywuzzy)
     pulled in only when an /identify request arrives, so Django boot stays fast.
 
     Cached on the function attribute so subsequent requests reuse the
@@ -49,26 +49,38 @@ def _hybrid_searcher():
 
 def _credentials_configured():
     """Lightweight env check — used by views to bail out with 503 before
-    booting the heavy hybrid searcher when nothing's set."""
+    booting the heavy hybrid searcher when nothing's set.
+
+    V2 path: Claude Agent SDK via the operator's Max subscription. Same env
+    var that organize/services/agent_enrich.py already requires."""
     import os
-    key = os.getenv('CRATEMATE_GEMINI_API_KEY', '')
+    key = os.getenv('CLAUDE_CODE_OAUTH_TOKEN', '')
     return bool(key) and key != '__PENDING__'
+
+
+def _has(env_var: str) -> bool:
+    """True if env var is set and not the placeholder."""
+    import os
+    v = os.getenv(env_var, '')
+    return bool(v) and v != '__PENDING__'
 
 
 @api_view(['GET'])
 def status_view(request):
     """Operational status of the cratemate module."""
-    import os
     return Response({
         'status': 'operational' if _credentials_configured() else 'unconfigured',
+        'recognition_backend': 'claude_agent_sdk',
         'features': {
-            'gemini_vision': bool(os.getenv('CRATEMATE_GEMINI_API_KEY', '')) and os.getenv('CRATEMATE_GEMINI_API_KEY') != '__PENDING__',
-            'discogs': bool(os.getenv('CRATEMATE_DISCOGS_TOKEN', '')) and os.getenv('CRATEMATE_DISCOGS_TOKEN') != '__PENDING__',
-            'spotify': bool(os.getenv('CRATEMATE_SPOTIFY_CLIENT_ID', '')) and os.getenv('CRATEMATE_SPOTIFY_CLIENT_ID') != '__PENDING__',
-            'youtube': bool(os.getenv('CRATEMATE_YOUTUBE_API_KEY') or os.getenv('YOUTUBE_API_KEY')),
-            'gcp_vision': bool(os.getenv('CRATEMATE_GCP_SA_JSON', '')) and os.getenv('CRATEMATE_GCP_SA_JSON') != '__PENDING__',
+            'claude_vision': _has('CLAUDE_CODE_OAUTH_TOKEN'),
+            'discogs': _has('CRATEMATE_DISCOGS_TOKEN'),
+            'spotify': _has('CRATEMATE_SPOTIFY_CLIENT_ID'),
+            'youtube': _has('CRATEMATE_YOUTUBE_API_KEY') or _has('YOUTUBE_API_KEY'),
         },
-        'description': 'Album-cover identification + multi-platform metadata enrichment.',
+        'description': (
+            'Album-cover identification (Claude vision via Max OAuth) + '
+            'multi-platform metadata enrichment (Discogs, Spotify, YouTube, Bandcamp).'
+        ),
     })
 
 
@@ -84,8 +96,11 @@ def identify(request):
         return Response(
             {
                 'error': 'cratemate credentials not configured',
-                'detail': 'Set CRATEMATE_GEMINI_API_KEY (and friends) in '
-                          '~/.secrets/ocdj-cratemate.env or Dokploy env, then restart.',
+                'detail': (
+                    'Set CLAUDE_CODE_OAUTH_TOKEN in the backend environment '
+                    '(generated once via `claude setup-token`). The same token '
+                    'agent_enrich.py uses for filename parsing.'
+                ),
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
@@ -135,36 +150,38 @@ def identify(request):
     duration_ms = int((time.time() - started) * 1000)
 
     # Persist the identification + (optional) enriched release.
+    #
+    # NB: hybrid_search.py returns a NESTED payload — `album.*`, `links.*`,
+    # `tracks.*`, `identification.*` — not the flat top-level fields the
+    # original Gemini-era port assumed. The helper below normalizes both shapes
+    # so old responses (if any leaked into the DB) and new ones survive.
+    flat = _flatten_search_result(result) if isinstance(result, dict) else {}
     identification = AlbumIdentification.objects.create(
         image_hash=image_hash,
-        method='gemini',
+        method='claude_vision',
         raw_response=result if isinstance(result, dict) else {},
-        artist_guess=(result or {}).get('artist_name', '') or (result or {}).get('album', {}).get('artist', '') if isinstance(result, dict) else '',
-        album_guess=(result or {}).get('album_name', '') or (result or {}).get('album', {}).get('name', '') if isinstance(result, dict) else '',
-        confidence=(result or {}).get('confidence') if isinstance(result, dict) else None,
+        artist_guess=flat.get('artist') or '',
+        album_guess=flat.get('album') or '',
+        confidence=flat.get('confidence_numeric'),
         error_message=(result or {}).get('error', '') if isinstance(result, dict) else '',
     )
 
     release = None
-    if isinstance(result, dict) and not result.get('error'):
+    if isinstance(result, dict) and not result.get('error') and (flat.get('artist') or flat.get('album')):
         release = IdentifiedRelease.objects.create(
             identification=identification,
-            artist=identification.artist_guess or '',
-            album=identification.album_guess or '',
-            release_date=result.get('release_date') or '',
-            genres=result.get('genres') or [],
-            cover_image_url=result.get('album_image') or '',
-            discogs_url=result.get('discogs_url') or '',
-            spotify_url=result.get('spotify_url') or '',
-            youtube_url=result.get('youtube_url') or '',
-            bandcamp_url=result.get('bandcamp_url') or '',
-            tracklist=result.get('tracks', {}).get('tracklist', []) if isinstance(result.get('tracks'), dict) else [],
-            market_stats=result.get('market_stats') or {},
-            extra={k: v for k, v in result.items() if k not in (
-                'artist_name', 'album_name', 'release_date', 'genres',
-                'album_image', 'discogs_url', 'spotify_url', 'youtube_url',
-                'bandcamp_url', 'tracks', 'market_stats',
-            )},
+            artist=flat.get('artist') or '',
+            album=flat.get('album') or '',
+            release_date=flat.get('release_date') or '',
+            genres=flat.get('genres') or [],
+            cover_image_url=flat.get('cover_image_url') or '',
+            discogs_url=flat.get('discogs_url') or '',
+            spotify_url=flat.get('spotify_url') or '',
+            youtube_url=flat.get('youtube_url') or '',
+            bandcamp_url=flat.get('bandcamp_url') or '',
+            tracklist=flat.get('tracklist') or [],
+            market_stats=flat.get('market_stats') or {},
+            extra=flat.get('extra') or {},
         )
 
     run.identification = identification
@@ -188,18 +205,155 @@ def identify(request):
 
 @api_view(['POST'])
 def lookup(request):
-    """Manual artist+album fallback when image identification isn't useful."""
-    if not _credentials_configured():
-        return Response(
-            {'error': 'cratemate credentials not configured'},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
+    """Manual artist+album fallback when image identification isn't useful.
+
+    Skips the vision step entirely — goes straight to the Discogs/Spotify/
+    YouTube/Bandcamp enrichment pipeline. Useful when a user already knows
+    the album (e.g. read it off a sleeve text-only) and just wants the
+    cross-platform links and tracklist.
+    """
+    # Lookup doesn't need Claude — it's pure metadata enrichment. So the
+    # CLAUDE_CODE_OAUTH_TOKEN check from /identify doesn't apply here.
     ser = ManualLookupSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
-    return Response(
-        {'error': 'manual lookup not yet implemented in V1', 'detail': ser.validated_data},
-        status=status.HTTP_501_NOT_IMPLEMENTED,
+
+    artist = ser.validated_data['artist'].strip()
+    album = ser.validated_data['album'].strip()
+
+    searcher = _hybrid_searcher()
+    if searcher is None:
+        return Response(
+            {'error': 'hybrid search unavailable', 'detail': 'See server logs.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    started = time.time()
+    try:
+        result = asyncio.run(searcher.manual_lookup(artist, album))
+    except Exception as e:
+        logger.error("lookup failed for %r/%r: %s", artist, album, e, exc_info=True)
+        return Response(
+            {'error': 'lookup failed', 'detail': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    duration_ms = int((time.time() - started) * 1000)
+
+    # Persist as a manual identification so audit log + recent-results list
+    # surface it alongside image-driven IDs.
+    flat = _flatten_search_result(result) if isinstance(result, dict) else {}
+    identification = AlbumIdentification.objects.create(
+        image_hash='',
+        method='manual',
+        raw_response=result if isinstance(result, dict) else {},
+        artist_guess=flat.get('artist') or artist,
+        album_guess=flat.get('album') or album,
+        confidence=flat.get('confidence_numeric'),
+        error_message=(result or {}).get('error', '') if isinstance(result, dict) else '',
     )
+    release = None
+    if isinstance(result, dict) and not result.get('error') and (flat.get('artist') or flat.get('album')):
+        release = IdentifiedRelease.objects.create(
+            identification=identification,
+            artist=flat.get('artist') or artist,
+            album=flat.get('album') or album,
+            release_date=flat.get('release_date') or '',
+            genres=flat.get('genres') or [],
+            cover_image_url=flat.get('cover_image_url') or '',
+            discogs_url=flat.get('discogs_url') or '',
+            spotify_url=flat.get('spotify_url') or '',
+            youtube_url=flat.get('youtube_url') or '',
+            bandcamp_url=flat.get('bandcamp_url') or '',
+            tracklist=flat.get('tracklist') or [],
+            market_stats=flat.get('market_stats') or {},
+            extra=flat.get('extra') or {},
+        )
+
+    payload = dict(result) if isinstance(result, dict) else {'error': 'unexpected result'}
+    payload['cratemate'] = {
+        'identification_id': identification.id,
+        'release_id': release.id if release else None,
+        'duration_ms': duration_ms,
+        'method': 'manual',
+    }
+    return Response(payload, status=status.HTTP_200_OK)
+
+
+# --------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------
+
+# Map "high|medium|low" → 0–1 numeric for the AlbumIdentification.confidence
+# float column. Mirrors the buckets gemini.py / claude_vision.py already emit.
+_CONFIDENCE_BUCKETS = {'high': 0.9, 'medium': 0.7, 'low': 0.5}
+
+
+def _flatten_search_result(result: dict) -> dict:
+    """Normalize hybrid_search's nested response into the flat shape the
+    AlbumIdentification + IdentifiedRelease tables expect.
+
+    hybrid_search returns:
+        {
+          "album": {"name", "artist", "release_date", "genres", "image", ...},
+          "links": {"discogs", "spotify", "youtube", "bandcamp"},
+          "tracks": {"tracklist", "spotify_tracks", "youtube_tracks", ...},
+          "market_stats": {...},
+          "release_overview": {...},
+          "identification": {"confidence": 0.0–1.0, "method", "source"},
+        }
+
+    Older Gemini-era responses (pre-2026-05) used flat top-level keys like
+    `artist_name`, `album_name`, `discogs_url`. We accept both so DB rows
+    don't lose data depending on what shape leaked through.
+    """
+    album = result.get('album') if isinstance(result.get('album'), dict) else {}
+    links = result.get('links') if isinstance(result.get('links'), dict) else {}
+    tracks = result.get('tracks') if isinstance(result.get('tracks'), dict) else {}
+    ident = result.get('identification') if isinstance(result.get('identification'), dict) else {}
+
+    artist = album.get('artist') or result.get('artist_name') or ''
+    album_name = album.get('name') or result.get('album_name') or ''
+
+    # Tracklist: prefer the rich youtube_tracks (has YouTube mapping) → spotify_tracks → raw tracklist
+    tracklist = (
+        tracks.get('youtube_tracks')
+        or tracks.get('spotify_tracks')
+        or tracks.get('tracklist')
+        or []
+    )
+
+    # Confidence: hybrid_search puts a float in identification.confidence;
+    # claude_vision/gemini emit a string bucket. Normalize to float.
+    raw_conf = ident.get('confidence')
+    if isinstance(raw_conf, (int, float)):
+        confidence_numeric = float(raw_conf)
+    elif isinstance(raw_conf, str):
+        confidence_numeric = _CONFIDENCE_BUCKETS.get(raw_conf.lower())
+    else:
+        confidence_numeric = None
+
+    flat = {
+        'artist': artist,
+        'album': album_name,
+        'release_date': album.get('release_date') or result.get('release_date') or '',
+        'genres': album.get('genres') or result.get('genres') or [],
+        'cover_image_url': album.get('image') or result.get('album_image') or '',
+        'discogs_url': links.get('discogs') or result.get('discogs_url') or '',
+        'spotify_url': links.get('spotify') or result.get('spotify_url') or '',
+        'youtube_url': links.get('youtube') or result.get('youtube_url') or '',
+        'bandcamp_url': links.get('bandcamp') or result.get('bandcamp_url') or '',
+        'tracklist': tracklist,
+        'market_stats': result.get('market_stats') or {},
+        'confidence_numeric': confidence_numeric,
+    }
+    # Anything we didn't explicitly extract goes into extra so we don't lose it.
+    consumed = {
+        'album', 'links', 'tracks', 'identification',
+        'artist_name', 'album_name', 'release_date', 'genres',
+        'album_image', 'discogs_url', 'spotify_url', 'youtube_url',
+        'bandcamp_url', 'market_stats', 'cratemate',
+    }
+    flat['extra'] = {k: v for k, v in result.items() if k not in consumed}
+    return flat
 
 
 @api_view(['GET'])

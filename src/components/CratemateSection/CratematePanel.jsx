@@ -21,7 +21,7 @@ function CratematePanel() {
   }, [])
 
   // Pull module status on mount so the panel can render a clear "not configured"
-  // state when CRATEMATE_GEMINI_API_KEY isn't set yet (Phase 1 not run).
+  // state when CLAUDE_CODE_OAUTH_TOKEN isn't set yet.
   useEffect(() => {
     let cancelled = false
     fetch(`${API_BASE}/cratemate/status/`)
@@ -115,7 +115,7 @@ function CratematePanel() {
           <strong>Module unconfigured.</strong>{' '}
           {moduleStatus?.status === 'unreachable'
             ? 'Backend not reachable. Is the Django server running?'
-            : 'Set CRATEMATE_GEMINI_API_KEY (and friends) in ~/.secrets/ocdj-cratemate.env, then restart. Phase 1 of the absorption plan rotates these credentials.'}
+            : 'Set CLAUDE_CODE_OAUTH_TOKEN in the backend env (the same token agent_enrich uses for filename parsing), then restart.'}
         </div>
       )}
 

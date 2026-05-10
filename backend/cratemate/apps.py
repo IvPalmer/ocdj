@@ -14,7 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 REQUIRED_ENV_VARS = (
-    'CRATEMATE_GEMINI_API_KEY',
+    # Recognition backend — Claude vision via the operator's Max subscription.
+    # Same token agent_enrich.py already uses for filename parsing.
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    # Enrichment backends — required for the Discogs/Spotify/YouTube/Bandcamp
+    # cross-platform link payload that follows recognition.
     'CRATEMATE_DISCOGS_TOKEN',
     'CRATEMATE_SPOTIFY_CLIENT_ID',
     'CRATEMATE_SPOTIFY_CLIENT_SECRET',

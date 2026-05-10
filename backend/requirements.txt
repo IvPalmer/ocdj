@@ -43,9 +43,11 @@ huey>=2.5.1
 claude-agent-sdk>=0.1.0
 
 # Cratemate module (album-cover identification + multi-platform enrichment).
-# V1 ships Gemini Vision only — torch/torchvision/google-cloud-vision/streamlit
-# deferred to V2 per docs/plans/INGEST-CRATE-MATE-AS-MODULE.md Phase 0.
-google-generativeai>=0.8.0
+# V2 (2026-05): recognition switched from Gemini to Claude vision via the
+# claude-agent-sdk pinned above (Max OAuth, no API key, no per-call cost).
+# torch/torchvision/google-cloud-vision/streamlit/google-generativeai stay
+# deferred — Claude vision alone hits 6/7 perfect ID on a mixed test set
+# (see /tmp/cratemate-test/claude_v2_results.json).
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.25.0
 Pillow>=10.0.0

@@ -12,17 +12,18 @@ from django.db import models
 
 
 class AlbumIdentification(models.Model):
-    """A single image upload + the raw Gemini Vision (or fallback) response."""
+    """A single image upload + the raw vision-LM (or fallback) response."""
 
     METHOD_CHOICES = [
-        ('gemini', 'Gemini Vision'),
+        ('claude_vision', 'Claude vision (Max OAuth)'),
+        ('gemini', 'Gemini Vision (legacy V1)'),
         ('vision_ocr', 'Google Vision OCR'),
         ('universal', 'Universal CLIP search'),
         ('manual', 'Manual artist+album entry'),
     ]
 
-    image_hash = models.CharField(max_length=64, db_index=True)
-    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='gemini')
+    image_hash = models.CharField(max_length=64, db_index=True, blank=True)
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='claude_vision')
     raw_response = models.JSONField(default=dict, blank=True)
     artist_guess = models.CharField(max_length=500, blank=True)
     album_guess = models.CharField(max_length=500, blank=True)

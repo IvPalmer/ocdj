@@ -12,7 +12,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta
 
-from .gemini import GeminiCollector
+from .claude_vision import ClaudeVisionCollector
 from .vision import VisionCollector
 from .discogs import DiscogsCollector
 from .spotify import SpotifyCollector
@@ -39,12 +39,17 @@ logger = logging.getLogger(__name__)
 
 class HybridSearch:
     """
-    Combines multiple search methods to find the best match
-    Priority: Gemini Vision -> OCR + Discogs -> CLIP suggestions
+    Combines multiple search methods to find the best match.
+    Priority: Claude vision (Max OAuth, $0/call) -> OCR fallback -> CLIP (off by default).
+
+    History: V1 used Gemini Vision; replaced with Claude Agent SDK to (a) drop
+    the third-party API-key dependency, (b) make recognition free under the
+    operator's existing Max subscription, and (c) reuse the same auth path
+    that `organize/services/agent_enrich.py` already uses on the VPS.
     """
-    
+
     def __init__(self):
-        self.gemini = GeminiCollector()
+        self.vision_lm = ClaudeVisionCollector()
         self.vision = VisionCollector()
         self.discogs = DiscogsCollector()
         self.spotify = SpotifyCollector("spotify")
@@ -122,10 +127,13 @@ class HybridSearch:
             cached_result = self._get_from_cache(image_hash)
             if cached_result:
                 return cached_result
-            # Run multiple methods in parallel (skip universal if disabled)
+            # Run multiple methods in parallel (skip universal if disabled).
+            # OCR is kept as a fallback even though empirically it almost
+            # never produces a Discogs-resolvable hit on stylized covers —
+            # cheap to keep running in case the vision LM call itself fails.
             tasks = [
-                self._gemini_search(album_image),
-                self._vision_ocr_search(album_image)
+                self._vision_lm_search(album_image),
+                self._vision_ocr_search(album_image),
             ]
             if self.enable_universal and self.universal is not None:
                 tasks.insert(1, self._universal_search(album_image))
@@ -134,29 +142,31 @@ class HybridSearch:
 
             # Unpack based on whether universal ran
             if self.enable_universal and self.universal is not None:
-                gemini_result = results[0] if not isinstance(results[0], Exception) else None
+                vision_lm_result = results[0] if not isinstance(results[0], Exception) else None
                 universal_result = results[1] if not isinstance(results[1], Exception) else None
                 ocr_result = results[2] if not isinstance(results[2], Exception) else None
             else:
-                gemini_result = results[0] if not isinstance(results[0], Exception) else None
+                vision_lm_result = results[0] if not isinstance(results[0], Exception) else None
                 universal_result = None
                 ocr_result = results[1] if len(results) > 1 and not isinstance(results[1], Exception) else None
-            
+
             # Combine and rank all candidates
             all_candidates = []
-            
-            # Process Gemini results (highest priority)
-            if gemini_result and gemini_result.get("success"):
-                gemini_data = gemini_result["result"]
+
+            # Process Claude vision results (highest priority).
+            # `gemini_data` name preserved for downstream confidence calc and
+            # the candidate dict — the shape is identical so no other code moves.
+            if vision_lm_result and vision_lm_result.get("success"):
+                gemini_data = vision_lm_result["result"]
                 if gemini_data.get("artist") and gemini_data.get("album"):
-                    # Search Discogs with Gemini's identification
+                    # Search Discogs with Claude's identification
                     discogs_results = await self._search_discogs_with_info(
                         gemini_data["artist"],
                         gemini_data["album"]
                     )
                     for disc_result in discogs_results[:3]:
                         all_candidates.append({
-                            "source": "gemini",
+                            "source": "claude_vision",
                             "confidence": self._calculate_confidence(gemini_data, disc_result),
                             "discogs_data": disc_result,
                             "gemini_data": gemini_data
@@ -222,13 +232,38 @@ class HybridSearch:
                 "youtube_url": "unavailable"
             }
     
-    async def _gemini_search(self, image: Image.Image) -> Dict:
-        """Run Gemini Vision search"""
+    async def _vision_lm_search(self, image: Image.Image) -> Dict:
+        """Run Claude vision identification (Max OAuth, no API key)."""
         try:
-            return await self.gemini.identify_album(image)
+            return await self.vision_lm.identify_album(image)
         except Exception as e:
-            logger.error(f"Gemini search failed: {e}")
+            logger.error(f"Claude vision search failed: {e}")
             return {"success": False, "error": str(e)}
+
+    async def manual_lookup(self, artist: str, album: str) -> Dict:
+        """Skip the vision step — go straight from a known artist+album to the
+        full enrichment payload (Discogs + Spotify + YouTube + Bandcamp).
+
+        Used by `POST /api/cratemate/lookup/` when the user already knows the
+        identity and wants the cross-platform links + tracklist."""
+        discogs_results = await self._search_discogs_with_info(artist, album)
+        if not discogs_results:
+            return {
+                "error": f"No Discogs match for {artist!r} / {album!r}",
+                "discogs_url": "unavailable",
+                "spotify_url": "unavailable",
+                "youtube_url": "unavailable",
+            }
+        # Synthesize a minimal gemini_data so confidence calc + final-result
+        # builder behave identically to the image-driven path.
+        synthetic = {"artist": artist, "album": album, "confidence": "high"}
+        best = {
+            "source": "manual",
+            "confidence": self._calculate_confidence(synthetic, discogs_results[0]),
+            "discogs_data": discogs_results[0],
+            "gemini_data": synthetic,
+        }
+        return await self._build_final_result(best)
     
     async def _universal_search(self, image: Image.Image) -> Dict:
         """Run existing universal search"""
@@ -796,58 +831,16 @@ class HybridSearch:
         return enhanced_tracks
     
     def _generate_track_search_links(self, artist: str, album: str, tracklist: List[Dict]) -> List[Dict]:
-        """Generate YouTube links - try Gemini first, then yt-dlp, then fallback to search"""
-        
-        # First try Gemini to find YouTube video IDs
-        try:
-            logger.info("Using Gemini to find YouTube video links")
-            gemini_result = asyncio.run(self.gemini.find_youtube_links(artist, album, tracklist))
-            
-            if gemini_result.get("success") and gemini_result.get("tracks"):
-                enhanced_tracks = []
-                for track in gemini_result["tracks"]:
-                    enhanced_track = {
-                        "position": track.get("position", ""),
-                        "title": track.get("title", ""),
-                        "duration": track.get("duration", ""),
-                        "youtube": None
-                    }
-                    
-                    if track.get("youtube_url"):
-                        enhanced_track["youtube"] = {
-                            "url": track["youtube_url"],
-                            "video_id": track.get("youtube_id", ""),
-                            "is_search": False,  # This is a direct video link
-                            "source": "gemini"
-                        }
-                        logger.info(f"Gemini found YouTube video for {track.get('title')}: {track['youtube_url']}")
-                    
-                    enhanced_tracks.append(enhanced_track)
-                
-                # Count how many we found
-                videos_found = sum(1 for t in enhanced_tracks if t.get("youtube"))
-                if videos_found > 0:
-                    logger.info(f"Gemini found {videos_found} direct YouTube video URLs")
-                    # Still fill in search links for tracks without direct links
-                    for track in enhanced_tracks:
-                        if not track.get("youtube") and track.get("title"):
-                            # Include artist + album + track in the fallback search
-                            # Clean Discogs disambiguation suffix like " (3)"
-                            import re
-                            cleaned_artist = re.sub(r"\s*\(\d+\)$", "", artist).strip()
-                            cleaned_album = re.sub(r"\s*\(\d+\)$", "", album).strip()
-                            search_query = f"{cleaned_artist} {cleaned_album} {track['title']}"
-                            from urllib.parse import quote_plus
-                            track["youtube"] = {
-                                "url": f"https://www.youtube.com/results?search_query={quote_plus(search_query)}",
-                                "query": search_query,
-                                "is_search": True
-                            }
-                    return enhanced_tracks
-        except Exception as e:
-            logger.warning(f"Gemini YouTube search failed: {e}")
-        
-        # Second try yt-dlp if available
+        """Generate YouTube links — try yt-dlp first, then fallback to search.
+
+        V2: dropped the Gemini-guesses-YouTube-IDs path that used to live here.
+        Routing this through Claude is technically possible (same SDK pattern
+        as identification) but the value is marginal — this method only runs
+        when the Discogs release has no embedded videos AND the YouTube API
+        key isn't set, which is the rare-tail path. yt-dlp + search links
+        cover it well enough.
+        """
+        # Try yt-dlp if available
         if self.youtube_ytdlp.ytdlp_available:
             logger.info("Trying yt-dlp to get direct YouTube video URLs")
             try:
@@ -861,7 +854,7 @@ class HybridSearch:
                 logger.warning(f"yt-dlp failed, falling back to search links: {e}")
         
         # Fallback to search links
-        logger.info("Using YouTube search links (Gemini and yt-dlp not available or failed)")
+        logger.info("Using YouTube search links (yt-dlp not available or failed)")
         enhanced_tracks = []
         
         import re
