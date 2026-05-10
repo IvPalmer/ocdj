@@ -32,28 +32,43 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """You identify album covers for a DJ's record-digging tool.
 
 You will be given the path to an image file. Read it with the Read tool, look at
-the artwork, and identify the album.
+the artwork, and identify the release.
 
 Return ONLY a JSON object with this exact shape:
 {
-  "artist": "string or null — the performing artist",
-  "album": "string or null — the album/release title",
-  "visible_text": "string — any prominent text visible on the cover",
-  "genre": "string or null — genre if you can infer one",
+  "artist": "string or null — the performing artist if you can identify it",
+  "album": "string or null — the release title (album, EP, 12\\" title)",
+  "label": "string or null — the record label, if visible/recognizable (e.g. 'Sound Signature', 'Strictly Rhythm', 'Warp')",
+  "visible_text": "string — every legible word/character on the cover, in reading order, separated by ' | '",
+  "genre": "string or null",
   "era": "string or null — year or decade if you can tell",
-  "description": "string — short visual description (colors, layout, key visual element)",
+  "description": "string — short visual description that supports your ID",
   "confidence": "high | medium | low"
 }
 
-Rules:
+Critical rules for the artist/label distinction (a DJ's tool fails when these
+are confused):
+- Many obscure 12" / EP covers show the LABEL prominently (e.g. 'SOUND
+  SIGNATURE', 'DW Art', 'STRICTLY RHYTHM') with the artist hidden in small
+  print. Put the label in `label`, NOT in `artist`.
+- If you cannot determine the actual performing artist, leave `artist` as
+  null. Do NOT put the label name in `artist` as a guess.
+- The downstream Discogs lookup will retry with `label`, `album`, and
+  `visible_text` separately, so an honest `null` artist beats a wrong one.
+- Examples:
+   * Cover shows 'SOUND SIGNATURE' top, 'Parallel Dimensions' bottom →
+     {artist: null, album: "Parallel Dimensions", label: "Sound Signature"}
+   * Cover shows 'Daft Punk' (the chrome logo) → {artist: "Daft Punk",
+     album: "Discovery", label: null}  (the logo IS the artist for this release)
+   * Cover shows just a tracklist 'A1. Taipei Disco / B1. Body Movement' →
+     {artist: null, album: "Taipei Disco", label: <if visible>}
+
+Other rules:
 - If the cover is iconic and you genuinely recognize it, give your best guess.
-- If only the label name is visible (not the artist), put the label in `artist`
-  and the album title in `album` — the downstream Discogs lookup will resolve
-  the actual artist from the label+title combination.
-- Do NOT invent. If you cannot ID the album, set artist/album to null and
-  describe what you see in `description` and `visible_text`.
+- Do NOT invent. If you cannot ID the release, set artist/album to null and
+  describe what you see in `description` + `visible_text`.
 - No prose outside the JSON. No code fences. No explanation.
-- Preserve original casing and accents.
+- Preserve original casing, accents, and punctuation (e.g. 'D. W. Art' not 'DW Art').
 """
 
 
@@ -162,6 +177,7 @@ class ClaudeVisionCollector:
         result = {
             'artist': self._clean(parsed.get('artist')),
             'album': self._clean(parsed.get('album')),
+            'label': self._clean(parsed.get('label')),
             'visible_text': parsed.get('visible_text') or '',
             'genre': self._clean(parsed.get('genre')) or 'unknown',
             'era': self._clean(parsed.get('era')) or 'unknown',

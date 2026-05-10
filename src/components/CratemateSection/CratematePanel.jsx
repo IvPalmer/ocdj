@@ -277,8 +277,9 @@ function CratematePanel() {
       )}
 
       {/* Not-recognized result — replaces the old "? — ?" UI. Shows the
-          model's evidence so the user understands why it failed, plus a
-          path forward (try again or enter manually). */}
+          model's evidence (what text it actually read off the cover) so the
+          user understands why it failed and can quickly try a manual lookup
+          with the right artist/album spelling. */}
       {result && !recognized && (
         <section className="cratemate-result cratemate-result--miss">
           <div className="cratemate-miss">
@@ -307,7 +308,74 @@ function CratematePanel() {
         </section>
       )}
 
-      {result && recognized && (
+      {/* Vision-only result — Claude got an artist/album but Discogs found
+          no match. Show the guess + the model's evidence + a one-click
+          "search Discogs / look up manually" so the user can verify. */}
+      {result && recognized && result.vision_only && (
+        <section className="cratemate-result">
+          {previewUrl && (
+            <img className="cratemate-cover" src={previewUrl} alt="The cover you uploaded" />
+          )}
+          <div className="cratemate-banner cratemate-banner--warn" style={{ width: '100%' }}>
+            {result.warning || 'Vision identified this cover but Discogs returned no match.'}
+          </div>
+          <div className="cratemate-identity">
+            {identifiedArtist && (
+              <span className="cratemate-identity__artist">{identifiedArtist}</span>
+            )}
+            <h2 className="cratemate-identity__album">{identifiedAlbum || '—'}</h2>
+            {typeof confidence === 'number' && (
+              <span className="cratemate-confidence">
+                {Math.round(confidence * 100)}% confident · vision only
+              </span>
+            )}
+          </div>
+          {(result.vision_visible_text || result.vision_evidence) && (
+            <div className="cratemate-evidence">
+              {result.vision_visible_text && (
+                <>
+                  <span className="cratemate-evidence__label">Text on cover</span>
+                  <span className="cratemate-evidence__value">{result.vision_visible_text}</span>
+                </>
+              )}
+              {result.vision_evidence && (
+                <>
+                  <span className="cratemate-evidence__label">What I saw</span>
+                  <span className="cratemate-evidence__value">{result.vision_evidence}</span>
+                </>
+              )}
+            </div>
+          )}
+          <div className="cratemate-actions cratemate-actions--center">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                // Pre-fill manual lookup with what Claude saw, let user edit + retry.
+                setManualArtist(identifiedArtist || '')
+                setManualAlbum(identifiedAlbum || '')
+                setResult(null)
+                setManualMode(true)
+              }}
+            >
+              Edit + retry lookup
+            </button>
+            <a
+              className="btn btn-primary"
+              href={`https://www.discogs.com/search/?q=${encodeURIComponent(`${identifiedArtist || ''} ${identifiedAlbum || ''}`.trim())}&type=release`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Search Discogs
+            </a>
+          </div>
+          <button type="button" className="cratemate-reset btn" onClick={reset}>
+            Identify another
+          </button>
+        </section>
+      )}
+
+      {result && recognized && !result.vision_only && (
         <section className="cratemate-result">
           {coverImage && (
             <img className="cratemate-cover" src={coverImage} alt={`Cover art for ${identifiedAlbum}`} />

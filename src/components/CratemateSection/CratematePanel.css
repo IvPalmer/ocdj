@@ -423,3 +423,39 @@
     flex: 1 1 100%;
   }
 }
+
+/* Evidence block — shown on vision-only results so the user can see exactly
+   what Claude read off the cover and decide whether to retry the lookup. */
+.cratemate-evidence {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--s-2) var(--s-4);
+  width: 100%;
+  padding: var(--s-3) var(--s-4);
+  background: var(--bg-inset);
+  border-radius: var(--r);
+  border: 1px solid var(--border-subtle);
+  text-align: left;
+}
+.cratemate-evidence__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-muted);
+  align-self: start;
+  padding-top: 2px;
+}
+.cratemate-evidence__value {
+  font-size: 14px;
+  color: var(--text);
+  font-family: var(--mono);
+  word-break: break-word;
+}
+@media (max-width: 480px) {
+  .cratemate-evidence {
+    grid-template-columns: 1fr;
+    gap: var(--s-1) 0;
+  }
+  .cratemate-evidence__label { padding-top: var(--s-2); }
+}

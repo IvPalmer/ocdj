@@ -53,7 +53,10 @@ class VisionCollector:
             A dictionary containing the best guess for the album's title and artist,
             or an error message if identification fails.
         """
+        if not self.configured:
+            return {"success": False, "error": "VisionCollector unconfigured"}
         try:
+            from google.cloud import vision  # type: ignore  # lazy
             image = vision.Image(content=image_bytes)
             response = self.client.web_detection(image=image)
             annotations = response.web_detection
@@ -102,7 +105,10 @@ class VisionCollector:
         Returns:
             A dictionary containing the extracted text lines, or an error message.
         """
+        if not self.configured:
+            return {"success": False, "error": "VisionCollector unconfigured"}
         try:
+            from google.cloud import vision  # type: ignore  # lazy
             image = vision.Image(content=image_bytes)
             response = self.client.text_detection(image=image)
             texts = response.text_annotations

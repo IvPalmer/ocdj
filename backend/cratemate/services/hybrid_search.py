@@ -158,11 +158,17 @@ class HybridSearch:
             # the candidate dict — the shape is identical so no other code moves.
             if vision_lm_result and vision_lm_result.get("success"):
                 gemini_data = vision_lm_result["result"]
-                if gemini_data.get("artist") and gemini_data.get("album"):
-                    # Search Discogs with Claude's identification
-                    discogs_results = await self._search_discogs_with_info(
-                        gemini_data["artist"],
-                        gemini_data["album"]
+                if gemini_data.get("artist") or gemini_data.get("album") or gemini_data.get("label"):
+                    # Search Discogs with Claude's identification, retrying
+                    # several strategies. Claude now also returns `label`
+                    # separately, which avoids the historical "DW Art" vs
+                    # "D. W. Art" miss where the label was crammed into the
+                    # artist field and broke the strict artist+album query.
+                    discogs_results = await self._search_discogs_with_fallback(
+                        gemini_data.get("artist") or "",
+                        gemini_data.get("album") or "",
+                        label=gemini_data.get("label") or "",
+                        visible_text=gemini_data.get("visible_text") or "",
                     )
                     for disc_result in discogs_results[:3]:
                         all_candidates.append({
@@ -213,15 +219,23 @@ class HybridSearch:
                 # Save to cache before returning
                 self._save_to_cache(image_hash, final_result)
                 return final_result
-            else:
-                error_result = {
-                    "error": "Could not identify the album",
-                    "discogs_url": "unavailable",
-                    "spotify_url": "unavailable", 
-                    "youtube_url": "unavailable"
-                }
-                # Don't cache errors
-                return error_result
+
+            # No Discogs candidates. If Claude actually saw something, return
+            # a vision-only result so the user gets the artist/album guess +
+            # the model's evidence. Better than the old "couldn't identify"
+            # blanket error which threw away a high-confidence answer just
+            # because Discogs didn't index that release.
+            if vision_lm_result and vision_lm_result.get("success"):
+                vd = vision_lm_result["result"]
+                if vd.get("artist") or vd.get("album") or vd.get("visible_text"):
+                    return self._vision_only_result(vd)
+
+            return {
+                "error": "Could not identify the album",
+                "discogs_url": "unavailable",
+                "spotify_url": "unavailable",
+                "youtube_url": "unavailable",
+            }
                 
         except Exception as e:
             logger.error(f"Hybrid search error: {str(e)}", exc_info=True)
@@ -239,6 +253,128 @@ class HybridSearch:
         except Exception as e:
             logger.error(f"Claude vision search failed: {e}")
             return {"success": False, "error": str(e)}
+
+    async def _search_discogs_with_fallback(
+        self, artist: str, album: str, label: str = "", visible_text: str = ""
+    ) -> List[Dict]:
+        """Resilient Discogs search.
+
+        The previous strict `artist+album` query returned 0 hits for obscure
+        DJ records because Claude's `artist` field often held the label name
+        printed on the cover (e.g. "DW Art" for Taipei Disco — actually the
+        D. W. Art project; "Sound Signature" for Theo Parrish, etc.). With
+        Claude now returning `label` as its own field, this fallback chain
+        first tries the most specific queries, then progressively broadens.
+
+        Verified empirically against the bug report — on "Taipei Disco" the
+        `album-only` attempt returns the correct release at hit #1 even when
+        artist+album returns 0.
+        """
+        artist = (artist or "").strip()
+        album = (album or "").strip()
+        label = (label or "").strip()
+        text = (visible_text or "").strip()
+
+        attempts = []
+        if artist and album:
+            attempts.append(("artist+album", f"{artist} {album}"))
+        if label and album:
+            # Often the most reliable query for obscure 12"s where the cover
+            # shows only label + title (e.g. "Sound Signature Parallel Dimensions").
+            attempts.append(("label+album", f"{label} {album}"))
+        if album:
+            # Album alone catches the "Taipei Disco" case (label+album both
+            # mis-spelled as artist).
+            attempts.append(("album-only", album))
+        if artist and album:
+            # Swap heuristic — sometimes the model puts the album in artist.
+            attempts.append(("album+artist swap", f"{album} {artist}"))
+        if label:
+            # As a last attempt, label-only might surface releases on that
+            # imprint that match the cover via cover_image fuzzy ranking.
+            attempts.append(("label-only", label))
+        if artist:
+            attempts.append(("artist-only", artist))
+        if text and text not in {artist, album, label}:
+            attempts.append(("visible-text", text))
+
+        seen_ids = set()
+        out: List[Dict] = []
+        for label, query in attempts:
+            try:
+                res = self.discogs.search_release(query)
+                if not (res and res.get("success")):
+                    continue
+                hits = res.get("results") or []
+                if not hits:
+                    continue
+                logger.info(
+                    "discogs fallback (%s) %r -> %d hits",
+                    label, query, len(hits),
+                )
+                for hit in hits[:5]:
+                    hid = hit.get("id")
+                    if hid in seen_ids:
+                        continue
+                    seen_ids.add(hid)
+                    out.append(hit)
+                if out:
+                    # First successful query wins — don't pile up noise from
+                    # broader fallbacks if a tight query already matched.
+                    return out
+            except Exception as e:
+                logger.warning("discogs fallback %s failed: %s", label, e)
+                continue
+        return out
+
+    def _vision_only_result(self, vd: Dict) -> Dict:
+        """Build a minimal result payload when vision succeeded but Discogs
+        didn't return any matchable release.
+
+        The shape mirrors `_build_final_result` so views.py can extract via
+        the same `_flatten_search_result` path — frontend treats it as a
+        normal recognized result, just with `unavailable` external links and
+        a `vision_only: true` marker the UI can use to show a "no Discogs
+        match — verify the guess and look it up manually" hint.
+        """
+        artist = vd.get("artist") or ""
+        album = vd.get("album") or ""
+        return {
+            "album": {
+                "name": album,
+                "artist": artist,
+                "release_date": "",
+                "genres": [],
+                "image": "",
+                "country": "",
+                "label": "",
+            },
+            "identification": {
+                # Map Claude's bucket to a numeric — slightly lower than the
+                # Discogs-confirmed branch so downstream sorting prefers a
+                # confirmed match if one ever shows up.
+                "confidence": {
+                    "high": 0.55, "medium": 0.45, "low": 0.35,
+                }.get((vd.get("confidence") or "low").lower(), 0.40),
+                "method": "claude_vision_only",
+                "source": "claude_vision_no_discogs",
+            },
+            "links": {
+                "discogs": "unavailable",
+                "spotify": "unavailable",
+                "youtube": "unavailable",
+                "bandcamp": self._generate_bandcamp_search_link(artist, album) if (artist or album) else None,
+            },
+            "tracks": {"total": 0, "tracklist": [], "spotify_tracks": [], "youtube_tracks": []},
+            "vision_only": True,
+            "vision_evidence": vd.get("description") or "",
+            "vision_visible_text": vd.get("visible_text") or "",
+            "warning": (
+                "Found a likely identification but no Discogs match. The label "
+                "shown on the cover may be in the artist field — try editing it "
+                "in manual lookup."
+            ),
+        }
 
     async def manual_lookup(self, artist: str, album: str) -> Dict:
         """Skip the vision step — go straight from a known artist+album to the
