@@ -14,6 +14,7 @@ urlpatterns = [
     path('api/dig/', include('dig.urls')),
     path('api/library/', include('library.urls')),
     path('api/drain/', include('drain.urls')),
+    path('api/cratemate/', include('cratemate.urls')),
 ]
 
 if settings.DEBUG:

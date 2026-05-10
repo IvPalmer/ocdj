@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'dig',
     'library',
     'drain',
+    'cratemate',
 ]
 
 MIDDLEWARE = [

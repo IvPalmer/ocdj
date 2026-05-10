@@ -186,3 +186,45 @@ backend/cratemate/
 - Mobile-friendly responsive polish from crate-mate's Streamlit (re-do natively in the React port — don't port Streamlit CSS).
 - Any "share identified album to Discogs collection" write-side feature.
 - Cross-module integration (e.g. "send a cratemate result into the wanted-list module") — rich integration is V2 once the module is healthy on its own.
+
+---
+
+## Phase 0 — answers (surfaced 2026-04-29)
+
+Three confirmation gates surfaced for user decision. **All three carry a recommendation; none are decided unilaterally.** Phase 2 (code lift) executes regardless of which way these go because they only affect Phase 1 and Phase 6.
+
+### 1. Retire standalone `IvPalmer/crate-mate` repo vs keep both code paths
+
+- **Plan default:** retire.
+- **Recommendation:** **retire**. Duplicated business logic across two repos is the fastest way to drift; you'd be maintaining the FastAPI version "just in case" forever. The HF Spaces redirect (Phase 6) preserves inbound link continuity at near-zero cost, so retirement doesn't break anything user-visible.
+- **Awaiting:** user `confirm` / `keep both`.
+
+### 2. B2 vs Dokploy volume for the 45 MB ResNet weights (`resnet18_tuned.pth`)
+
+- **Plan default:** B2 build-time fetch (Option A).
+- **Recommendation:** **defer the ResNet path entirely in V1.** Gemini Vision alone covers the happy path (verified — see `hybrid_search.search_album` priority order: Gemini first, OCR fallback, universal/CLIP only when `ENABLE_UNIVERSAL=1`). Skipping ResNet drops `torch` + `torchvision` from the image (saves ~800 MB), keeps the Dockerfile simple, and removes the B2 vs volume question. If real-world usage shows Gemini misses, revisit as V2 with B2.
+- **Side benefit:** if ResNet stays deferred forever, the `backend/resnet18_tuned.pth` git-history bloat (commit `47eaa1b`) is harmless — no purge needed (see Phase 1 audit below).
+- **Awaiting:** user `defer` / `B2` / `volume`.
+
+### 3. GCP key rotation timing
+
+- **Plan default:** rotate after history purge regardless.
+- **Audit correction (per `elder-brain/wiki/decisions/2026-04-28-cratemate-into-ocdj.md`, verified again here):**
+  - `backend/gcp-credentials.json` — gitignored, never committed. `git log --all --oneline -- backend/gcp-credentials.json` returns empty.
+  - `neural-quarter-470623-r2-e3891a759a91.json` — gitignored, never committed. Empty log.
+  - `backend/resnet18_tuned.pth` — IS in history (commit `47eaa1b`). Not a secret, just bloat.
+- **Recommendation:** **rotate the GCP key anyway.** Cost is small (one console click + one Dokploy env update). Assumption set: keys leak in ways that bypass git history (developer machine compromise, screen-shares, accidental log dumps, public Spaces deploys). Treat any key that's been in a private repo for months as "assume scrapers indexed it" — rotation is cheap insurance.
+- **Awaiting:** user `rotate` / `skip` (skip is reasonable if you've never exported the key off-machine).
+
+### Phase 1 simplification (consequence of audits)
+
+If user confirms `defer ResNet`: Phase 1's `git filter-repo` pass becomes **optional**. The credentials never landed in history; only the 45 MB binary did, and it's not a secret. You could either:
+
+- **(a) Skip the purge entirely** — accept the 45 MB pack-file bloat in `IvPalmer/crate-mate` (which is being archived anyway, so nobody clones it). Just rotate the GCP key and move on.
+- **(b) Run a tighter purge** — `git filter-repo --path backend/resnet18_tuned.pth --invert-paths` only, force-push, archive.
+
+(a) is faster and reversible (you can always run filter-repo later). (b) keeps the archive history "clean" if that matters.
+
+### Secrets stub
+
+`~/.secrets/ocdj-cratemate.env` created with `__PENDING__` placeholders for `CRATEMATE_GEMINI_API_KEY`, `CRATEMATE_DISCOGS_TOKEN`, `CRATEMATE_SPOTIFY_CLIENT_ID`, `CRATEMATE_SPOTIFY_CLIENT_SECRET`, `CRATEMATE_GCP_SA_JSON`. chmod 600. Boot guard in `cratemate/apps.py` warns (not crashes) on placeholders so Phase 2 smoke testing works.
