@@ -121,6 +121,13 @@ def identify(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # Stash a copy of every uploaded image to /tmp/cratemate-debug/ so failed
+    # identifications can be inspected after the fact (e.g. via SSH).
+    # Bounded to the last 50 files so we don't fill the container disk; the
+    # filename includes timestamp + hash so it's easy to correlate with
+    # AlbumIdentification rows in the DB.
+    _stash_debug_image(raw_bytes, image_hash)
+
     searcher = _hybrid_searcher()
     if searcher is None:
         return Response(
@@ -281,6 +288,39 @@ def lookup(request):
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
+
+_DEBUG_IMAGE_DIR = '/tmp/cratemate-debug'
+_DEBUG_IMAGE_KEEP = 50
+
+
+def _stash_debug_image(raw_bytes: bytes, image_hash: str) -> None:
+    """Save the upload to a bounded debug directory.
+
+    Filenames look like `2026-05-10T22-34-12_<hash>.jpg`. Cleanup keeps only
+    the newest _DEBUG_IMAGE_KEEP files so production disk doesn't fill from a
+    burst of uploads. Failures here are silent — debug aid only.
+    """
+    import os
+    import time as _time
+    try:
+        os.makedirs(_DEBUG_IMAGE_DIR, exist_ok=True)
+        ts = _time.strftime('%Y-%m-%dT%H-%M-%S')
+        path = os.path.join(_DEBUG_IMAGE_DIR, f'{ts}_{image_hash[:12]}.jpg')
+        with open(path, 'wb') as f:
+            f.write(raw_bytes)
+        # Trim oldest if over the cap.
+        files = sorted(
+            (os.path.join(_DEBUG_IMAGE_DIR, n) for n in os.listdir(_DEBUG_IMAGE_DIR)),
+            key=lambda p: os.path.getmtime(p),
+        )
+        for old in files[:-_DEBUG_IMAGE_KEEP]:
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+    except Exception as e:
+        logger.debug('debug image stash failed: %s', e)
+
 
 # Map "high|medium|low" → 0–1 numeric for the AlbumIdentification.confidence
 # float column. Mirrors the buckets gemini.py / claude_vision.py already emit.

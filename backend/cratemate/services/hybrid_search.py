@@ -158,12 +158,16 @@ class HybridSearch:
             # the candidate dict — the shape is identical so no other code moves.
             if vision_lm_result and vision_lm_result.get("success"):
                 gemini_data = vision_lm_result["result"]
-                if gemini_data.get("artist") or gemini_data.get("album") or gemini_data.get("label"):
-                    # Search Discogs with Claude's identification, retrying
-                    # several strategies. Claude now also returns `label`
-                    # separately, which avoids the historical "DW Art" vs
-                    # "D. W. Art" miss where the label was crammed into the
-                    # artist field and broke the strict artist+album query.
+                # Include `visible_text` as a trigger so we still query Discogs
+                # when Claude couldn't extract a proper artist/album but did
+                # OCR readable text off the sleeve (e.g. obscure Brazilian
+                # records where the visible text is the only signal we have).
+                if (
+                    gemini_data.get("artist")
+                    or gemini_data.get("album")
+                    or gemini_data.get("label")
+                    or gemini_data.get("visible_text")
+                ):
                     discogs_results = await self._search_discogs_with_fallback(
                         gemini_data.get("artist") or "",
                         gemini_data.get("album") or "",
@@ -296,7 +300,23 @@ class HybridSearch:
         if artist:
             attempts.append(("artist-only", artist))
         if text and text not in {artist, album, label}:
-            attempts.append(("visible-text", text))
+            # The prompt asks Claude to join visible words with " | " so we
+            # split on it here. Try the longest segment first (most likely
+            # the full title), then the joined-cleaned version, then any
+            # individual segment >2 chars. This is what catches the
+            # vague-cover case where artist+album are null but Claude
+            # OCR'd "polo | polo i b" off the sleeve.
+            segs = [s.strip() for s in text.split('|') if s.strip()]
+            segs.sort(key=len, reverse=True)
+            seen_text = set()
+            for seg in segs:
+                if len(seg) < 3 or seg in seen_text:
+                    continue
+                seen_text.add(seg)
+                attempts.append((f"visible-text:{seg!r}", seg))
+            joined = ' '.join(segs)
+            if joined and joined not in seen_text:
+                attempts.append(("visible-text-joined", joined))
 
         seen_ids = set()
         out: List[Dict] = []

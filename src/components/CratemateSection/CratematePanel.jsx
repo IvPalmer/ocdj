@@ -277,9 +277,9 @@ function CratematePanel() {
       )}
 
       {/* Not-recognized result — replaces the old "? — ?" UI. Shows the
-          model's evidence (what text it actually read off the cover) so the
-          user understands why it failed and can quickly try a manual lookup
-          with the right artist/album spelling. */}
+          model's evidence (text it OCR'd + visual description) so the user
+          can see what was read and try a manual lookup or Discogs search
+          with the salvageable signal. */}
       {result && !recognized && (
         <section className="cratemate-result cratemate-result--miss">
           <div className="cratemate-miss">
@@ -287,15 +287,41 @@ function CratematePanel() {
             <p>
               {result.error
                 ? result.error
-                : 'The vision model didn’t recognize the artwork. Try a tighter crop of the cover, better lighting, or enter the artist and album manually.'}
+                : 'The vision model didn’t recognize the artwork. Use the text it read below to refine a manual search, or try a tighter crop / better lighting.'}
             </p>
             {previewUrl && (
               <img className="cratemate-cover cratemate-cover--small" src={previewUrl} alt="The image you uploaded" />
+            )}
+            {(result.vision_visible_text || result.vision_evidence) && (
+              <div className="cratemate-evidence">
+                {result.vision_visible_text && (
+                  <>
+                    <span className="cratemate-evidence__label">Text on cover</span>
+                    <span className="cratemate-evidence__value">{result.vision_visible_text}</span>
+                  </>
+                )}
+                {result.vision_evidence && (
+                  <>
+                    <span className="cratemate-evidence__label">What I saw</span>
+                    <span className="cratemate-evidence__value">{result.vision_evidence}</span>
+                  </>
+                )}
+              </div>
             )}
             <div className="cratemate-actions cratemate-actions--center">
               <button type="button" className="btn" onClick={reset}>
                 Try another photo
               </button>
+              {result.vision_visible_text && (
+                <a
+                  className="btn"
+                  href={`https://www.discogs.com/search/?q=${encodeURIComponent(result.vision_visible_text.replace(/\s*\|\s*/g, ' '))}&type=release`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Search Discogs with this text
+                </a>
+              )}
               <button
                 type="button"
                 className="btn btn-primary"
