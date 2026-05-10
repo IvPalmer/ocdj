@@ -1,21 +1,6 @@
+/* .page-title and .section-title now live in src/responsive.css so every
+ * panel gets the same Instrument Serif treatment + mobile sizing. */
 .dashboard {
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0 0 24px;
-  letter-spacing: -0.02em;
-}
-
-.section-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin: 28px 0 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 /* ── Status ── */

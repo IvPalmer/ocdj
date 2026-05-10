@@ -6,6 +6,7 @@ import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ToastProvider, toast } from './components/Toast/Toast'
 import './index.css'
+import './responsive.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

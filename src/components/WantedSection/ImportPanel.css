@@ -261,3 +261,15 @@
   background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
   color: var(--accent-amber);
 }
+
+/* Mobile pass May 2026. */
+@media (max-width: 767px) {
+  .import-panel,
+  .import-header,
+  .import-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--s-3);
+  }
+  .import-actions .btn { width: 100%; }
+}

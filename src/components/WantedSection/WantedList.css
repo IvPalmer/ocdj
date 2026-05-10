@@ -437,3 +437,30 @@
   justify-content: center;
   margin-top: 4px;
 }
+
+/* ── Mobile pass May 2026 — stack header + filters; tables get scroll
+       from src/responsive.css; let inputs grow to 16px to dodge iOS zoom. */
+@media (max-width: 767px) {
+  .wanted-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-3);
+  }
+  .filters-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .filters-row .btn,
+  .filters-row select,
+  .filters-row .search-input {
+    width: 100%;
+  }
+  .bulk-actions {
+    flex-wrap: wrap;
+  }
+  .wanted-table th,
+  .wanted-table td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}

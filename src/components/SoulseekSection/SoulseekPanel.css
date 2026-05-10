@@ -181,8 +181,12 @@
   white-space: nowrap;
 }
 
-/* ── Section Titles ── */
-.section-title {
+/* Soulseek-specific override for the queue + free-results subheaders.
+ * The global .section-title (responsive.css) targets uppercase 11px micro-
+ * labels with extra top margin; in this panel we use them as inline section
+ * markers so we keep margin: 0 and text-secondary color. */
+.queue-section .section-title,
+.free-results-section .section-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -886,4 +890,19 @@
 .slskd-link--button:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+/* ── Mobile pass May 2026. */
+@media (max-width: 767px) {
+  .slsk-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-3);
+  }
+  .slskd-status { align-self: flex-start; }
+  .free-results-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-2);
+  }
 }

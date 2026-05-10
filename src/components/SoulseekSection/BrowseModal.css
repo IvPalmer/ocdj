@@ -231,3 +231,14 @@
   margin: 12px auto 0;
   display: block;
 }
+
+/* Mobile pass May 2026 - modal already gets fullscreen from
+   responsive.css; tighten internal padding so body fills. */
+@media (max-width: 767px) {
+  .browse-modal__header,
+  .browse-modal__body,
+  .browse-modal__footer {
+    padding-left: var(--s-4) !important;
+    padding-right: var(--s-4) !important;
+  }
+}

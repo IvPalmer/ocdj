@@ -116,3 +116,28 @@
   color: var(--text);
 }
 .agent-composer input:disabled { opacity: 0.5; }
+
+/* Mobile pass May 2026 - composer stacks under transcript so the
+   send button isn't sharing a single 320px row with the input. */
+@media (max-width: 767px) {
+  .agent-panel {
+    padding: 0 !important;
+    min-height: calc(100dvh - var(--nav-h-mobile) - var(--s-7)) !important;
+  }
+  .agent-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-2);
+  }
+  .agent-composer {
+    flex-direction: column;
+    gap: var(--s-2);
+  }
+  .agent-composer .btn {
+    width: 100%;
+  }
+  .agent-msg__body {
+    max-width: 92%;
+    font-size: 14.5px;
+  }
+}

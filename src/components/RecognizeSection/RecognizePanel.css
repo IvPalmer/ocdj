@@ -778,3 +778,29 @@
   font-size: 12px;
   margin-bottom: 16px;
 }
+
+/* ── Mobile pass May 2026 — release the local page-title override so
+       the new global serif takes effect, stack header + input row. */
+.recognize-header .page-title {
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  font-family: var(--font-serif) !important;
+}
+@media (max-width: 767px) {
+  .recognize-header,
+  .recognize-active-header,
+  .recognize-tracklist-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-3);
+  }
+  .recognize-input-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-2);
+  }
+  .recognize-input-row input,
+  .recognize-input-row .btn {
+    width: 100%;
+  }
+}

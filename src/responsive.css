@@ -1,0 +1,132 @@
+/* OCDJ universal mobile + typography layer.
+ *
+ * Loaded after index.css from main.jsx. Two responsibilities:
+ *
+ *   1. Global page-title / section-title typography that was previously
+ *      defined in Dashboard.css (and accidentally inherited app-wide
+ *      depending on which panel mounted first). Promoted here with the
+ *      new editorial Instrument Serif treatment + mobile sizing.
+ *
+ *   2. Cross-cutting mobile rules — tables → horizontal scroll, forms →
+ *      stack with 16px inputs (no iOS zoom), buttons → 44px minimum,
+ *      modals → fullscreen, action rows → wrap. Per-panel CSS files
+ *      can still override; this file just kills the worst defaults.
+ */
+
+/* ── Page + section headers ── */
+.page-title {
+  font-family: var(--font-serif);
+  font-size: clamp(26px, 5.5vw, 34px);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  color: var(--text);
+  margin: 0 0 var(--s-5);
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: var(--s-6) 0 var(--s-3);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+}
+
+/* ── Buttons baseline ── */
+.btn,
+.btn-primary,
+.btn-accent,
+.btn-secondary,
+.btn-danger {
+  border-radius: var(--r-sm);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.btn:active,
+.btn-primary:active,
+.btn-accent:active {
+  transform: scale(0.98);
+}
+
+/* ── Mobile rules (≤767px) ── */
+@media (max-width: 767px) {
+  /* Page-title compresses on phones — bigger margin top compensates for the
+   * sticky topbar already eating 56px. */
+  .page-title {
+    font-size: clamp(24px, 7vw, 30px);
+    margin: 0 0 var(--s-4);
+  }
+
+  /* Form fields: 16px font is the iOS magic number that prevents the
+   * focus-zoom. Apply to ALL text-like inputs unless the panel CSS overrides
+   * with !important. */
+  input[type='text'],
+  input[type='email'],
+  input[type='number'],
+  input[type='password'],
+  input[type='url'],
+  input[type='search'],
+  input[type='tel'],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Tables: convert to horizontal-scroll containers. The `display: block`
+   * collapses the table grid model, but we keep the visual layout via the
+   * inner thead/tbody and gain finger-friendly side-scrolling for any panel
+   * with more columns than fit. -webkit-overflow-scrolling=touch gives
+   * iOS the inertial scroll users expect. */
+  .main-content table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+    white-space: nowrap;
+  }
+
+  /* Common toolbar / filter / action row patterns — let them wrap. */
+  [class$='-toolbar'],
+  [class$='-filters'],
+  [class$='-actions'],
+  [class*='-actions '] {
+    flex-wrap: wrap !important;
+  }
+
+  /* Modals: ocdj uses a few different conventions (.modal, .modal-dialog,
+   * [role=dialog]). Force any of them to fullscreen on mobile so they're
+   * actually usable instead of a tiny centered card with a scrolled body. */
+  .modal,
+  .modal-dialog,
+  [role='dialog'] {
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* If the panel uses an explicit modal backdrop wrapper, make sure the
+   * dialog inside fills the screen and the backdrop doesn't add inset. */
+  .modal-backdrop {
+    padding: 0 !important;
+  }
+}
+
+/* ── Reduced motion respect ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

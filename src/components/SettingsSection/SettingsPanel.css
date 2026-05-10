@@ -379,3 +379,16 @@
   background: var(--bg-input, var(--bg));
   color: var(--text);
 }
+
+/* ── Mobile pass May 2026 — Settings is a long form, so stack everything
+       and give field rows breathing room. */
+@media (max-width: 767px) {
+  .settings-panel { padding: 0 !important; }
+  .config-actions { flex-direction: column-reverse; gap: var(--s-2); }
+  .config-actions .btn { width: 100%; }
+  .config-section,
+  .field-row,
+  [class$='-field'] {
+    grid-template-columns: 1fr !important;
+  }
+}
