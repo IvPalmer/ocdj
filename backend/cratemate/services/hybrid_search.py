@@ -449,7 +449,9 @@ class HybridSearch:
                 cover.thumbnail((512, 512))
                 ph = imagehash.phash(cover)
                 dh = imagehash.dhash(cover)
-                cand["phash_distance"] = (up_phash - ph) + (up_dhash - dh)
+                # imagehash returns numpy int64; cast so the result survives
+                # JSON serialization when persisted to AlbumIdentification.raw_response.
+                cand["phash_distance"] = int((up_phash - ph) + (up_dhash - dh))
             except Exception as e:
                 logger.debug("phash candidate %s failed: %s", disc.get("id"), e)
                 cand["phash_distance"] = None
