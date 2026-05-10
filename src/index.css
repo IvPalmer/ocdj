@@ -1,3 +1,18 @@
+/* OCDJ global tokens — May 2026 refresh.
+ *
+ * Goals of this pass:
+ *  - Mobile-first defaults (15px body, finger-sized tap targets).
+ *  - One considered accent (warm amber) replacing the blue/black duo
+ *    that read as "AI default".
+ *  - Warm-neutral surface stack instead of pure #fff (less clinical).
+ *  - Tinted shadows + a varied radius scale.
+ *
+ * Old tokens (--bg, --text, --accent-blue, etc.) are kept as aliases
+ * so we don't have to chase every component file in this pass — the
+ * value behind each name is just upgraded. */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap');
+
 *,
 *::before,
 *::after {
@@ -7,26 +22,65 @@
 }
 
 :root {
-  --bg: #ffffff;
-  --bg-raised: #f8f9fa;
-  --bg-surface: #f1f3f5;
-  --border: #e1e4e8;
-  --border-subtle: #edf0f2;
-  --text: #1a1d21;
-  --text-secondary: #4a5568;
-  --text-muted: #8b95a5;
-  --accent: #2d3748;
-  --accent-blue: #2563eb;
-  --accent-green: #16a34a;
-  --accent-amber: #d97706;
-  --accent-red: #dc2626;
-  --accent-violet: #7c3aed;
-  --radius: 8px;
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --mono: 'SF Mono', 'Fira Code', 'Fira Mono', monospace;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  /* ── Surfaces (warm neutral, not pure white) ── */
+  --bg: #faf8f4;            /* warm off-white */
+  --bg-raised: #f1ede5;     /* sidebar / cards */
+  --bg-surface: #e9e3d8;    /* hover / active */
+  --bg-inset: #f6f2eb;      /* inputs / tracks */
+
+  /* ── Ink ── */
+  --text: #1a1814;          /* warm near-black */
+  --text-secondary: #4a4540;
+  --text-muted: #8c8278;
+
+  /* ── Lines ── */
+  --border: #e2dccf;
+  --border-subtle: #ece6da;
+
+  /* ── Accent: one considered warm amber (replaces blue) ── */
+  --accent: #b25a1a;         /* amber/terracotta */
+  --accent-hover: #9a4a13;
+  --accent-soft: rgba(178, 90, 26, 0.10);
+  --accent-blue: var(--accent);  /* alias for legacy components */
+
+  /* ── Status (desaturated so they don't scream) ── */
+  --accent-green: #4a7c3a;
+  --accent-amber: #b88a1a;
+  --accent-red:   #b14a3a;
+  --accent-violet: #6b4a8a;
+
+  /* ── Radius scale (varied per skill audit) ── */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r:    10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --radius: var(--r);  /* legacy alias */
+
+  /* ── Spacing scale ── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* ── Shadows (tinted warm to match palette) ── */
+  --shadow-sm: 0 1px 2px rgba(50, 35, 20, 0.05);
+  --shadow:    0 1px 3px rgba(50, 35, 20, 0.07), 0 1px 2px rgba(50, 35, 20, 0.04);
+  --shadow-md: 0 6px 18px rgba(50, 35, 20, 0.10);
+  --shadow-lg: 0 16px 40px rgba(50, 35, 20, 0.14);
+
+  /* ── Fonts ── */
+  --font:        'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif:  'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --mono:        'Geist Mono', 'SF Mono', 'Fira Mono', monospace;
+
+  /* ── Layout ── */
+  --sidebar-w: 220px;
+  --nav-h-mobile: 56px;
 
   font-family: var(--font);
   font-synthesis: none;
@@ -35,12 +89,46 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text-secondary);
   line-height: 1.5;
-  font-size: 13px;
+  font-size: 15px;            /* mobile-readable default; was 13px */
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Bump up only on desktop where 13px was originally tuned for data density. */
+@media (min-width: 768px) {
+  body { font-size: 14px; }
+}
+
+/* Headings: Instrument Serif for a touch of editorial character — saves
+ * us from the third "everything-is-Inter-bold" sans-serif feel. */
+h1, h2, h3 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+h4, h5, h6 {
+  font-family: var(--font);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+
+p {
+  text-wrap: pretty;
+  max-width: 65ch;
 }
 
 ::-webkit-scrollbar {
@@ -73,6 +161,8 @@ input, select, textarea, button {
 
 button {
   cursor: pointer;
+  /* Mobile tap targets: minimum 44x44 unless explicitly overridden. */
+  min-height: 44px;
 }
 
 table {
@@ -80,6 +170,22 @@ table {
 }
 
 ::selection {
-  background: var(--accent-blue);
+  background: var(--accent);
   color: #fff;
+}
+
+/* Keyboard focus: visible amber ring (skill: missing focus = a11y fail). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* Reusable utility — used by both Layout and CratematePanel for the
+ * mobile-only hidden state. */
+@media (max-width: 767px) {
+  .desktop-only { display: none !important; }
+}
+@media (min-width: 768px) {
+  .mobile-only { display: none !important; }
 }

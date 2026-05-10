@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
 import './Layout.css'
 
 // Grouped by workflow stage. Sidebar reflects the mental model:
@@ -32,12 +33,74 @@ const NAV_GROUPS = [
   },
 ]
 
+// Map route → human title for the mobile header. Keeps the bar context-aware
+// without exposing the full route string.
+const ROUTE_TITLES = NAV_GROUPS.flatMap((g) => g.items).reduce((acc, it) => {
+  acc[it.to] = it.label
+  return acc
+}, {})
+
 function Layout({ children }) {
+  // Drawer state is only meaningful on mobile, but we keep one state hook so
+  // the markup is identical at all sizes — CSS handles the transform.
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const location = useLocation()
+
+  // Close the drawer on route change. Without this, tapping a nav item leaves
+  // the overlay covering the new page on mobile.
+  useEffect(() => {
+    setDrawerOpen(false)
+  }, [location.pathname])
+
+  // Lock body scroll while the drawer is open so the page underneath doesn't
+  // jitter when the user drags on the overlay.
+  useEffect(() => {
+    if (drawerOpen) {
+      document.body.style.overflow = 'hidden'
+      return () => { document.body.style.overflow = '' }
+    }
+  }, [drawerOpen])
+
+  const currentTitle = ROUTE_TITLES[location.pathname] || 'OCDJ'
+
   return (
     <div className="layout">
-      <aside className="sidebar">
+      {/* Mobile-only top bar with hamburger + current route name. Hidden ≥768px
+          via .mobile-only utility from index.css. */}
+      <header className="topbar mobile-only">
+        <button
+          type="button"
+          className="topbar__menu"
+          aria-label="Open navigation"
+          aria-expanded={drawerOpen}
+          onClick={() => setDrawerOpen(true)}
+        >
+          <span className="topbar__menu-line" aria-hidden="true" />
+          <span className="topbar__menu-line" aria-hidden="true" />
+          <span className="topbar__menu-line" aria-hidden="true" />
+        </button>
+        <span className="topbar__title">{currentTitle}</span>
+        <span className="topbar__brand">OCDJ</span>
+      </header>
+
+      {/* Backdrop tappable to close. Pointer-events controlled by .open class. */}
+      <div
+        className={`drawer-backdrop ${drawerOpen ? 'drawer-backdrop--open' : ''}`}
+        onClick={() => setDrawerOpen(false)}
+        aria-hidden="true"
+      />
+
+      <aside className={`sidebar ${drawerOpen ? 'sidebar--open' : ''}`}>
         <div className="sidebar-header">
           <span className="sidebar-title">OCDJ</span>
+          <button
+            type="button"
+            className="sidebar-close mobile-only"
+            aria-label="Close navigation"
+            onClick={() => setDrawerOpen(false)}
+          >
+            ×
+          </button>
         </div>
         <nav className="sidebar-nav">
           {NAV_GROUPS.map((group, gi) => (
@@ -58,7 +121,7 @@ function Layout({ children }) {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <span className="version">v2.0</span>
+          <span className="version">v2.1 · mobile</span>
         </div>
       </aside>
       <main className="main-content">
