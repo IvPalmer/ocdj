@@ -52,5 +52,9 @@ fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.25.0
 Pillow>=10.0.0
 aiohttp>=3.9.0
+# Perceptual hashing for Discogs cover-image verification — kills false
+# positives like the Prefuse 73 hallucination (text-search hit that doesn't
+# look anything like the upload). pHash + dHash combined, reject high-hamming.
+imagehash>=4.3.0
 # spotipy / musicbrainzngs / beautifulsoup4 / lxml / python3-discogs-client
 # are already pinned above for wanted/organize — cratemate reuses them.

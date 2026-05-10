@@ -214,25 +214,48 @@ class HybridSearch:
                             "gemini_data": None
                         })
             
-            # Select best candidate
-            best_match = self._select_best_match(all_candidates)
-            
+            # Perceptual-hash verification — download each candidate's cover
+            # and reject ones that don't visually resemble the upload. Kills
+            # false positives where Claude hallucinated a real album name and
+            # Discogs returned a text-match for a totally different cover
+            # (the Prefuse 73 case: medium-confidence text-match shipped
+            # without anyone checking if the artwork actually matched).
+            #
+            # Verification only activates when Claude's evidence_quality is
+            # weak/none OR the candidate came from a broad fallback
+            # (artist-only / label-only / visible-text). Strong evidence +
+            # exact artist+album hit is trusted without round-tripping
+            # cover downloads.
+            vd = (
+                vision_lm_result.get("result")
+                if (vision_lm_result and vision_lm_result.get("success"))
+                else None
+            )
+            verified_candidates = await self._verify_candidates_by_cover(
+                all_candidates, album_image, vd
+            )
+
+            # Select best candidate (now with pHash distance penalty applied)
+            best_match = self._select_best_match(verified_candidates)
+
             if best_match:
                 # Get all available links
                 final_result = await self._build_final_result(best_match)
+                # Stamp visual-verification info so frontend can show "verified
+                # against the cover image" badge for high-trust matches.
+                if "phash_distance" in best_match:
+                    final_result.setdefault("identification", {})["cover_match_distance"] = best_match["phash_distance"]
                 # Save to cache before returning
                 self._save_to_cache(image_hash, final_result)
                 return final_result
 
-            # No Discogs candidates. If Claude actually saw something, return
-            # a vision-only result so the user gets the artist/album guess +
+            # No verified Discogs candidates. If Claude actually saw something,
+            # return a vision-only result so the user gets the artist/album +
             # the model's evidence. Better than the old "couldn't identify"
             # blanket error which threw away a high-confidence answer just
             # because Discogs didn't index that release.
-            if vision_lm_result and vision_lm_result.get("success"):
-                vd = vision_lm_result["result"]
-                if vd.get("artist") or vd.get("album") or vd.get("visible_text"):
-                    return self._vision_only_result(vd)
+            if vd and (vd.get("artist") or vd.get("album") or vd.get("visible_text")):
+                return self._vision_only_result(vd)
 
             return {
                 "error": "Could not identify the album",
@@ -346,6 +369,134 @@ class HybridSearch:
                 logger.warning("discogs fallback %s failed: %s", label, e)
                 continue
         return out
+
+    async def _verify_candidates_by_cover(
+        self,
+        candidates: List[Dict],
+        upload_image: Image.Image,
+        vd: Optional[Dict],
+    ) -> List[Dict]:
+        """Compute perceptual-hash distance between the upload and each
+        candidate's Discogs cover image; annotate + filter.
+
+        Strategy:
+          - Compute upload pHash + dHash once.
+          - For each candidate, download its cover_image (bounded timeout +
+            size). pHash both. Hamming-distance-sum.
+          - Annotate `phash_distance` on every candidate.
+          - For LOW-TRUST candidates (broad-fallback source OR weak vision
+            evidence), drop ones with distance > REJECT_THRESHOLD.
+          - For HIGH-TRUST candidates (strong evidence + exact match), only
+            log the distance — don't reject. Some legit matches still have
+            distance > 20 due to JPEG/crop/lighting; we don't want pHash to
+            block obviously-correct hits.
+
+        Skips silently if imagehash isn't installed (graceful degradation
+        until the new dep deploys; the old behaviour is no worse than V2).
+        """
+        if not candidates:
+            return candidates
+        try:
+            import imagehash  # type: ignore  # added to requirements.txt
+        except ImportError:
+            logger.warning("imagehash not installed — skipping cover verification")
+            return candidates
+
+        # Compute upload hash once. Both pHash + dHash because they catch
+        # different distortion modes (pHash = DCT, dHash = gradient direction).
+        try:
+            up_phash = imagehash.phash(upload_image)
+            up_dhash = imagehash.dhash(upload_image)
+        except Exception as e:
+            logger.warning("upload imagehash failed: %s", e)
+            return candidates
+
+        REJECT_THRESHOLD = 28   # combined hamming distance — empirical
+
+        evidence_quality = (vd or {}).get("evidence_quality") or "none"
+        is_iconic = bool((vd or {}).get("is_iconic"))
+        # Trust the model's own self-assessment: strong evidence OR a
+        # recognized-iconic flag means we don't reject on visual distance.
+        # This avoids fighting the model on the easy 80% (Daft Punk, Joy
+        # Division, etc.) where text+visual already align.
+        high_trust = (evidence_quality == "strong") or is_iconic
+
+        async def _hash_one(cand: Dict) -> None:
+            disc = cand.get("discogs_data") or {}
+            url = disc.get("cover_image") or disc.get("thumb")
+            if not url:
+                cand["phash_distance"] = None
+                return
+            try:
+                # Tiny embedded import keeps the module importable without
+                # aiohttp at startup time (we already use it for spotify).
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=8)
+                    ) as resp:
+                        if resp.status != 200:
+                            cand["phash_distance"] = None
+                            return
+                        body = await resp.read()
+                if len(body) > 10 * 1024 * 1024:  # 10 MB sanity cap
+                    cand["phash_distance"] = None
+                    return
+                cover = Image.open(BytesIO(body))
+                # Downscale before hashing — faster, also normalizes the
+                # comparison since uploads and Discogs covers come at very
+                # different resolutions.
+                cover.thumbnail((512, 512))
+                ph = imagehash.phash(cover)
+                dh = imagehash.dhash(cover)
+                cand["phash_distance"] = (up_phash - ph) + (up_dhash - dh)
+            except Exception as e:
+                logger.debug("phash candidate %s failed: %s", disc.get("id"), e)
+                cand["phash_distance"] = None
+
+        # Hash up to 6 candidates concurrently (Discogs CDN can take it).
+        from io import BytesIO  # local import — only used here
+        await asyncio.gather(
+            *[_hash_one(c) for c in candidates[:6]],
+            return_exceptions=True,
+        )
+
+        # Apply rejection rules.
+        kept: List[Dict] = []
+        for c in candidates:
+            dist = c.get("phash_distance")
+            disc = c.get("discogs_data") or {}
+            disc_id = disc.get("id")
+
+            # No distance computed → keep but penalize confidence slightly so
+            # confirmed visual matches outrank.
+            if dist is None:
+                kept.append(c)
+                continue
+
+            if dist > REJECT_THRESHOLD and not high_trust:
+                logger.info(
+                    "phash REJECT candidate %s (distance=%d, source=%s, evidence=%s)",
+                    disc_id, dist, c.get("source"), evidence_quality,
+                )
+                continue
+
+            # Boost confidence for visually verified candidates so they sort
+            # above text-only matches in _select_best_match.
+            if dist <= 14:
+                c["confidence"] = min(0.99, c["confidence"] + 0.10)
+            elif dist <= 22:
+                c["confidence"] = min(0.99, c["confidence"] + 0.04)
+            else:
+                c["confidence"] = max(0.0, c["confidence"] - 0.05)
+
+            logger.info(
+                "phash candidate %s distance=%d source=%s -> conf=%.2f",
+                disc_id, dist, c.get("source"), c["confidence"],
+            )
+            kept.append(c)
+
+        return kept
 
     def _vision_only_result(self, vd: Dict) -> Dict:
         """Build a minimal result payload when vision succeeded but Discogs
@@ -528,11 +679,24 @@ class HybridSearch:
                 f"(confidence: {cand['confidence']:.2f}, source: {cand['source']})"
             )
         
-        # Return best match if confidence is reasonable
+        # Return best match if confidence is reasonable.
+        # Threshold raised from 0.30 (V2) to 0.45 (V3) per the codex review:
+        # the old threshold accepted medium-confidence Claude guesses paired
+        # with weak Discogs text matches, shipping hallucinations like the
+        # Prefuse 73 false-positive. With the pHash boost (+0.10 for visually
+        # confirmed candidates), genuinely correct matches still clear 0.45
+        # easily; weak guesses don't.
         best = candidates[0]
-        if best["confidence"] > 0.3:  # Low threshold to allow more matches
+        if best["confidence"] >= 0.45:
             return best
-        
+
+        # Log near-misses so we can tune later from production data instead
+        # of guessing.
+        logger.info(
+            "best candidate below threshold (conf=%.2f, source=%s) — falling "
+            "through to vision-only / not-recognized",
+            best["confidence"], best.get("source"),
+        )
         return None
     
     async def _build_final_result(self, match: Dict) -> Dict:
