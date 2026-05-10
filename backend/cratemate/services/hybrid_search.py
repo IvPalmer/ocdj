@@ -323,24 +323,42 @@ class HybridSearch:
         if artist:
             attempts.append(("artist-only", artist))
         if text and text not in {artist, album, label}:
-            # The prompt asks Claude to join visible words with " | " so we
-            # split on it here. Try the longest segment first (most likely
-            # the full title), then the joined-cleaned version, then any
-            # individual segment >2 chars. This is what catches the
-            # vague-cover case where artist+album are null but Claude
-            # OCR'd "polo | polo i b" off the sleeve.
+            # The prompt asks Claude to join visible words with ' | '. Try:
+            #   (1) joined-no-pipes  — collapses pipe separators back into
+            #       a sentence; catches "A | SPEC | TRA | TURN" → search
+            #       "A SPECTRA TURN" which Discogs fuzz-matches "A Spectral
+            #       Turn" at hit #1.
+            #   (2) joined-no-spaces — for the case where the cover's
+            #       letterforms were broken across rows ("SPEC | TRA" →
+            #       "SPECTRA"). Helps when the title is a single word.
+            #   (3) each long-enough segment, longest first.
             segs = [s.strip() for s in text.split('|') if s.strip()]
-            segs.sort(key=len, reverse=True)
             seen_text = set()
-            for seg in segs:
+
+            joined_words = ' '.join(segs)
+            if joined_words and joined_words not in seen_text:
+                seen_text.add(joined_words)
+                attempts.append(("visible-text-words", joined_words))
+
+            joined_concat = ''.join(segs)
+            if joined_concat and joined_concat != joined_words and joined_concat not in seen_text:
+                seen_text.add(joined_concat)
+                attempts.append(("visible-text-concat", joined_concat))
+
+            for seg in sorted(segs, key=len, reverse=True):
                 if len(seg) < 3 or seg in seen_text:
                     continue
                 seen_text.add(seg)
-                attempts.append((f"visible-text:{seg!r}", seg))
-            joined = ' '.join(segs)
-            if joined and joined not in seen_text:
-                attempts.append(("visible-text-joined", joined))
+                attempts.append((f"visible-text-seg:{seg!r}", seg))
 
+        # AGGREGATE across ALL attempts (don't short-circuit on first hit).
+        # The earlier "first hit wins" was a bug: if the most specific query
+        # returned 5 garbage matches (e.g. "marschmellows flesh fried" fuzzy-
+        # matched a death metal record on the word "flesh"), broader queries
+        # like album-only "flesh fried" — which actually surface the correct
+        # 'Marschmellows - Flash Fried' release at hit #1 — never ran.
+        # Now we collect from every attempt, dedup by release id, and let
+        # _calculate_confidence + pHash verification rank the union.
         seen_ids = set()
         out: List[Dict] = []
         for label, query in attempts:
@@ -360,15 +378,17 @@ class HybridSearch:
                     if hid in seen_ids:
                         continue
                     seen_ids.add(hid)
+                    # Tag the source attempt so downstream pHash + confidence
+                    # logic can lean harder on the visual check for hits from
+                    # broad queries (album-only, label-only).
+                    hit['_attempt'] = label
                     out.append(hit)
-                if out:
-                    # First successful query wins — don't pile up noise from
-                    # broader fallbacks if a tight query already matched.
-                    return out
             except Exception as e:
                 logger.warning("discogs fallback %s failed: %s", label, e)
                 continue
-        return out
+        # Cap at 12 candidates total so pHash verification doesn't fan out
+        # to dozens of cover downloads per request.
+        return out[:12]
 
     async def _verify_candidates_by_cover(
         self,
@@ -411,15 +431,14 @@ class HybridSearch:
             logger.warning("upload imagehash failed: %s", e)
             return candidates
 
-        REJECT_THRESHOLD = 28   # combined hamming distance — empirical
+        # Combined hamming distance threshold. Empirically pHash+dHash both
+        # 64-bit; matching reissues of the same artwork sit at 5-22, mild
+        # crops/rotations at 22-40, completely different art at 40+.
+        REJECT_THRESHOLD = 32
+        ICONIC_REJECT_THRESHOLD = 80   # extremely permissive for iconic covers
+                                       # (Pink Floyd Dark Side reissues all over the place)
 
-        evidence_quality = (vd or {}).get("evidence_quality") or "none"
         is_iconic = bool((vd or {}).get("is_iconic"))
-        # Trust the model's own self-assessment: strong evidence OR a
-        # recognized-iconic flag means we don't reject on visual distance.
-        # This avoids fighting the model on the easy 80% (Daft Punk, Joy
-        # Division, etc.) where text+visual already align.
-        high_trust = (evidence_quality == "strong") or is_iconic
 
         async def _hash_one(cand: Dict) -> None:
             disc = cand.get("discogs_data") or {}
@@ -476,21 +495,34 @@ class HybridSearch:
                 kept.append(c)
                 continue
 
-            if dist > REJECT_THRESHOLD and not high_trust:
+            # Hard pHash gate. Strong evidence on Claude's READ doesn't
+            # validate that the Discogs MATCH is correct. The Marschmellows
+            # case showed exactly this: Claude read the cover correctly,
+            # Discogs returned a death-metal record on a fuzzy "flesh" hit,
+            # pHash distance was 53 (clearly wrong cover), but the old code
+            # let it through because evidence_quality=strong.
+            #
+            # Only iconic covers get a permissive threshold — they survive
+            # reissue artwork variation (Pink Floyd Dark Side has many
+            # pressings with subtly different prism renderings).
+            limit = ICONIC_REJECT_THRESHOLD if is_iconic else REJECT_THRESHOLD
+            if dist > limit:
                 logger.info(
-                    "phash REJECT candidate %s (distance=%d, source=%s, evidence=%s)",
-                    disc_id, dist, c.get("source"), evidence_quality,
+                    "phash REJECT candidate %s (distance=%d > %d, source=%s)",
+                    disc_id, dist, limit, c.get("source"),
                 )
                 continue
 
             # Boost confidence for visually verified candidates so they sort
             # above text-only matches in _select_best_match.
-            if dist <= 14:
-                c["confidence"] = min(0.99, c["confidence"] + 0.10)
-            elif dist <= 22:
-                c["confidence"] = min(0.99, c["confidence"] + 0.04)
+            if dist <= 12:
+                c["confidence"] = min(0.99, c["confidence"] + 0.15)
+            elif dist <= 20:
+                c["confidence"] = min(0.99, c["confidence"] + 0.08)
+            elif dist <= 28:
+                c["confidence"] = min(0.99, c["confidence"] + 0.02)
             else:
-                c["confidence"] = max(0.0, c["confidence"] - 0.05)
+                c["confidence"] = max(0.0, c["confidence"] - 0.10)
 
             logger.info(
                 "phash candidate %s distance=%d source=%s -> conf=%.2f",
@@ -635,34 +667,67 @@ class HybridSearch:
             return []
     
     def _calculate_confidence(self, gemini_data: Dict, discogs_data: Dict) -> float:
-        """Calculate confidence score for a match"""
-        confidence = 0.0
-        
-        # Start with Gemini's confidence
-        gemini_conf = gemini_data.get("confidence", "low")
+        """Calculate confidence score for a match.
+
+        V3 tightening: the old `(0.5 + 0.5 * fuzz)` multiplier let 0%-fuzz
+        candidates pass with a 0.5 multiplier — that's how the Marschmellows
+        false-positive (Claude said 'flash fried', Discogs returned 'Malformed -
+        Confinement Of Flesh' with ~10% fuzz on both fields) cleared threshold.
+
+        Now: weak fuzz on EITHER field (< 60) returns near-zero confidence
+        outright. That candidate gets dropped by _select_best_match's 0.45
+        floor unless pHash strongly redeems it. For partial fuzz (60-80) we
+        use a steeper multiplier so genuinely close matches still rank.
+        """
+        gemini_conf = (gemini_data.get("confidence") or "low").lower()
         if gemini_conf == "high":
-            confidence = 0.9
+            base = 0.9
         elif gemini_conf == "medium":
-            confidence = 0.7
+            base = 0.75
         else:
-            confidence = 0.5
-        
-        # Adjust based on text matching
+            base = 0.55
+
+        artist_fuzz = None
         if gemini_data.get("artist") and discogs_data.get("artist"):
-            artist_match = fuzz.token_set_ratio(
+            artist_fuzz = fuzz.token_set_ratio(
                 gemini_data["artist"].lower(),
                 str(discogs_data.get("artist", "")).lower()
-            ) / 100.0
-            confidence *= (0.5 + 0.5 * artist_match)
-        
+            )
+
+        album_fuzz = None
         if gemini_data.get("album") and discogs_data.get("title"):
-            album_match = fuzz.token_set_ratio(
+            album_fuzz = fuzz.token_set_ratio(
                 gemini_data["album"].lower(),
                 str(discogs_data.get("title", "")).lower()
-            ) / 100.0
-            confidence *= (0.5 + 0.5 * album_match)
-        
-        return min(confidence, 0.95)  # Cap at 95%
+            )
+
+        # If we have both artist and album fuzz scores, BOTH must clear 60.
+        # If only one is available (Claude returned just album, common for
+        # label-only covers), that one must clear 70.
+        # Returning a tiny non-zero confidence preserves the candidate so
+        # pHash can rescue it if the cover image is a perfect match
+        # (extremely close artwork can recover from artist mismatch).
+        FAIL = 0.05
+
+        if artist_fuzz is not None and album_fuzz is not None:
+            if artist_fuzz < 60 and album_fuzz < 60:
+                return FAIL  # both failed — reject
+            # Use the geometric mean so one bad and one good doesn't average up.
+            combined = (artist_fuzz * album_fuzz) ** 0.5 / 100.0
+            return min(0.95, base * combined)
+
+        if album_fuzz is not None:
+            if album_fuzz < 70:
+                return FAIL
+            return min(0.95, base * (album_fuzz / 100.0))
+
+        if artist_fuzz is not None:
+            if artist_fuzz < 70:
+                return FAIL
+            return min(0.95, base * (artist_fuzz / 100.0))
+
+        # No comparable text — only the iconic-image path or pHash can rescue.
+        return FAIL
     
     def _select_best_match(self, candidates: List[Dict]) -> Optional[Dict]:
         """Select the best match from all candidates"""

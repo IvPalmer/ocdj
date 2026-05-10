@@ -95,7 +95,22 @@ Critical rules:
 4. PRESERVE original casing, punctuation, accents (e.g. 'D. W. Art' not 'DW Art';
    'NOMA' not 'Noma'; 'Sound Signature' not 'sound signature').
 
-5. NO PROSE outside the JSON. NO code fences. NO explanation.
+5. PROOFREAD your visible_text against common English words and music
+   terminology BEFORE returning. Stylized record sleeves often disguise
+   familiar words:
+   - "FLΞSH" or "fl3sh" → "FLESH" or "FLASH" (decide by context — DJ records
+     use "Flash Fried", "Flash Cut" much more than "Flesh Fried")
+   - "SPECTRVM" with sharp V → almost certainly "SPECTRUM" or "SPECTRAL"
+     (Latin V was used for U; record sleeves rarely use literal "SPECTRVM")
+   - Mixed Latin/katakana/cyrillic substitutions where shape mimics Latin
+     (ヤ for U, ナ for N, ル for L, Cyrillic Я for R) → DECODE to the Latin
+     reading. The cover "JヤSト WAナ FイEル" reads "JUST WANNA FEEL". Put the
+     decoded English in `album` and the literal characters in `visible_text`.
+   - Rotated/upside-down text — orient mentally and read normally.
+   When ambiguous, prefer the dictionary-word reading. Note alternates in
+   `description` so the downstream search can try both.
+
+6. NO PROSE outside the JSON. NO code fences. NO explanation.
 """
 
 
