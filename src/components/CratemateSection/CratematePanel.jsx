@@ -427,6 +427,13 @@ function QueueItem({ item, onRemove, onManualEditFromVisionOnly }) {
 }
 
 
+// Format a Discogs price + currency for compact display.
+function fmtPrice(value, currency) {
+  if (value == null) return null
+  const sym = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', BRL: 'R$' }[currency] || ''
+  return `${sym}${Number(value).toFixed(2)}${sym ? '' : ` ${currency || ''}`}`.trim()
+}
+
 // Single result card — used both for queue items and the manual-lookup result.
 function ResultCard({ result, previewUrl, onDismiss, onManualEditFromVisionOnly }) {
   const { artist, album } = extractIdentity(result)
@@ -438,6 +445,18 @@ function ResultCard({ result, previewUrl, onDismiss, onManualEditFromVisionOnly 
   const visionOnly = !!result?.vision_only
   const visibleText = result?.vision_visible_text
   const evidence = result?.vision_evidence
+
+  // Discogs-detail extras for the "more info" strip.
+  const releaseYear = result?.album?.release_date
+  const releaseLabel = result?.album?.label
+  const releaseCountry = result?.album?.country
+  const numForSale = result?.num_for_sale ?? result?.release_overview?.num_for_sale
+  const lowestPrice = fmtPrice(
+    result?.lowest_price ?? result?.release_overview?.lowest_price,
+    result?.price_currency ?? result?.release_overview?.currency
+  )
+  const medianPrice = fmtPrice(result?.median_price, result?.price_currency)
+  const coverMismatch = !!result?.cover_mismatch_warning
 
   if (!recognized) {
     // Couldn't identify — surface evidence + retry affordances.
@@ -512,6 +531,31 @@ function ResultCard({ result, previewUrl, onDismiss, onManualEditFromVisionOnly 
           <div className="cratemate-banner cratemate-banner--warn">
             {result.warning || 'No Discogs match — verify before adding to wantlist.'}
           </div>
+        )}
+
+        {coverMismatch && !visionOnly && (
+          <div className="cratemate-banner cratemate-banner--info">
+            Discogs cover doesn't visually match — likely a different pressing of the same release. Verify before trusting the link.
+          </div>
+        )}
+
+        {/* Discogs detail strip — year, label, country, market info. */}
+        {(releaseYear || releaseLabel || releaseCountry || numForSale != null || lowestPrice) && (
+          <dl className="cratemate-meta-strip">
+            {releaseYear && (<><dt>Year</dt><dd>{releaseYear}</dd></>)}
+            {releaseLabel && (<><dt>Label</dt><dd>{releaseLabel}</dd></>)}
+            {releaseCountry && (<><dt>Country</dt><dd>{releaseCountry}</dd></>)}
+            {numForSale != null && (
+              <>
+                <dt>For sale</dt>
+                <dd>
+                  {numForSale} on Discogs
+                  {lowestPrice ? ` · from ${lowestPrice}` : ''}
+                </dd>
+              </>
+            )}
+            {medianPrice && !lowestPrice && (<><dt>Median</dt><dd>{medianPrice}</dd></>)}
+          </dl>
         )}
 
         {/* Platform links — Discogs/Spotify/YouTube/Bandcamp pills. */}

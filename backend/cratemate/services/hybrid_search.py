@@ -245,7 +245,13 @@ class HybridSearch:
                 # Stamp visual-verification info so frontend can show "verified
                 # against the cover image" badge for high-trust matches.
                 if "phash_distance" in best_match:
-                    final_result.setdefault("identification", {})["cover_match_distance"] = best_match["phash_distance"]
+                    dist = best_match.get("phash_distance")
+                    final_result.setdefault("identification", {})["cover_match_distance"] = dist
+                    # User-facing warning when the Discogs cover doesn't
+                    # visually match — usually still the right RELEASE
+                    # (different pressing artwork) but flag for verification.
+                    if dist is not None and dist > 30 and not is_iconic:
+                        final_result["cover_mismatch_warning"] = True
                 # Save to cache before returning
                 self._save_to_cache(image_hash, final_result)
                 return final_result
@@ -447,8 +453,11 @@ class HybridSearch:
             # only when Claude's text-match was weak. Strong text match wins
             # regardless — accommodates reissue artwork variation.
             #
-            # When Discogs returned multiple candidates, pHash boost lets
-            # the visually-correct release rise to the top of the rank.
+            # V6 note: we also annotate `cover_mismatch_warning` for any
+            # accepted candidate with dist > 30. The UI shows a "verify
+            # cover" hint so the user knows the Discogs sleeve doesn't
+            # visually match — usually still the right release (different
+            # pressing) but lets them spot the rare wrong-record case.
             EXTREME_DIST = 50
 
             text_match_strong = c["confidence"] >= 0.7  # text fuzz already strong

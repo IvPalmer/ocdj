@@ -728,3 +728,97 @@
 .cratemate-manual-section {
   padding: var(--s-4) 0;
 }
+
+/* ── V6: mobile text-overflow fix + Discogs detail strip + info banner ── */
+
+/* Mobile text breaking: long titles and artist names were overflowing the
+   narrow card body grid cell on phones. Force wrap on word boundaries and
+   allow the title to break mid-word as a last resort. */
+.cratemate-card .cratemate-identity {
+  min-width: 0;  /* allow flex/grid child to shrink */
+  width: 100%;
+}
+.cratemate-card .cratemate-identity__album {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+.cratemate-card .cratemate-identity__artist {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.cratemate-card__body {
+  overflow: hidden;  /* contain children that try to overflow */
+}
+
+/* Info banner variant — used for soft warnings like cover-mismatch. */
+.cratemate-banner--info {
+  color: #5a4514;
+  background: rgba(178, 90, 26, 0.08);
+  border: 1px solid rgba(178, 90, 26, 0.20);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* Discogs detail strip — compact two-column grid of metadata rows. */
+.cratemate-meta-strip {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--s-1) var(--s-3);
+  margin: 0;
+  padding: var(--s-3) var(--s-4);
+  background: var(--bg-inset);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+}
+.cratemate-meta-strip dt {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-muted);
+  align-self: center;
+}
+.cratemate-meta-strip dd {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .cratemate-meta-strip {
+    grid-template-columns: 1fr;
+    gap: var(--s-1);
+    padding: var(--s-3);
+  }
+  .cratemate-meta-strip dt {
+    margin-top: var(--s-2);
+  }
+  .cratemate-meta-strip dt:first-child { margin-top: 0; }
+
+  /* Tighter card layout on small phones — narrower thumb so the body
+     has room to breathe. */
+  .cratemate-card {
+    grid-template-columns: 80px 1fr;
+    gap: var(--s-3);
+    padding: var(--s-3);
+  }
+  .cratemate-card .cratemate-identity__album {
+    font-size: clamp(18px, 5vw, 24px);
+  }
+}
+
+/* Confidence + status caption — let it wrap too. */
+.cratemate-card .cratemate-confidence {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Pill links: prevent the row from forcing layout on tiny screens. */
+.cratemate-card .cratemate-links {
+  flex-wrap: wrap;
+}

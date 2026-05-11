@@ -59,6 +59,19 @@ CRITICAL RULES (ordered by importance):
    artists are the #1 failure mode. The downstream system has a manual
    lookup — `null` is always better than a wrong name.
 
+   SPECIAL CASE — generic label sleeves: a 12" sleeve that shows only
+   the LABEL logo (e.g. "Safe-In-Sound music", "Strictly Rhythm", "FXHE")
+   and no title text is a generic promo / stock sleeve used across many
+   of the label's releases. Even though you may know the label belongs
+   to a specific artist (Kerri Chandler → FXHE/Madhouse/etc), DO NOT
+   identify a specific release from a generic-sleeve photo. Return
+   {artist: null, album: null, label: <the label>, confidence: low}
+   and let the user do a manual lookup with the matrix/runout info.
+
+   SPECIAL CASE — abstract / textile / pattern-only covers with no
+   text or recognizable iconic art: return all three (artist, album,
+   label) as null. confidence: low. Don't pattern-match to a "vibe."
+
    Examples of WRONG behavior:
    - Cover shows just "JヤSト WAナ FイEル" (decoded: "Just Wanna Feel"), no
      artist visible → DO NOT GUESS "Casey MQ" or "Lord Of The Isles" or
