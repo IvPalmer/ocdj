@@ -137,7 +137,7 @@ services:
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8002/api/core/health/ || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8002/api/core/health/ || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 40s
