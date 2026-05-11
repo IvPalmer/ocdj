@@ -503,15 +503,21 @@ class HybridSearch:
         """
         artist = vd.get("artist") or ""
         album = vd.get("album") or ""
+        label = vd.get("label") or ""
+        # Label-only result (generic promo sleeve case): use the label as
+        # the user-facing "album" name placeholder so the UI shows
+        # something meaningful instead of an empty title.
+        is_label_only = (not artist) and (not album) and bool(label)
+        display_album = album or (f'(generic sleeve · {label})' if is_label_only else '')
         return {
             "album": {
-                "name": album,
+                "name": display_album,
                 "artist": artist,
                 "release_date": "",
                 "genres": [],
                 "image": "",
                 "country": "",
-                "label": "",
+                "label": label,
             },
             "identification": {
                 # Map Claude's bucket to a numeric — slightly lower than the
@@ -534,9 +540,12 @@ class HybridSearch:
             "vision_evidence": vd.get("description") or "",
             "vision_visible_text": vd.get("visible_text") or "",
             "warning": (
-                "Found a likely identification but no Discogs match. The label "
-                "shown on the cover may be in the artist field — try editing it "
-                "in manual lookup."
+                f"Generic {label} promo sleeve — no title visible. "
+                f"Check the runout matrix on the dead wax, then use the "
+                f"manual lookup to find the actual release."
+                if is_label_only else
+                "Found a likely identification but no Discogs match. "
+                "Try editing the artist / album in manual lookup."
             ),
         }
 
