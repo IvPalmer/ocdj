@@ -160,17 +160,16 @@ class HybridSearch:
             if vision_lm_result and vision_lm_result.get("success"):
                 gemini_data = vision_lm_result["result"]
 
-                # Pass 2 trigger: Pass 1 returned a label but no artist
-                # (generic-sleeve case — the Safe-In-Sound bug). Instead of
-                # free-form WebSearch (which the SDK fought with under
-                # streaming-input + image mode), use a more constrained
-                # approach: server-side fetch the Discogs catalog for that
-                # label, then ask Opus "which of these N releases is this?"
-                # while showing the image.
+                # Pass 2 trigger: Pass 1 returned a label but no artist AND
+                # no album (generic-sleeve case — the Safe-In-Sound bug).
+                # When Pass 1 already has an album+label, plain Discogs
+                # label+album search resolves it without an extra Opus turn.
                 needs_pass2 = (
                     not gemini_data.get("artist")
+                    and not gemini_data.get("album")
                     and gemini_data.get("label")
                 )
+                pass2_match = None
                 if needs_pass2:
                     label = gemini_data["label"]
                     logger.info("Pass 1 returned label-only — Pass 2 catalog match on %r", label)
@@ -187,22 +186,59 @@ class HybridSearch:
                             cm = None
                         if cm and cm.get("success"):
                             choice = cm["result"]
-                            rel_id = choice.get("release_id")
-                            if rel_id:
-                                matched = next((c for c in candidates if c.get("id") == rel_id), None)
-                                if matched:
-                                    logger.info(
-                                        "Pass 2 picked release %s: %s — %s",
-                                        rel_id, matched.get("artist"), matched.get("title"),
-                                    )
-                                    gemini_data["artist"] = matched.get("artist")
-                                    gemini_data["album"] = matched.get("title")
-                                    gemini_data["confidence"] = choice.get("confidence") or "medium"
-                                    gemini_data["evidence"] = choice.get("evidence") or ""
-                                    gemini_data["pass2_ran"] = True
-                                    gemini_data["pass2_release_id"] = rel_id
+                            # Opus may emit release_id as int or numeric string;
+                            # Discogs IDs are ints — coerce before matching.
+                            raw_rel_id = choice.get("release_id")
+                            rel_id = None
+                            try:
+                                rel_id = int(raw_rel_id) if raw_rel_id is not None else None
+                            except (TypeError, ValueError):
+                                rel_id = None
+                            matched = None
+                            if rel_id is not None:
+                                matched = next(
+                                    (c for c in candidates if int(c.get("id", -1)) == rel_id),
+                                    None,
+                                )
+                            # Fallback: if release_id missing/invalid, accept a
+                            # valid `choice` index (1-based) instead of dropping.
+                            if matched is None:
+                                ch = choice.get("choice")
+                                try:
+                                    ch_idx = int(ch) - 1 if ch is not None else -1
+                                except (TypeError, ValueError):
+                                    ch_idx = -1
+                                if 0 <= ch_idx < len(candidates):
+                                    matched = candidates[ch_idx]
+                            if matched:
+                                logger.info(
+                                    "Pass 2 picked release %s: %s — %s",
+                                    matched.get("id"), matched.get("artist"), matched.get("title"),
+                                )
+                                gemini_data["artist"] = matched.get("artist")
+                                gemini_data["album"] = matched.get("title")
+                                gemini_data["confidence"] = choice.get("confidence") or "medium"
+                                gemini_data["evidence"] = choice.get("evidence") or ""
+                                gemini_data["pass2_ran"] = True
+                                gemini_data["pass2_release_id"] = matched.get("id")
+                                pass2_match = matched
 
-                if (
+                # When Pass 2 picked a specific release, skip the broad
+                # Discogs re-search — that's the whole point of catalog-match:
+                # the deterministic release_id Opus picked beats whatever a
+                # fresh text search would rank highest. Inject `matched`
+                # directly as the candidate; _build_final_result fetches
+                # full details by ID downstream.
+                if pass2_match:
+                    disc_result = dict(pass2_match)
+                    disc_result.setdefault("uri", f"/release/{pass2_match.get('id')}")
+                    all_candidates.append({
+                        "source": "claude_vision_pass2",
+                        "confidence": 0.92,
+                        "discogs_data": disc_result,
+                        "gemini_data": gemini_data,
+                    })
+                elif (
                     gemini_data.get("artist")
                     or gemini_data.get("album")
                     or gemini_data.get("label")
@@ -332,18 +368,6 @@ class HybridSearch:
             return await self.vision_lm.identify_album(image)
         except Exception as e:
             logger.error(f"Claude vision search failed: {e}")
-            return {"success": False, "error": str(e)}
-
-    async def _vision_lm_web_pass(self, image: Image.Image, pass1_result: Dict) -> Dict:
-        """Pass 2 — Opus with WebSearch enabled. Triggered when Pass 1
-        couldn't pin an artist (generic-sleeve / label-only / null-artist
-        case). Codex/GPT-5 with web search correctly identified the same
-        record in our testing — same approach via the Max-subscription
-        Opus + its WebSearch tool."""
-        try:
-            return await self.vision_lm.identify_album_with_web(image, hint=pass1_result)
-        except Exception as e:
-            logger.error(f"Claude vision pass-2 (web) failed: {e}")
             return {"success": False, "error": str(e)}
 
     async def _search_discogs_simple(
