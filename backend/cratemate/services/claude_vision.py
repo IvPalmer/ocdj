@@ -31,12 +31,13 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """You identify album covers for a DJ.
 
 Look at the image and tell me what release this is — the way you would
-recognize a record while crate-digging. Trust your visual recognition.
+recognize a record while crate-digging. Trust your visual recognition for
+covers you genuinely recognize. Refuse to guess for ones you don't.
 
 Return ONLY a JSON object:
 
 {
-  "artist": "string or null — the performing artist",
+  "artist": "string or null — the performing artist (see strict rule below)",
   "album": "string or null — the release/album/EP title",
   "label": "string or null — record label if printed prominently",
   "confidence": "high | medium | low",
@@ -44,28 +45,46 @@ Return ONLY a JSON object:
     artwork, photo features) that supports the identification"
 }
 
-Rules:
+CRITICAL RULES (ordered by importance):
 
-- BE A DJ, not an OCR scanner. If you recognize the cover (iconic, well-known,
-  or you can read the artist+title clearly), say so confidently.
+1. ARTIST = NULL UNLESS PROVEN. Set `artist` to a name ONLY when:
+   (a) the artist's name is literally printed on the cover, OR
+   (b) the artwork is a globally iconic cover you instantly recognize
+       (Daft Punk Discovery chrome graffiti, Joy Division Unknown
+       Pleasures pulsar plot, Aphex Twin black-A-on-white, Pink Floyd
+       Dark Side prism, etc.).
 
-- The biggest text on a record sleeve is sometimes the LABEL, not the
-  artist. If only the label is printed prominently (e.g. 'Sound Signature',
-  'Strictly Rhythm', 'Warp'), put it in `label`. Don't fake an artist.
+   If neither is true, return artist: null. DO NOT GUESS based on style,
+   genre, era, label, color palette, or cover aesthetic. Hallucinated
+   artists are the #1 failure mode. The downstream system has a manual
+   lookup — `null` is always better than a wrong name.
 
-- DECODE stylized text into the dictionary word it represents. Mixed
-  Latin/katakana/cyrillic substitutions are common (ヤ for U, ナ for N,
-  ル for L, Cyrillic Я for R, V for U). 'JヤSト WAナ FイEル' = 'Just Wanna
-  Feel'. 'SPECTRVM' = 'Spectrum' or 'Spectral'. 'FLΞSH' = 'Flash' or
-  'Flesh' (prefer dictionary + common record-title words).
+   Examples of WRONG behavior:
+   - Cover shows just "JヤSト WAナ FイEル" (decoded: "Just Wanna Feel"), no
+     artist visible → DO NOT GUESS "Casey MQ" or "Lord Of The Isles" or
+     any other artist. Return artist: null, album: "Just Wanna Feel".
+   - Cover shows large outlined "A SPECTRAL TURN", no artist visible →
+     DO NOT GUESS "Big Thief". Return artist: null, album: "A Spectral
+     Turn".
+   - Cover is a label-only sleeve showing "SOUND SIGNATURE" + "Parallel
+     Dimensions", no artist visible → artist: null, album: "Parallel
+     Dimensions", label: "Sound Signature".
 
-- If you cannot identify the release, set artist+album to null. The user
-  has a manual lookup fallback — empty is better than wrong.
+2. The biggest text on a record sleeve is sometimes the LABEL, not the
+   artist. If only the label is printed prominently (e.g. 'Sound Signature',
+   'Strictly Rhythm', 'Warp'), put it in `label`. Leave `artist` null
+   unless the actual performer is also visible somewhere on the sleeve.
 
-- Preserve original casing, accents, punctuation in the names you DO emit
-  (e.g. 'D. W. Art', 'NOMA', 'Sound Signature').
+3. DECODE stylized text into the dictionary word it represents. Mixed
+   Latin/katakana/cyrillic substitutions are common (ヤ for U, ナ for N,
+   ル for L, Cyrillic Я for R, V for U). 'JヤSト WAナ FイEル' = 'Just Wanna
+   Feel'. 'SPECTRVM' = 'Spectrum' or 'Spectral'. 'FLΞSH' = 'Flash' or
+   'Flesh' (prefer dictionary + common record-title words).
 
-- NO PROSE outside the JSON. NO code fences. NO explanation.
+4. Preserve original casing, accents, punctuation in the names you DO emit
+   (e.g. 'D. W. Art', 'NOMA', 'Sound Signature').
+
+5. NO PROSE outside the JSON. NO code fences. NO explanation.
 """
 
 
@@ -88,7 +107,11 @@ class ClaudeVisionCollector:
             logger.info('ClaudeVisionCollector V4 initialized (DJ-style identification)')
 
     async def identify_album(self, image: Image.Image, timeout_seconds: int = 90) -> Dict:
-        """Identify album from a PIL Image."""
+        """Identify album from a PIL Image.
+
+        Tries Opus first (strongest vision), falls back to Sonnet then Haiku
+        when the Max-subscription quota is exhausted on a higher tier.
+        """
         if not self.configured:
             return {'success': False, 'error': 'CLAUDE_CODE_OAUTH_TOKEN not configured'}
 

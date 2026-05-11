@@ -636,16 +636,37 @@ class HybridSearch:
             if claude_album and disc_title else None
         )
 
-        # Hard reject: Claude gave us a non-trivial artist name and the
-        # Discogs candidate's artist is something completely different.
-        # Returning near-zero pushes this candidate below the 0.30
-        # _select_best_match floor, so vision-only fallback kicks in.
+        # Reject logic. Two failure modes to distinguish:
+        #
+        # (A) Generic-title trap. Claude gave us an artist+album, Discogs
+        #     returned a different artist's record with the same title
+        #     (e.g. Claude says "Lord Of The Isles - Just Wanna Feel",
+        #     Discogs returns "Carol Riddick - I Just Wanna Feel You").
+        #     Both fields fuzz weakly → reject.
+        #
+        # (B) Cover-has-no-artist trap. The cover only shows the album
+        #     title (common for obscure 12"s); Claude correctly read the
+        #     title but HALLUCINATED an artist that fits the genre vibe
+        #     (e.g. Claude says "Big Thief - A Spectral Turn", Discogs
+        #     correctly returns "Numa Gama - A Spectral Turn"). The album
+        #     match is exact but the artist is wrong → ACCEPT the album
+        #     match because Claude's artist was a guess.
+        #
+        # Heuristic: if album fuzz >= 85, trust the album and ignore the
+        # artist mismatch. Otherwise enforce both-must-match.
+
+        if claude_album and album_fuzz is not None and album_fuzz >= 85:
+            # Strong album match — likely case (B). Penalize artist mismatch
+            # softly via the multiplier instead of hard-rejecting.
+            base *= (album_fuzz / 100.0)  # near-1
+            if artist_fuzz is not None:
+                # Mild penalty if artist mismatched, no penalty if matched.
+                base *= (0.7 + 0.3 * artist_fuzz / 100.0)
+            return min(0.95, base)
+
+        # Hard reject: artist OR album fuzz < 60 → not a real match.
         if claude_artist and artist_fuzz is not None and artist_fuzz < 60:
             return 0.05
-
-        # Same for album: if Claude gave us an album and the Discogs
-        # title is unrelated, reject. Don't trust artist-only matches
-        # for records that share a generic word.
         if claude_album and album_fuzz is not None and album_fuzz < 60:
             return 0.05
 
