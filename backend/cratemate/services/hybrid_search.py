@@ -467,7 +467,23 @@ class HybridSearch:
             # pressing) but lets them spot the rare wrong-record case.
             EXTREME_DIST = 50
 
-            text_match_strong = c["confidence"] >= 0.7  # text fuzz already strong
+            # Two paths to "trust the text match despite cover-image distance":
+            #   (a) overall confidence already >= 0.7 (both fuzz scores good)
+            #   (b) the album-title fuzz with the Claude-read is essentially
+            #       exact (>= 90 by token_set). This catches the case where
+            #       the new strict prompt makes Opus return conf="low" out
+            #       of caution but the title literally matches — e.g. Claude
+            #       says "A Spectral Turn", Discogs returns "A Spectral Turn".
+            #       Without this branch, Numa Gama gets pHash-rejected even
+            #       though it's the correct release.
+            disc_title = str((c.get("discogs_data") or {}).get("title") or "").lower()
+            claude_album = ((vd or {}).get("album") or "").lower()
+            album_exact_fuzz = (
+                fuzz.token_set_ratio(claude_album, disc_title)
+                if claude_album and disc_title else 0
+            )
+            text_match_strong = c["confidence"] >= 0.7 or album_exact_fuzz >= 90
+
             if dist > EXTREME_DIST and not text_match_strong and not is_iconic:
                 logger.info(
                     "phash REJECT candidate %s (dist=%d, low text conf=%.2f)",
