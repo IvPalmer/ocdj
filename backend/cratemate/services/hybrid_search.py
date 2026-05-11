@@ -611,27 +611,48 @@ class HybridSearch:
     def _calculate_confidence(self, gemini_data: Dict, discogs_data: Dict) -> float:
         """Confidence score for a Claude-vision-suggested + Discogs-found match.
 
-        V4 simple: trust Claude's confidence bucket, soft-multiply by fuzz
-        match. Don't gate on hard floors — the Discogs query was already
-        seeded by Claude's identification, so a top hit is usually right.
-        pHash verification (later) catches the rare case where Discogs
-        fuzz-matched a different record."""
+        Hard rule: if Claude gave us an artist, the Discogs candidate's
+        artist must fuzz-match it >= 60. If it doesn't, the album text-match
+        is meaningless (many records share titles like "Just Wanna Feel").
+        Discogs catalog gaps are real — when Claude correctly identifies a
+        new release that Discogs hasn't indexed yet, we should fall through
+        to vision-only with Claude's answer instead of shipping a junk
+        same-title-different-artist match.
+        """
         bucket = (gemini_data.get("confidence") or "low").lower()
         base = {"high": 0.9, "medium": 0.75, "low": 0.6}.get(bucket, 0.5)
 
-        if gemini_data.get("artist") and discogs_data.get("artist"):
-            af = fuzz.token_set_ratio(
-                gemini_data["artist"].lower(),
-                str(discogs_data.get("artist", "")).lower(),
-            ) / 100.0
-            base *= (0.6 + 0.4 * af)
+        claude_artist = (gemini_data.get("artist") or "").strip().lower()
+        claude_album = (gemini_data.get("album") or "").strip().lower()
+        disc_artist = str(discogs_data.get("artist") or "").strip().lower()
+        disc_title = str(discogs_data.get("title") or "").strip().lower()
 
-        if gemini_data.get("album") and discogs_data.get("title"):
-            tf = fuzz.token_set_ratio(
-                gemini_data["album"].lower(),
-                str(discogs_data.get("title", "")).lower(),
-            ) / 100.0
-            base *= (0.6 + 0.4 * tf)
+        artist_fuzz = (
+            fuzz.token_set_ratio(claude_artist, disc_artist)
+            if claude_artist and disc_artist else None
+        )
+        album_fuzz = (
+            fuzz.token_set_ratio(claude_album, disc_title)
+            if claude_album and disc_title else None
+        )
+
+        # Hard reject: Claude gave us a non-trivial artist name and the
+        # Discogs candidate's artist is something completely different.
+        # Returning near-zero pushes this candidate below the 0.30
+        # _select_best_match floor, so vision-only fallback kicks in.
+        if claude_artist and artist_fuzz is not None and artist_fuzz < 60:
+            return 0.05
+
+        # Same for album: if Claude gave us an album and the Discogs
+        # title is unrelated, reject. Don't trust artist-only matches
+        # for records that share a generic word.
+        if claude_album and album_fuzz is not None and album_fuzz < 60:
+            return 0.05
+
+        if artist_fuzz is not None:
+            base *= (0.6 + 0.4 * artist_fuzz / 100.0)
+        if album_fuzz is not None:
+            base *= (0.6 + 0.4 * album_fuzz / 100.0)
 
         return min(0.95, base)
     
