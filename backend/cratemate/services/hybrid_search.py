@@ -4,6 +4,7 @@ Hybrid search system that combines multiple identification methods
 import logging
 import asyncio
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 from PIL import Image
 from fuzzywuzzy import fuzz
@@ -919,25 +920,31 @@ class HybridSearch:
                     })
                 
                 # Fill gaps with yt-dlp ytsearch (direct video IDs, no API key
-                # needed). Without this, tracks that don't have a Discogs-
-                # embedded video render as "no link" — the user explicitly
-                # wants every track clickable to a real YouTube video, not a
-                # search results page.
+                # needed). Wrapped in try/except so a yt-dlp failure CANNOT
+                # nuke the existing Discogs-mapped tracks (which is what was
+                # happening — the function blocked, request timed out
+                # mid-flight, and youtube_tracks was never set on the result).
                 missing = [t for t in mapped_tracks if not t.get('youtube') and t.get('title')]
                 if missing:
                     logger.info(
                         "yt-dlp fallback: %d/%d tracks need direct links",
                         len(missing), len(mapped_tracks),
                     )
-                    filled = self._fill_missing_youtube_with_ytdlp(artist, album, missing)
-                    if filled:
-                        # Re-merge: replace each missing entry with its filled version.
-                        by_pos = {(t.get('position'), t.get('title')): t for t in filled}
-                        mapped_tracks = [
-                            by_pos.get((t.get('position'), t.get('title')), t)
-                            for t in mapped_tracks
-                        ]
+                    try:
+                        filled = self._fill_missing_youtube_with_ytdlp(artist, album, missing)
+                        if filled:
+                            by_pos = {(t.get('position'), t.get('title')): t for t in filled}
+                            mapped_tracks = [
+                                by_pos.get((t.get('position'), t.get('title')), t)
+                                for t in mapped_tracks
+                            ]
+                    except Exception as e:
+                        logger.warning("yt-dlp gap-fill failed: %s — keeping Discogs-only matches", e)
 
+                # CRITICAL: set youtube_tracks BEFORE any subsequent code path
+                # that might raise. The earlier ordering (set after yt-dlp)
+                # meant a yt-dlp exception left youtube_tracks unset and the
+                # downstream _build_formatted_tracklist found nothing to merge.
                 result["tracks"]["youtube_tracks"] = mapped_tracks
                 logger.info(f"Mapped {sum(1 for t in mapped_tracks if t.get('youtube'))} tracks to YouTube videos")
 
