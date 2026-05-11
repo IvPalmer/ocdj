@@ -361,11 +361,16 @@ class ClaudeVisionCollector:
             }
 
         model_id = os.getenv('CRATEMATE_VISION_MODEL', 'claude-opus-4-7')
+        # permission_mode='dontAsk' is required because the backend container
+        # runs as root, which forbids bypassPermissions. Without explicit
+        # permission grant the CLI prompts interactively for each WebSearch
+        # call — there's no human to answer, so the SDK returns is_error=True.
         options = ClaudeAgentOptions(
             max_turns=4,
             model=model_id,
             allowed_tools=['WebSearch', 'WebFetch'],
             setting_sources=[],
+            permission_mode='dontAsk',
         )
 
         collected: list[str] = []
@@ -378,7 +383,11 @@ class ClaudeVisionCollector:
                                 collected.append(block.text)
                     elif isinstance(msg, ResultMessage):
                         if msg.is_error:
-                            logger.warning('claude_vision (pass2): SDK is_error=True')
+                            logger.warning(
+                                'claude_vision (pass2): SDK is_error=True, stop_reason=%r, result=%r',
+                                getattr(msg, 'stop_reason', None),
+                                (getattr(msg, 'result', None) or '')[:300],
+                            )
                         break
         except asyncio.TimeoutError:
             return {'success': False, 'error': f'pass2 timeout after {timeout_seconds}s'}
