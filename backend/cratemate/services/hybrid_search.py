@@ -284,21 +284,20 @@ class HybridSearch:
     async def _search_discogs_simple(
         self, artist: str, album: str, label: str = ""
     ) -> List[Dict]:
-        """Simple Discogs lookup — try the obvious queries, take the first
-        non-empty result, return up to 5 hits.
+        """Look up Claude's identification on Discogs.
 
-        V3's elaborate fallback chain (7 attempts, aggregation, dedup, fuzz
-        scoring) made things worse: when Claude returned 'marschmellows /
-        flesh fried' the strict artist+album query fuzz-matched a death-
-        metal record on the word 'flesh', that became the answer despite a
-        terrible cover-image match. Keep it simple — the broad queries and
-        downstream pHash sanity check do the work.
+        Runs a small set of obvious queries (artist+album, label+album,
+        album-only, artist-only) and returns the unioned/deduped hits. No
+        scoring contortions — `_calculate_confidence` and pHash do that.
+        Looking in more than one place is the cheap fix for Claude OCR
+        typos: 'marschmellows flesh fried' returns garbage but
+        'marschmellows' alone returns the actual Marschmellows discography.
         """
-        attempts = []
         artist = (artist or "").strip()
         album = (album or "").strip()
         label = (label or "").strip()
 
+        attempts = []
         if artist and album:
             attempts.append(("artist+album", f"{artist} {album}"))
         if label and album:
@@ -308,24 +307,26 @@ class HybridSearch:
         if artist:
             attempts.append(("artist", artist))
 
-        for label_, query in attempts:
+        seen, out = set(), []
+        for tag, q in attempts:
             try:
-                res = self.discogs.search_release(query)
+                res = self.discogs.search_release(q)
                 if not (res and res.get("success")):
                     continue
-                hits = res.get("results") or []
-                if not hits:
-                    continue
-                logger.info(
-                    "discogs (%s) %r -> %d hits", label_, query, len(hits),
-                )
-                # Tag attempt source for debugging.
-                for h in hits[:5]:
-                    h['_attempt'] = label_
-                return hits[:5]
+                for h in (res.get("results") or [])[:5]:
+                    hid = h.get("id")
+                    if hid in seen:
+                        continue
+                    seen.add(hid)
+                    h['_attempt'] = tag
+                    out.append(h)
+                logger.info("discogs (%s) %r -> %d new hits (cum=%d)",
+                            tag, q, min(5, len(res.get("results") or [])), len(out))
+                if len(out) >= 10:
+                    break
             except Exception as e:
-                logger.warning("discogs query %s failed: %s", label_, e)
-        return []
+                logger.warning("discogs query %s failed: %s", tag, e)
+        return out[:10]
 
     async def _search_discogs_with_fallback(
         self, artist: str, album: str, label: str = "", visible_text: str = ""
