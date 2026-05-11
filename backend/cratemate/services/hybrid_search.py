@@ -159,10 +159,41 @@ class HybridSearch:
             # the candidate dict — the shape is identical so no other code moves.
             if vision_lm_result and vision_lm_result.get("success"):
                 gemini_data = vision_lm_result["result"]
-                # Include `visible_text` as a trigger so we still query Discogs
-                # when Claude couldn't extract a proper artist/album but did
-                # OCR readable text off the sleeve (e.g. obscure Brazilian
-                # records where the visible text is the only signal we have).
+
+                # Pass 2 trigger: Pass 1 returned a label but no artist
+                # (generic-sleeve case — the Safe-In-Sound bug). Use Opus
+                # with WebSearch to research the specific release. Costs
+                # one more multi-turn Opus call, only fires on the hard
+                # tail. Skip when Pass 1 has artist (we already know who).
+                needs_web = (
+                    not gemini_data.get("artist")
+                    and (gemini_data.get("label") or gemini_data.get("album"))
+                )
+                if needs_web:
+                    logger.info(
+                        "Pass 1 returned no artist (label=%r, album=%r) — "
+                        "triggering Pass 2 with WebSearch",
+                        gemini_data.get("label"), gemini_data.get("album"),
+                    )
+                    pass2 = await self._vision_lm_web_pass(album_image, gemini_data)
+                    if pass2 and pass2.get("success"):
+                        p2 = pass2["result"]
+                        if p2.get("artist") or p2.get("album"):
+                            logger.info(
+                                "Pass 2 refined: artist=%r album=%r label=%r conf=%s",
+                                p2.get("artist"), p2.get("album"),
+                                p2.get("label"), p2.get("confidence"),
+                            )
+                            # Overlay Pass 2 fields onto gemini_data so the
+                            # rest of the pipeline (Discogs query, confidence
+                            # calc, vision_only fallback) uses the refined
+                            # identification.
+                            for k in ("artist", "album", "label", "confidence",
+                                      "evidence", "description"):
+                                if p2.get(k):
+                                    gemini_data[k] = p2[k]
+                            gemini_data["pass2_ran"] = True
+
                 if (
                     gemini_data.get("artist")
                     or gemini_data.get("album")
@@ -293,6 +324,18 @@ class HybridSearch:
             return await self.vision_lm.identify_album(image)
         except Exception as e:
             logger.error(f"Claude vision search failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _vision_lm_web_pass(self, image: Image.Image, pass1_result: Dict) -> Dict:
+        """Pass 2 — Opus with WebSearch enabled. Triggered when Pass 1
+        couldn't pin an artist (generic-sleeve / label-only / null-artist
+        case). Codex/GPT-5 with web search correctly identified the same
+        record in our testing — same approach via the Max-subscription
+        Opus + its WebSearch tool."""
+        try:
+            return await self.vision_lm.identify_album_with_web(image, hint=pass1_result)
+        except Exception as e:
+            logger.error(f"Claude vision pass-2 (web) failed: {e}")
             return {"success": False, "error": str(e)}
 
     async def _search_discogs_simple(
