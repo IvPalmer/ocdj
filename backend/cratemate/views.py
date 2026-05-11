@@ -193,7 +193,17 @@ def identify(request):
 
     run.identification = identification
     run.release = release
-    run.status = 'completed' if release else 'failed'
+    # Audit state: 'completed' if EITHER we got a Discogs-enriched release
+    # OR Claude returned a valid artist/album (vision-only success).
+    # Previously this marked vision-only hits as 'failed' even when the
+    # frontend rendered them as a successful identification with manual
+    # lookup affordance — confusing the audit log + recent-results view.
+    if release or flat.get('artist') or flat.get('album'):
+        run.status = 'completed'
+    elif (result or {}).get('error'):
+        run.status = 'failed'
+    else:
+        run.status = 'failed'
     run.duration_ms = duration_ms
     run.error_message = identification.error_message
     run.save()

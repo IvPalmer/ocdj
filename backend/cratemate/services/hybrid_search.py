@@ -1036,9 +1036,14 @@ class HybridSearch:
                         result["tracks"]["youtube_tracks"] = youtube_tracks
             else:
                 logger.info("No YouTube API key, using search links")
-                # Generate album search link
-                album_link = self.youtube_enhanced.generate_album_link(artist, album)
-                result["links"]["youtube"] = album_link["url"]
+                # Album-level YouTube fallback: plain search URL. The old
+                # youtube_enhanced helper was a dead reference (was on
+                # _NullYouTubeBackend post-V2 — codex review flagged).
+                from urllib.parse import quote_plus
+                album_q = f"{artist} {album}".strip()
+                result["links"]["youtube"] = (
+                    f"https://www.youtube.com/results?search_query={quote_plus(album_q)}"
+                )
                 
                 # Generate individual track links
                 if discogs_data.get("tracklist"):
@@ -1300,33 +1305,31 @@ class HybridSearch:
         return enhanced_tracks
     
     def _generate_track_search_links(self, artist: str, album: str, tracklist: List[Dict]) -> List[Dict]:
-        """Generate YouTube links — try yt-dlp first, then fallback to search.
-
-        V2: dropped the Gemini-guesses-YouTube-IDs path that used to live here.
-        Routing this through Claude is technically possible (same SDK pattern
-        as identification) but the value is marginal — this method only runs
-        when the Discogs release has no embedded videos AND the YouTube API
-        key isn't set, which is the rare-tail path. yt-dlp + search links
-        cover it well enough.
+        """Generate YouTube links via _fill_missing_youtube_with_ytdlp +
+        search-link fallback. V4 cleanup: dropped references to the old
+        self.youtube_ytdlp / self.youtube_enhanced legacy backends (they
+        were _NullYouTubeBackend instances after the V2 rewrite — codex
+        review caught the dead reference).
         """
-        # Try yt-dlp if available
-        if self.youtube_ytdlp.ytdlp_available:
-            logger.info("Trying yt-dlp to get direct YouTube video URLs")
-            try:
-                youtube_tracks = self.youtube_ytdlp.get_track_videos(artist, album, tracklist)
-                # Check if we got any actual video URLs
-                videos_found = sum(1 for t in youtube_tracks if t.get("youtube"))
-                if videos_found > 0:
-                    logger.info(f"Found {videos_found} direct YouTube video URLs using yt-dlp")
-                    return youtube_tracks
-            except Exception as e:
-                logger.warning(f"yt-dlp failed, falling back to search links: {e}")
-        
-        # Fallback to search links
-        logger.info("Using YouTube search links (yt-dlp not available or failed)")
+        # Try direct video lookup via the proven yt-dlp helper.
+        try:
+            base = [
+                {'position': t.get('position', ''),
+                 'title': t.get('title', ''),
+                 'duration': t.get('duration', ''),
+                 'youtube': None}
+                for t in tracklist
+            ]
+            filled = self._fill_missing_youtube_with_ytdlp(artist, album, base)
+            if any(t.get('youtube') for t in (filled or [])):
+                return filled
+        except Exception as e:
+            logger.warning("yt-dlp track lookup failed: %s — falling back to search links", e)
+
+        # Final fallback: per-track YouTube search URLs (better than nothing).
+        logger.info("Using YouTube search links (yt-dlp didn't find direct videos)")
         enhanced_tracks = []
-        
-        import re
+
         from urllib.parse import quote_plus
         cleaned_artist = re.sub(r"\s*\(\d+\)$", "", artist).strip()
         cleaned_album = re.sub(r"\s*\(\d+\)$", "", album).strip()

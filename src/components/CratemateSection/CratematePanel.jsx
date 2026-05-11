@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import './CratematePanel.css'
 
@@ -98,17 +98,36 @@ function CratematePanel() {
     setItems((prev) => [...prev, ...valid.map(makeItem)])
   }, [])
 
-  // Run pending items through /identify with bounded concurrency.
-  useEffect(() => {
-    let cancelled = false
-    const work = async () => {
-      while (!cancelled) {
-        const inflight = items.filter((it) => it.status === 'uploading').length
-        if (inflight >= CONCURRENCY) return
-        const next = items.find((it) => it.status === 'pending')
-        if (!next) return
-        // Mark as uploading immediately so the next loop tick doesn't re-pick it.
-        setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'uploading' } : it))
+  // Queue runner — ref-guarded so the effect doesn't keep spawning new
+  // runners on every items[] mutation. The earlier version (effect dep on
+  // items + closure-captured `cancelled` flag) deadlocked: marking an
+  // item 'uploading' mutated items, which triggered cleanup that set
+  // cancelled=true on the in-flight fetch's closure. When the fetch
+  // resolved, the `if (cancelled) return` early-out left the item stuck
+  // in 'uploading' forever, blocking the rest of the queue. Per codex
+  // review — real bug at scale.
+  //
+  // New design: one persistent runner started on mount; it walks the
+  // queue using the latest items via the itemsRef. Effect just pokes it
+  // whenever there might be more pending work.
+  const itemsRef = useRef(items)
+  useEffect(() => { itemsRef.current = items }, [items])
+  const runnerActive = useRef(false)
+  const unmountedRef = useRef(false)
+  useEffect(() => () => { unmountedRef.current = true }, [])
+
+  const tickQueue = useCallback(() => {
+    if (runnerActive.current) return
+    runnerActive.current = true
+    ;(async () => {
+      while (!unmountedRef.current) {
+        const inflight = itemsRef.current.filter((it) => it.status === 'uploading').length
+        if (inflight >= CONCURRENCY) break
+        const next = itemsRef.current.find((it) => it.status === 'pending')
+        if (!next) break
+        const id = next.id
+        // Mark uploading. Use functional update so we don't race with concurrent setItems.
+        setItems((prev) => prev.map((it) => it.id === id ? { ...it, status: 'uploading' } : it))
         try {
           const formData = new FormData()
           formData.append('image', next.file)
@@ -117,22 +136,25 @@ function CratematePanel() {
             body: formData,
           })
           const data = await res.json().catch(() => ({}))
-          if (cancelled) return
+          if (unmountedRef.current) break
           if (!res.ok) {
             const msg = data.error || data.detail || `HTTP ${res.status}`
-            setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'error', error: msg } : it))
+            setItems((prev) => prev.map((it) => it.id === id ? { ...it, status: 'error', error: msg } : it))
           } else {
-            setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'done', result: data } : it))
+            setItems((prev) => prev.map((it) => it.id === id ? { ...it, status: 'done', result: data } : it))
           }
         } catch (err) {
-          if (cancelled) return
-          setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'error', error: err.message || 'Network error' } : it))
+          if (unmountedRef.current) break
+          setItems((prev) => prev.map((it) => it.id === id ? { ...it, status: 'error', error: err.message || 'Network error' } : it))
         }
       }
-    }
-    work()
-    return () => { cancelled = true }
-  }, [items])
+      runnerActive.current = false
+    })()
+  }, [])
+
+  // Whenever items changes (especially: a new pending item was added),
+  // poke the runner. It's a no-op when already running.
+  useEffect(() => { tickQueue() }, [items, tickQueue])
 
   const removeItem = (id) => {
     setItems((prev) => {
