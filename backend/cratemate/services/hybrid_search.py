@@ -631,10 +631,19 @@ class HybridSearch:
             fuzz.token_set_ratio(claude_artist, disc_artist)
             if claude_artist and disc_artist else None
         )
-        album_fuzz = (
-            fuzz.token_set_ratio(claude_album, disc_title)
-            if claude_album and disc_title else None
-        )
+
+        # Album fuzz: when Claude provided an artist, use token_set (tolerant
+        # of word order). When artist is null (cover only shows title), use
+        # fuzz.ratio (literal edit distance) so exact titles like
+        # 'Just Wanna Feel' beat string-supersets like 'I Just Wanna Feel You'.
+        # token_set rates both at 100; ratio rates them 100 vs 50.
+        if claude_album and disc_title:
+            if claude_artist:
+                album_fuzz = fuzz.token_set_ratio(claude_album, disc_title)
+            else:
+                album_fuzz = fuzz.ratio(claude_album, disc_title)
+        else:
+            album_fuzz = None
 
         # Reject logic. Two failure modes to distinguish:
         #
