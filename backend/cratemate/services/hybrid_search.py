@@ -239,6 +239,11 @@ class HybridSearch:
             # Select best candidate (now with pHash distance penalty applied)
             best_match = self._select_best_match(verified_candidates)
 
+            # is_iconic is a vision-result attribute used inside the
+            # _verify_candidates_by_cover scope earlier; recompute locally
+            # for the post-verification block.
+            iconic_flag = bool((vd or {}).get("is_iconic"))
+
             if best_match:
                 # Get all available links
                 final_result = await self._build_final_result(best_match)
@@ -250,18 +255,20 @@ class HybridSearch:
                     # User-facing warning when the Discogs cover doesn't
                     # visually match — usually still the right RELEASE
                     # (different pressing artwork) but flag for verification.
-                    if dist is not None and dist > 30 and not is_iconic:
+                    if dist is not None and dist > 30 and not iconic_flag:
                         final_result["cover_mismatch_warning"] = True
                 # Save to cache before returning
                 self._save_to_cache(image_hash, final_result)
                 return final_result
 
-            # No verified Discogs candidates. If Claude actually saw something,
-            # return a vision-only result so the user gets the artist/album +
-            # the model's evidence. Better than the old "couldn't identify"
-            # blanket error which threw away a high-confidence answer just
-            # because Discogs didn't index that release.
-            if vd and (vd.get("artist") or vd.get("album") or vd.get("visible_text")):
+            # No verified Discogs candidates. If Claude actually saw
+            # something — including a label-only read for generic-sleeve
+            # promos — return a vision-only result so the user gets
+            # what was found plus the manual-lookup affordance.
+            if vd and (
+                vd.get("artist") or vd.get("album") or vd.get("label")
+                or vd.get("visible_text")
+            ):
                 return self._vision_only_result(vd)
 
             return {
