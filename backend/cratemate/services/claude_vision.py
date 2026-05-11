@@ -153,22 +153,49 @@ class ClaudeVisionCollector:
                 'session_id': 'cratemate-identify',
             }
 
+        # CRITICAL: pin Opus explicitly. Without this the Claude Code default
+        # routing was sending the bulk of token work to Haiku 4.5 — confirmed
+        # via ResultMessage.model_usage on a probe call. Haiku's vision is
+        # significantly weaker on stylized cover typography (the user's
+        # "flesh" vs "flash" + "Spectraturm" vs "Spectral Turn" misreads
+        # were the symptom). Opus is the strongest vision model available
+        # via the Max subscription. Override-able via CRATEMATE_VISION_MODEL.
+        model_id = os.getenv('CRATEMATE_VISION_MODEL', 'claude-opus-4-7')
+
         options = ClaudeAgentOptions(
             max_turns=1,
+            model=model_id,
             system_prompt=_SYSTEM_PROMPT,
             allowed_tools=[],
             setting_sources=[],
         )
 
         collected: list[str] = []
+        answering_model: Optional[str] = None
         try:
             async with asyncio.timeout(timeout_seconds):
                 async for msg in query(prompt=_prompts(), options=options):
                     if isinstance(msg, AssistantMessage):
+                        # AssistantMessage carries .model — the model that
+                        # actually generated this turn. Log it so we can
+                        # confirm Sonnet (not Haiku) is doing vision work.
+                        m = getattr(msg, 'model', None)
+                        if m and m != answering_model:
+                            answering_model = m
+                            logger.info('claude_vision: assistant model=%s', m)
                         for block in msg.content:
                             if isinstance(block, TextBlock):
                                 collected.append(block.text)
                     elif isinstance(msg, ResultMessage):
+                        # model_usage shows token totals per model — proves
+                        # which one bore the load.
+                        usage = getattr(msg, 'model_usage', None) or {}
+                        if usage:
+                            logger.info(
+                                'claude_vision: model_usage=%s',
+                                {k: {'in': v.get('inputTokens'), 'out': v.get('outputTokens')}
+                                 for k, v in usage.items()},
+                            )
                         if msg.is_error:
                             logger.warning('claude_vision: SDK is_error=True')
                         break

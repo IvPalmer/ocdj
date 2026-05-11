@@ -120,6 +120,16 @@ services:
       OCDJ_AUTOPUBLISH: "1"
       DRAIN_TOKEN: ${DRAIN_TOKEN}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Cratemate vision: pin Opus 4.7 — the strongest vision model on
+      # the Max subscription. Without an explicit pin, Claude Code's
+      # default routing was sending vision-identification work to Haiku 4.5,
+      # which misreads stylized record sleeves ("flash"→"flesh",
+      # "Spectral"→"Spectrvm").
+      CRATEMATE_VISION_MODEL: ${CRATEMATE_VISION_MODEL:-claude-opus-4-7}
+      # Belt-and-suspenders: even if any internal SDK routing tries to use
+      # the "haiku" alias for tool/router decisions, redirect it to Sonnet
+      # so the actual content generation never falls to Haiku.
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: ${ANTHROPIC_DEFAULT_HAIKU_MODEL:-claude-sonnet-4-6}
     volumes:
       - /srv/ocdj/pipeline:/srv/ocdj/pipeline
       - /srv/ocdj/publish:/srv/ocdj/publish
