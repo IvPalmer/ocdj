@@ -161,38 +161,46 @@ class HybridSearch:
                 gemini_data = vision_lm_result["result"]
 
                 # Pass 2 trigger: Pass 1 returned a label but no artist
-                # (generic-sleeve case — the Safe-In-Sound bug). Use Opus
-                # with WebSearch to research the specific release. Costs
-                # one more multi-turn Opus call, only fires on the hard
-                # tail. Skip when Pass 1 has artist (we already know who).
-                needs_web = (
+                # (generic-sleeve case — the Safe-In-Sound bug). Instead of
+                # free-form WebSearch (which the SDK fought with under
+                # streaming-input + image mode), use a more constrained
+                # approach: server-side fetch the Discogs catalog for that
+                # label, then ask Opus "which of these N releases is this?"
+                # while showing the image.
+                needs_pass2 = (
                     not gemini_data.get("artist")
-                    and (gemini_data.get("label") or gemini_data.get("album"))
+                    and gemini_data.get("label")
                 )
-                if needs_web:
-                    logger.info(
-                        "Pass 1 returned no artist (label=%r, album=%r) — "
-                        "triggering Pass 2 with WebSearch",
-                        gemini_data.get("label"), gemini_data.get("album"),
-                    )
-                    pass2 = await self._vision_lm_web_pass(album_image, gemini_data)
-                    if pass2 and pass2.get("success"):
-                        p2 = pass2["result"]
-                        if p2.get("artist") or p2.get("album"):
-                            logger.info(
-                                "Pass 2 refined: artist=%r album=%r label=%r conf=%s",
-                                p2.get("artist"), p2.get("album"),
-                                p2.get("label"), p2.get("confidence"),
+                if needs_pass2:
+                    label = gemini_data["label"]
+                    logger.info("Pass 1 returned label-only — Pass 2 catalog match on %r", label)
+                    label_search = self.discogs.search_label_releases(label, limit=30)
+                    if label_search.get("success") and label_search.get("results"):
+                        candidates = label_search["results"]
+                        logger.info("Pass 2: %d catalog candidates for label %r", len(candidates), label)
+                        try:
+                            cm = await self.vision_lm.identify_album_from_label_catalog(
+                                album_image, label, candidates,
                             )
-                            # Overlay Pass 2 fields onto gemini_data so the
-                            # rest of the pipeline (Discogs query, confidence
-                            # calc, vision_only fallback) uses the refined
-                            # identification.
-                            for k in ("artist", "album", "label", "confidence",
-                                      "evidence", "description"):
-                                if p2.get(k):
-                                    gemini_data[k] = p2[k]
-                            gemini_data["pass2_ran"] = True
+                        except Exception as e:
+                            logger.warning("Pass 2 catalog match failed: %s", e)
+                            cm = None
+                        if cm and cm.get("success"):
+                            choice = cm["result"]
+                            rel_id = choice.get("release_id")
+                            if rel_id:
+                                matched = next((c for c in candidates if c.get("id") == rel_id), None)
+                                if matched:
+                                    logger.info(
+                                        "Pass 2 picked release %s: %s — %s",
+                                        rel_id, matched.get("artist"), matched.get("title"),
+                                    )
+                                    gemini_data["artist"] = matched.get("artist")
+                                    gemini_data["album"] = matched.get("title")
+                                    gemini_data["confidence"] = choice.get("confidence") or "medium"
+                                    gemini_data["evidence"] = choice.get("evidence") or ""
+                                    gemini_data["pass2_ran"] = True
+                                    gemini_data["pass2_release_id"] = rel_id
 
                 if (
                     gemini_data.get("artist")

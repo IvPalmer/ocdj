@@ -68,6 +68,36 @@ class DiscogsCollector(MetadataCollector):
             self.logger.error(f"Error searching Discogs: {e}")
             return {"success": False, "error": str(e)}
     
+    def search_label_releases(self, label: str, limit: int = 30):
+        """Fetch releases on a specific label. Used by the catalog-match
+        Pass 2 fallback when the cover is a generic label sleeve and we
+        want to show Opus all releases on that label so it can pick the
+        match by looking at the disc center label."""
+        if not self.client:
+            return {"success": False, "error": "Discogs client not initialized"}
+        try:
+            results = self.client.search(label, type='release', label=label)
+            if not results or not getattr(results, 'count', 0):
+                return {"success": False, "error": "no label results"}
+            page = results.page(1) if hasattr(results, 'page') else list(results)[:limit]
+            out = []
+            for r in page[:limit]:
+                artist = r.artists[0].name if r.artists else "Unknown Artist"
+                out.append({
+                    "id": r.id,
+                    "title": r.title,
+                    "artist": artist,
+                    "year": getattr(r, 'year', ''),
+                    "format": [f['name'] for f in getattr(r, 'formats', [])]
+                              if hasattr(r, 'formats') else [],
+                    "cover_image": getattr(r, 'cover_image', '') or '',
+                    "thumb": getattr(r, 'thumb', '') or '',
+                })
+            return {"success": True, "results": out}
+        except Exception as e:
+            self.logger.error(f"Discogs label search error: {e}")
+            return {"success": False, "error": str(e)}
+
     def get_release_details(self, release_id: str):
         """Get detailed release info including tracklist, videos, and price data"""
         if not self.client:

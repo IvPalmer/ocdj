@@ -267,6 +267,131 @@ class ClaudeVisionCollector:
         )
         return {'success': True, 'result': result, 'raw_response': raw}
 
+    async def identify_album_from_label_catalog(
+        self, image: Image.Image, label: str, candidate_releases: list,
+        timeout_seconds: int = 90,
+    ) -> Dict:
+        """Pass 2b — server pre-fetches the Discogs catalog for the label
+        Pass 1 identified, then shows Opus the image alongside a numbered
+        list of candidate releases and asks "which one is this?" That's
+        more reliable than free-form WebSearch (which the SDK turned out
+        to fight with under streaming-input + image mode), and uses the
+        Discogs data source we already trust.
+
+        candidate_releases: list of dicts {id, artist, title, year, format}.
+        """
+        if not self.configured:
+            return {'success': False, 'error': 'CLAUDE_CODE_OAUTH_TOKEN not configured'}
+        if not candidate_releases:
+            return {'success': False, 'error': 'no candidates to match'}
+
+        try:
+            from claude_agent_sdk import (
+                AssistantMessage,
+                ClaudeAgentOptions,
+                ResultMessage,
+                TextBlock,
+                query,
+            )
+        except ImportError as e:
+            return {'success': False, 'error': f'sdk import: {e}'}
+
+        try:
+            img = ImageOps.exif_transpose(image)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            if max(img.size) > 1600:
+                ratio = 1600 / max(img.size)
+                img = img.resize(
+                    (int(img.size[0] * ratio), int(img.size[1] * ratio)),
+                    Image.LANCZOS,
+                )
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=92)
+            image_b64 = base64.standard_b64encode(buf.getvalue()).decode('ascii')
+        except Exception as e:
+            return {'success': False, 'error': f'image prep: {e}'}
+
+        # Format the candidate list. Cap at 30 to keep prompt small.
+        lines = []
+        for idx, r in enumerate(candidate_releases[:30], start=1):
+            yr = r.get('year') or '?'
+            fmt = ', '.join(r.get('format') or []) or '?'
+            artist = r.get('artist') or '?'
+            title = r.get('title') or '?'
+            lines.append(f"{idx}. [{r.get('id')}] {artist} — {title} ({yr}, {fmt})")
+        catalog_text = '\n'.join(lines)
+
+        prompt_text = (
+            f"This 12\" vinyl record is on the {label!r} label. The actual "
+            f"artist + title aren't visible on the sleeve, but the disc "
+            f"center label is visible through the cutout and the dead-wax "
+            f"matrix has identifying marks.\n\n"
+            f"Here are all the releases Discogs has on this label "
+            f"(numbered, with catalog IDs):\n\n{catalog_text}\n\n"
+            f"Which numbered release matches this record? Look at:\n"
+            f"- the disc center label design (color, illustration, text)\n"
+            f"- any visible matrix/runout text on the dead wax\n"
+            f"- year clues from the sleeve design style\n\n"
+            f"Return ONLY JSON: "
+            f'{{"choice": <number from the list, or null if you can\'t tell>, '
+            f'"release_id": <the Discogs id of your choice, or null>, '
+            f'"confidence": "high|medium|low", '
+            f'"evidence": "what specifically pointed you to this release"}}\n\n'
+            f"If none of the listed releases match what you see on the disc "
+            f"label, return choice: null. Don't guess."
+        )
+
+        async def _gen():
+            yield {
+                'type': 'user',
+                'message': {
+                    'role': 'user',
+                    'content': [
+                        {'type': 'image', 'source': {'type': 'base64',
+                                                     'media_type': 'image/jpeg',
+                                                     'data': image_b64}},
+                        {'type': 'text', 'text': prompt_text},
+                    ],
+                },
+                'parent_tool_use_id': None,
+                'session_id': 'cratemate-catalog-match',
+            }
+
+        model_id = os.getenv('CRATEMATE_VISION_MODEL', 'claude-opus-4-7')
+        options = ClaudeAgentOptions(
+            max_turns=1,
+            model=model_id,
+            allowed_tools=[],
+            setting_sources=[],
+        )
+
+        collected: list[str] = []
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                async for msg in query(prompt=_gen(), options=options):
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, TextBlock):
+                                collected.append(block.text)
+                    elif isinstance(msg, ResultMessage):
+                        if msg.is_error:
+                            logger.warning('catalog-match: SDK is_error=True')
+                        break
+        except Exception as e:
+            return {'success': False, 'error': f'sdk: {e}'}
+
+        raw = '\n'.join(collected).strip()
+        parsed = self._parse_response(raw)
+        if parsed is None:
+            return {'success': False, 'error': 'unparseable', 'raw_response': raw}
+        logger.info(
+            'catalog-match: choice=%s release_id=%s conf=%s',
+            parsed.get('choice'), parsed.get('release_id'),
+            parsed.get('confidence'),
+        )
+        return {'success': True, 'result': parsed, 'raw_response': raw}
+
     async def identify_album_with_web(self, image: Image.Image, hint: Optional[Dict] = None, timeout_seconds: int = 180) -> Dict:
         """Pass 2 — give Opus WebSearch + a hint from Pass 1, let it research.
 
