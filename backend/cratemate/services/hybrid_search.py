@@ -918,9 +918,54 @@ class HybridSearch:
                         'youtube': youtube_match
                     })
                 
+                # Fill gaps with yt-dlp ytsearch (direct video IDs, no API key
+                # needed). Without this, tracks that don't have a Discogs-
+                # embedded video render as "no link" — the user explicitly
+                # wants every track clickable to a real YouTube video, not a
+                # search results page.
+                missing = [t for t in mapped_tracks if not t.get('youtube') and t.get('title')]
+                if missing:
+                    logger.info(
+                        "yt-dlp fallback: %d/%d tracks need direct links",
+                        len(missing), len(mapped_tracks),
+                    )
+                    filled = self._fill_missing_youtube_with_ytdlp(artist, album, missing)
+                    if filled:
+                        # Re-merge: replace each missing entry with its filled version.
+                        by_pos = {(t.get('position'), t.get('title')): t for t in filled}
+                        mapped_tracks = [
+                            by_pos.get((t.get('position'), t.get('title')), t)
+                            for t in mapped_tracks
+                        ]
+
                 result["tracks"]["youtube_tracks"] = mapped_tracks
                 logger.info(f"Mapped {sum(1 for t in mapped_tracks if t.get('youtube'))} tracks to YouTube videos")
-                
+
+            elif discogs_data.get("tracklist"):
+                # No Discogs videos at all — build from the tracklist and run
+                # yt-dlp on every track. The user wants direct YouTube links
+                # for every song, not search-page fallbacks.
+                logger.info("No Discogs videos — yt-dlp on full tracklist (%d tracks)",
+                            len(discogs_data["tracklist"]))
+                base_tracks = [
+                    {
+                        'position': t.get('position', ''),
+                        'title': t.get('title', ''),
+                        'duration': t.get('duration', ''),
+                        'youtube': None,
+                    }
+                    for t in discogs_data["tracklist"]
+                ]
+                filled = self._fill_missing_youtube_with_ytdlp(artist, album, base_tracks)
+                if filled:
+                    result["tracks"]["youtube_tracks"] = filled
+                    # Set the album-level YouTube link to the first track's video.
+                    first_with_video = next((t for t in filled if t.get('youtube')), None)
+                    if first_with_video and result["links"].get("youtube") in (None, "unavailable"):
+                        result["links"]["youtube"] = first_with_video['youtube']['url']
+                else:
+                    result["tracks"]["youtube_tracks"] = base_tracks
+
             elif youtube_api_key := None:  # os.getenv('YOUTUBE_API_KEY')  # Disabled for now
                 logger.info("Using YouTube API to fetch actual video links")
                 try:
@@ -1061,6 +1106,73 @@ class HybridSearch:
         
         return result
     
+    def _fill_missing_youtube_with_ytdlp(
+        self, artist: str, album: str, tracks_needing_video: List[Dict]
+    ) -> List[Dict]:
+        """For each track, run a single yt-dlp ytsearch and attach the first
+        result's direct video URL. Returns the same shape as the input list,
+        with `youtube` populated where a search succeeded.
+
+        Why yt-dlp instead of YouTube Data API: no API key required, no
+        quota, works reliably from a server. Per-track cost is one HTTP
+        round-trip + minimal scraping. We run sequentially with a 6-second
+        timeout per track to stay under nginx/gunicorn ~120s envelope even
+        for 14-track albums.
+        """
+        if not tracks_needing_video:
+            return tracks_needing_video
+
+        try:
+            from yt_dlp import YoutubeDL
+        except ImportError:
+            logger.warning("yt-dlp not installed — skipping per-track video lookup")
+            return tracks_needing_video
+
+        # Quiet config: just need the first search result's id.
+        # extract_flat=True avoids loading the full video page.
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'skip_download': True,
+            'socket_timeout': 6,
+            'noplaylist': True,
+            'default_search': 'ytsearch1',
+        }
+
+        # Sanitize artist for queries (drop Discogs disambiguation suffixes
+        # like " (3)" or "Magic Touch (6)" which YouTube searches don't like).
+        clean_artist = re.sub(r'\s*\(\d+\)$', '', artist or '').strip()
+
+        out: List[Dict] = []
+        with YoutubeDL(ydl_opts) as ydl:
+            for t in tracks_needing_video:
+                title = (t.get('title') or '').strip()
+                if not title:
+                    out.append(t)
+                    continue
+                query = f'{clean_artist} {title}' if clean_artist else title
+                try:
+                    info = ydl.extract_info(f'ytsearch1:{query}', download=False)
+                    entries = (info or {}).get('entries') or []
+                    if entries:
+                        e = entries[0]
+                        vid = e.get('id') or ''
+                        url = e.get('url') or (f'https://www.youtube.com/watch?v={vid}' if vid else '')
+                        if url:
+                            t = dict(t)
+                            t['youtube'] = {
+                                'url': url,
+                                'title': e.get('title') or '',
+                                'is_search': False,
+                                'source': 'yt-dlp',
+                            }
+                            logger.info("yt-dlp: %r -> %s", query, url)
+                except Exception as e:
+                    logger.warning("yt-dlp search failed for %r: %s", query, e)
+                out.append(t)
+        return out
+
     def _extract_youtube_video_id(self, url: str) -> str:
         """Extract video ID from YouTube URL"""
         import re

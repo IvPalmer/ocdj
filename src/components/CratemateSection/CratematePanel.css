@@ -459,3 +459,272 @@
   }
   .cratemate-evidence__label { padding-top: var(--s-2); }
 }
+
+/* ── V5: Multi-image queue + dual pickers (camera / library) ── */
+
+.cratemate-upload-zone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.cratemate-pickers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+}
+
+@media (max-width: 480px) {
+  .cratemate-pickers { grid-template-columns: 1fr; }
+}
+
+.cratemate-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+  padding: var(--s-5) var(--s-4);
+  background: var(--bg-raised);
+  border: 1.5px dashed var(--border);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.12s ease;
+  min-height: 140px;
+  font-family: inherit;
+  color: var(--text);
+}
+.cratemate-picker:hover { border-color: var(--accent); background: var(--bg-surface); }
+.cratemate-picker:active { transform: scale(0.98); }
+.cratemate-picker:disabled { opacity: 0.4; cursor: not-allowed; }
+.cratemate-picker__icon {
+  font-size: 32px;
+  color: var(--accent);
+  font-family: var(--font-serif);
+}
+.cratemate-picker__title {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.cratemate-picker__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+.cratemate-picker--camera { background: var(--bg-surface); }
+
+.cratemate-queue-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: var(--bg-inset);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+.cratemate-link-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-xs);
+  min-height: 32px;
+}
+.cratemate-link-btn:hover { color: var(--accent); }
+
+/* ── Stacked result cards (queue + manual) ── */
+.cratemate-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.cratemate-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--s-4);
+  padding: var(--s-4);
+  background: var(--bg-raised);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  align-items: start;
+}
+
+@media (min-width: 600px) {
+  .cratemate-card { grid-template-columns: 140px 1fr; gap: var(--s-5); padding: var(--s-5); }
+}
+
+.cratemate-card__thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-sm);
+  background: var(--bg-inset);
+}
+
+.cratemate-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-width: 0;  /* allow text truncation */
+}
+
+.cratemate-card__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.cratemate-card__sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 50ch;
+}
+
+.cratemate-card__status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.cratemate-card__remove {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-muted);
+  border-radius: var(--r-xs);
+  z-index: 2;
+}
+.cratemate-card__remove:hover { background: var(--bg-surface); color: var(--text); }
+
+.cratemate-card--working { background: var(--bg-inset); }
+.cratemate-card--error { background: rgba(177, 74, 58, 0.05); border-color: rgba(177, 74, 58, 0.25); }
+.cratemate-card--miss { background: var(--bg-inset); }
+.cratemate-card--vision-only { background: rgba(184, 138, 26, 0.05); border-color: rgba(184, 138, 26, 0.25); }
+
+/* Spinner */
+.cratemate-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cratemate-spin 0.8s linear infinite;
+}
+@keyframes cratemate-spin { to { transform: rotate(360deg); } }
+
+/* ── Override identity sizing inside cards (was full-screen sized in V4) ── */
+.cratemate-card .cratemate-identity {
+  align-items: flex-start;
+  text-align: left;
+}
+.cratemate-card .cratemate-identity__album {
+  font-size: clamp(20px, 4vw, 28px);
+  text-align: left;
+}
+.cratemate-card .cratemate-identity__artist {
+  font-size: 11px;
+}
+.cratemate-card .cratemate-confidence { margin-top: var(--s-1); }
+.cratemate-card .cratemate-links { justify-content: flex-start; }
+.cratemate-card .cratemate-links li { flex: 0 0 auto; }
+.cratemate-card .cratemate-tracklist { padding-top: var(--s-3); border-top: 1px solid var(--border-subtle); }
+
+/* ── Tracklist with direct-YouTube affordance ── */
+.cratemate-track {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.cratemate-track:last-child { border-bottom: none; }
+
+.cratemate-track-link,
+.cratemate-track-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  padding: var(--s-3) var(--s-2);
+  min-height: 48px;  /* finger-friendly */
+  color: var(--text);
+  font-size: 14px;
+  text-decoration: none;
+  transition: background 0.12s;
+  border-radius: var(--r-xs);
+}
+
+.cratemate-track-link:hover {
+  background: var(--bg-surface);
+  color: var(--accent);
+}
+
+.cratemate-track-pos {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  min-width: 24px;
+}
+
+.cratemate-track-title {
+  font-weight: 500;
+}
+
+.cratemate-track-duration {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cratemate-track-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.cratemate-track--search .cratemate-track-badge {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.cratemate-track--direct .cratemate-track-link {
+  /* Keep default — direct YouTube is the happy path */
+}
+.cratemate-track--search .cratemate-track-link {
+  /* Visually quieter — search-page fallback isn't as useful */
+  opacity: 0.7;
+}
+
+/* Manual lookup section spacing inside the new layout */
+.cratemate-manual-section {
+  padding: var(--s-4) 0;
+}

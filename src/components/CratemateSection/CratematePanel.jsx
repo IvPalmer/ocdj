@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import './CratematePanel.css'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
 
-// A result counts as "recognized" only when there's both an artist and an
-// album string. Without this gate the UI rendered "? — ?" on failed IDs
-// (the bug the user hit on mobile). The backend already returns evidence
-// text in those cases; we surface it explicitly below.
+// Process at most N identifies concurrently. Set to 1 because the Claude
+// Max subscription's Opus quota gets eaten fast at higher concurrency
+// (see backend logs — "out of extra usage" errors at 2+ parallel).
+const CONCURRENCY = 1
+
+let nextId = 1
+const newId = () => `it-${nextId++}`
+
 function extractIdentity(result) {
   if (!result) return { artist: '', album: '' }
   const artist = result.artist_name || result.album?.artist || ''
@@ -25,27 +29,52 @@ function extractLinks(result) {
   }
 }
 
+// Prefer the youtube_tracks array (direct YouTube video links per track)
+// over plain tracklist (titles only). The user explicitly wants per-track
+// direct YouTube links — search-page fallbacks are noise.
+function extractTracks(result) {
+  if (!result) return []
+  const yt = result.tracks?.youtube_tracks
+  if (Array.isArray(yt) && yt.length > 0) return yt
+  const tl = result.tracks?.tracklist
+  if (Array.isArray(tl) && tl.length > 0) return tl
+  return []
+}
+
+// One row in the upload queue / results list.
+function makeItem(file) {
+  return {
+    id: newId(),
+    file,
+    name: file.name,
+    previewUrl: URL.createObjectURL(file),
+    status: 'pending',     // 'pending' | 'uploading' | 'done' | 'error'
+    result: null,
+    error: null,
+  }
+}
+
 function CratematePanel() {
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [previewUrl, setPreviewUrl] = useState(null)
-  const [uploading, setUploading] = useState(false)
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState(null)
+  // Items queue: each item is an image to identify + its result. Single-
+  // image flow is just "queue of length 1" so the UX is uniform.
+  const [items, setItems] = useState([])
   const [moduleStatus, setModuleStatus] = useState(null)
   const [isMobile, setIsMobile] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [manualMode, setManualMode] = useState(false)
   const [manualArtist, setManualArtist] = useState('')
   const [manualAlbum, setManualAlbum] = useState('')
+  const [manualLoading, setManualLoading] = useState(false)
+  const [manualError, setManualError] = useState(null)
+  const [manualResult, setManualResult] = useState(null)
+  const cameraInputRef = useRef(null)
+  const libraryInputRef = useRef(null)
 
-  // Detect mobile so the file input becomes a camera-capture button.
   useEffect(() => {
     const ua = navigator.userAgent || navigator.vendor || ''
     setIsMobile(/android|iphone|ipad|iPod|opera mini|iemobile|wpdesktop/i.test(ua.toLowerCase()))
   }, [])
 
-  // Pull module status on mount so the panel can render a clear "not configured"
-  // state when CLAUDE_CODE_OAUTH_TOKEN isn't set yet.
   useEffect(() => {
     let cancelled = false
     fetch(`${API_BASE}/cratemate/status/`)
@@ -55,80 +84,87 @@ function CratematePanel() {
     return () => { cancelled = true }
   }, [])
 
-  // Clean up object URL when preview changes / unmounts.
+  // Cleanup object URLs on unmount.
   useEffect(() => {
-    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }
-  }, [previewUrl])
+    return () => { items.forEach((it) => it.previewUrl && URL.revokeObjectURL(it.previewUrl)) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const reset = () => {
-    setSelectedFile(null)
-    setPreviewUrl(null)
-    setResult(null)
-    setError(null)
-    setManualMode(false)
-    setManualArtist('')
-    setManualAlbum('')
-  }
+  const unconfigured = moduleStatus && moduleStatus.status !== 'operational'
 
-  const processFile = (file) => {
-    if (!file || !file.type.startsWith('image/')) {
-      setError('Please pick an image file.')
-      return
+  const enqueue = useCallback((files) => {
+    const valid = Array.from(files).filter((f) => f && f.type.startsWith('image/'))
+    if (valid.length === 0) return
+    setItems((prev) => [...prev, ...valid.map(makeItem)])
+  }, [])
+
+  // Run pending items through /identify with bounded concurrency.
+  useEffect(() => {
+    let cancelled = false
+    const work = async () => {
+      while (!cancelled) {
+        const inflight = items.filter((it) => it.status === 'uploading').length
+        if (inflight >= CONCURRENCY) return
+        const next = items.find((it) => it.status === 'pending')
+        if (!next) return
+        // Mark as uploading immediately so the next loop tick doesn't re-pick it.
+        setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'uploading' } : it))
+        try {
+          const formData = new FormData()
+          formData.append('image', next.file)
+          const res = await fetch(`${API_BASE}/cratemate/identify/`, {
+            method: 'POST',
+            body: formData,
+          })
+          const data = await res.json().catch(() => ({}))
+          if (cancelled) return
+          if (!res.ok) {
+            const msg = data.error || data.detail || `HTTP ${res.status}`
+            setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'error', error: msg } : it))
+          } else {
+            setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'done', result: data } : it))
+          }
+        } catch (err) {
+          if (cancelled) return
+          setItems((prev) => prev.map((it) => it.id === next.id ? { ...it, status: 'error', error: err.message || 'Network error' } : it))
+        }
+      }
     }
-    setSelectedFile(file)
-    setPreviewUrl(URL.createObjectURL(file))
-    setError(null)
-    setResult(null)
+    work()
+    return () => { cancelled = true }
+  }, [items])
+
+  const removeItem = (id) => {
+    setItems((prev) => {
+      const target = prev.find((it) => it.id === id)
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
+      return prev.filter((it) => it.id !== id)
+    })
   }
 
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0]
-    if (file) processFile(file)
+  const clearAll = () => {
+    items.forEach((it) => it.previewUrl && URL.revokeObjectURL(it.previewUrl))
+    setItems([])
+    setManualMode(false)
+    setManualResult(null)
   }
+
+  const handleCameraChange = (e) => { enqueue(e.target.files); e.target.value = '' }
+  const handleLibraryChange = (e) => { enqueue(e.target.files); e.target.value = '' }
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
     setIsDragging(false)
-    const file = e.dataTransfer?.files?.[0]
-    if (file) processFile(file)
-  }, [])
-
+    if (e.dataTransfer?.files?.length) enqueue(e.dataTransfer.files)
+  }, [enqueue])
   const handleDragOver = useCallback((e) => { e.preventDefault(); setIsDragging(true) }, [])
   const handleDragLeave = useCallback((e) => { e.preventDefault(); setIsDragging(false) }, [])
 
-  const handleUpload = async () => {
-    if (!selectedFile) return
-    setUploading(true)
-    setError(null)
-    setResult(null)
-
-    const formData = new FormData()
-    formData.append('image', selectedFile)
-
-    try {
-      const res = await fetch(`${API_BASE}/cratemate/identify/`, {
-        method: 'POST',
-        body: formData,
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data.error || data.detail || `Identify failed: HTTP ${res.status}`)
-      } else {
-        setResult(data)
-      }
-    } catch (err) {
-      setError(err.message || 'Network error.')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  // Manual fallback: hits /api/cratemate/lookup/ with artist+album.
   const handleManualLookup = async (e) => {
     e?.preventDefault?.()
     if (!manualArtist.trim() || !manualAlbum.trim()) return
-    setUploading(true)
-    setError(null)
+    setManualLoading(true)
+    setManualError(null)
     try {
       const res = await fetch(`${API_BASE}/cratemate/lookup/`, {
         method: 'POST',
@@ -137,30 +173,22 @@ function CratematePanel() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(data.error || data.detail || `Lookup failed: HTTP ${res.status}`)
+        setManualError(data.error || data.detail || `HTTP ${res.status}`)
       } else {
-        setResult(data)
+        setManualResult(data)
       }
     } catch (err) {
-      setError(err.message || 'Network error.')
+      setManualError(err.message || 'Network error')
     } finally {
-      setUploading(false)
+      setManualLoading(false)
     }
   }
 
-  const unconfigured = moduleStatus && moduleStatus.status !== 'operational'
-
-  // Recognition can succeed at the HTTP level but fail at the identification
-  // level — e.g. Claude returned no artist/album, or the backend's
-  // _select_best_match couldn't reach the 0.3 confidence threshold. Detect
-  // that state so we can show a useful "couldn't identify" UI instead of the
-  // old "? — ?" placeholder.
-  const { artist: identifiedArtist, album: identifiedAlbum } = extractIdentity(result)
-  const recognized = result && (identifiedArtist || identifiedAlbum) && !result.error
-  const links = extractLinks(result)
-  const tracklist = result?.tracks?.tracklist || []
-  const coverImage = result?.album?.image || result?.album_image
-  const confidence = result?.identification?.confidence ?? result?.confidence
+  const totalDone = items.filter((it) => it.status === 'done').length
+  const totalErr = items.filter((it) => it.status === 'error').length
+  const totalQueued = items.filter((it) => it.status === 'pending').length
+  const totalActive = items.filter((it) => it.status === 'uploading').length
+  const hasItems = items.length > 0
 
   return (
     <div
@@ -171,74 +199,100 @@ function CratematePanel() {
     >
       <header className="cratemate-header">
         <h1>Crate-Mate</h1>
-        <p>Snap a cover. Get the artist, album, and every link in one place.</p>
+        <p>
+          Snap covers (one or many). Get the artist, album, Discogs link, and
+          a clickable tracklist with direct YouTube videos.
+        </p>
       </header>
 
       {unconfigured && (
         <div className="cratemate-banner cratemate-banner--warn">
           <strong>Module unconfigured.</strong>{' '}
           {moduleStatus?.status === 'unreachable'
-            ? 'Backend not reachable. Is the Django server running?'
+            ? 'Backend not reachable.'
             : 'Set CLAUDE_CODE_OAUTH_TOKEN in the backend env, then restart.'}
         </div>
       )}
 
-      {isDragging && <div className="cratemate-drag-overlay">Drop the cover here</div>}
+      {isDragging && <div className="cratemate-drag-overlay">Drop covers here</div>}
 
-      {!result && !manualMode && (
-        <section className="cratemate-upload">
-          {!selectedFile && (
-            <label htmlFor="cratemate-file" className="cratemate-dropzone">
-              <span className="cratemate-dropzone__icon" aria-hidden="true">◎</span>
-              <span className="cratemate-dropzone__title">
-                {isMobile ? 'Take photo' : 'Choose a cover'}
-              </span>
-              <span className="cratemate-dropzone__hint">
-                {isMobile ? 'Or pick from camera roll' : 'or drop a file here'}
-              </span>
-              <input
-                id="cratemate-file"
-                type="file"
-                accept="image/*"
-                capture={isMobile ? 'environment' : undefined}
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-              />
-            </label>
-          )}
-
-          {previewUrl && (
-            <div className="cratemate-preview">
-              <img src={previewUrl} alt="Selected cover preview" />
-              <div className="cratemate-actions">
-                <button type="button" className="btn" onClick={reset} disabled={uploading}>
-                  Reset
-                </button>
-                <button type="button" className="btn btn-primary" onClick={handleUpload} disabled={uploading || unconfigured}>
-                  {uploading ? 'Identifying…' : 'Identify'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!selectedFile && (
+      {/* Upload zone — always visible so you can keep adding to the queue. */}
+      <section className="cratemate-upload-zone">
+        <div className="cratemate-pickers">
+          {isMobile && (
             <button
               type="button"
-              className="cratemate-manual-link"
-              onClick={() => setManualMode(true)}
+              className="cratemate-picker cratemate-picker--camera"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={unconfigured}
             >
-              No photo? Type the artist and album instead →
+              <span className="cratemate-picker__icon" aria-hidden="true">◉</span>
+              <span className="cratemate-picker__title">Take photo</span>
+              <span className="cratemate-picker__hint">Open camera</span>
             </button>
           )}
+          <button
+            type="button"
+            className="cratemate-picker cratemate-picker--library"
+            onClick={() => libraryInputRef.current?.click()}
+            disabled={unconfigured}
+          >
+            <span className="cratemate-picker__icon" aria-hidden="true">◎</span>
+            <span className="cratemate-picker__title">
+              {isMobile ? 'From library' : 'Choose files'}
+            </span>
+            <span className="cratemate-picker__hint">
+              {isMobile ? 'Pick one or many' : 'or drop them here'}
+            </span>
+          </button>
+        </div>
 
-          {error && <div className="cratemate-banner cratemate-banner--err">{error}</div>}
-        </section>
-      )}
+        {/* Hidden inputs — camera = single, library = multiple. */}
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleCameraChange}
+          style={{ display: 'none' }}
+        />
+        <input
+          ref={libraryInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleLibraryChange}
+          style={{ display: 'none' }}
+        />
 
-      {/* Manual lookup form — alternative to image upload, or rescue path
-          when Claude can't ID the cover (offered from the not-recognized UI). */}
-      {!result && manualMode && (
-        <section className="cratemate-upload">
+        {!hasItems && !manualMode && (
+          <button
+            type="button"
+            className="cratemate-manual-link"
+            onClick={() => { setManualMode(true); setManualResult(null); setManualError(null) }}
+          >
+            Or type the artist and album manually →
+          </button>
+        )}
+
+        {hasItems && (
+          <div className="cratemate-queue-status">
+            <span>
+              {totalDone}/{items.length} identified
+              {totalActive > 0 ? ` · ${totalActive} working` : ''}
+              {totalQueued > 0 ? ` · ${totalQueued} queued` : ''}
+              {totalErr > 0 ? ` · ${totalErr} error` : ''}
+            </span>
+            <button type="button" className="cratemate-link-btn" onClick={clearAll}>
+              Clear all
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Manual lookup form (always offered as alternative). */}
+      {manualMode && !manualResult && (
+        <section className="cratemate-manual-section">
           <form className="cratemate-manual" onSubmit={handleManualLookup}>
             <label className="cratemate-field">
               <span>Artist</span>
@@ -260,199 +314,248 @@ function CratematePanel() {
               />
             </label>
             <div className="cratemate-actions">
-              <button type="button" className="btn" onClick={reset} disabled={uploading}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => { setManualMode(false); setManualArtist(''); setManualAlbum('') }}
+                disabled={manualLoading}
+              >
                 Cancel
               </button>
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={uploading || !manualArtist.trim() || !manualAlbum.trim()}
+                disabled={manualLoading || !manualArtist.trim() || !manualAlbum.trim()}
               >
-                {uploading ? 'Looking up…' : 'Look up'}
+                {manualLoading ? 'Looking up…' : 'Look up'}
               </button>
             </div>
           </form>
-          {error && <div className="cratemate-banner cratemate-banner--err">{error}</div>}
+          {manualError && <div className="cratemate-banner cratemate-banner--err">{manualError}</div>}
         </section>
       )}
 
-      {/* Not-recognized result — replaces the old "? — ?" UI. Shows the
-          model's evidence (text it OCR'd + visual description) so the user
-          can see what was read and try a manual lookup or Discogs search
-          with the salvageable signal. */}
-      {result && !recognized && (
-        <section className="cratemate-result cratemate-result--miss">
-          <div className="cratemate-miss">
-            <h2>Couldn’t identify this cover.</h2>
-            <p>
-              {result.error
-                ? result.error
-                : 'The vision model didn’t recognize the artwork. Use the text it read below to refine a manual search, or try a tighter crop / better lighting.'}
-            </p>
-            {previewUrl && (
-              <img className="cratemate-cover cratemate-cover--small" src={previewUrl} alt="The image you uploaded" />
-            )}
-            {(result.vision_visible_text || result.vision_evidence) && (
-              <div className="cratemate-evidence">
-                {result.vision_visible_text && (
-                  <>
-                    <span className="cratemate-evidence__label">Text on cover</span>
-                    <span className="cratemate-evidence__value">{result.vision_visible_text}</span>
-                  </>
-                )}
-                {result.vision_evidence && (
-                  <>
-                    <span className="cratemate-evidence__label">What I saw</span>
-                    <span className="cratemate-evidence__value">{result.vision_evidence}</span>
-                  </>
-                )}
-              </div>
-            )}
-            <div className="cratemate-actions cratemate-actions--center">
-              <button type="button" className="btn" onClick={reset}>
-                Try another photo
-              </button>
-              {result.vision_visible_text && (
-                <a
-                  className="btn"
-                  href={`https://www.discogs.com/search/?q=${encodeURIComponent(result.vision_visible_text.replace(/\s*\|\s*/g, ' '))}&type=release`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Search Discogs with this text
-                </a>
-              )}
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => { setResult(null); setManualMode(true) }}
-              >
-                Enter manually
-              </button>
-            </div>
-          </div>
-        </section>
+      {manualResult && (
+        <ResultCard
+          result={manualResult}
+          previewUrl={null}
+          onDismiss={() => { setManualResult(null); setManualMode(false); setManualArtist(''); setManualAlbum('') }}
+        />
       )}
 
-      {/* Vision-only result — Claude got an artist/album but Discogs found
-          no match. Show the guess + the model's evidence + a one-click
-          "search Discogs / look up manually" so the user can verify. */}
-      {result && recognized && result.vision_only && (
-        <section className="cratemate-result">
-          {previewUrl && (
-            <img className="cratemate-cover" src={previewUrl} alt="The cover you uploaded" />
-          )}
-          <div className="cratemate-banner cratemate-banner--warn" style={{ width: '100%' }}>
-            {result.warning || 'Vision identified this cover but Discogs returned no match.'}
+      {/* Stacked result cards for the queue. */}
+      <section className="cratemate-results">
+        {items.map((it) => (
+          <QueueItem
+            key={it.id}
+            item={it}
+            onRemove={() => removeItem(it.id)}
+            onManualEditFromVisionOnly={(artist, album) => {
+              setManualArtist(artist || '')
+              setManualAlbum(album || '')
+              setManualMode(true)
+              setManualResult(null)
+            }}
+          />
+        ))}
+      </section>
+    </div>
+  )
+}
+
+
+function QueueItem({ item, onRemove, onManualEditFromVisionOnly }) {
+  if (item.status === 'pending' || item.status === 'uploading') {
+    return (
+      <article className="cratemate-card cratemate-card--working">
+        <img className="cratemate-card__thumb" src={item.previewUrl} alt={item.name} />
+        <div className="cratemate-card__body">
+          <div className="cratemate-card__title">{item.name}</div>
+          <div className="cratemate-card__status">
+            {item.status === 'pending' ? 'Queued…' : 'Identifying…'}
+            <span className="cratemate-spinner" />
           </div>
-          <div className="cratemate-identity">
-            {identifiedArtist && (
-              <span className="cratemate-identity__artist">{identifiedArtist}</span>
-            )}
-            <h2 className="cratemate-identity__album">{identifiedAlbum || '—'}</h2>
-            {typeof confidence === 'number' && (
-              <span className="cratemate-confidence">
-                {Math.round(confidence * 100)}% confident · vision only
-              </span>
-            )}
-          </div>
-          {(result.vision_visible_text || result.vision_evidence) && (
+        </div>
+        <button type="button" className="cratemate-card__remove" onClick={onRemove} aria-label="Remove">
+          ×
+        </button>
+      </article>
+    )
+  }
+  if (item.status === 'error') {
+    return (
+      <article className="cratemate-card cratemate-card--error">
+        <img className="cratemate-card__thumb" src={item.previewUrl} alt={item.name} />
+        <div className="cratemate-card__body">
+          <div className="cratemate-card__title">{item.name}</div>
+          <div className="cratemate-card__status">{item.error}</div>
+        </div>
+        <button type="button" className="cratemate-card__remove" onClick={onRemove} aria-label="Remove">×</button>
+      </article>
+    )
+  }
+  return (
+    <ResultCard
+      result={item.result}
+      previewUrl={item.previewUrl}
+      onDismiss={onRemove}
+      onManualEditFromVisionOnly={onManualEditFromVisionOnly}
+    />
+  )
+}
+
+
+// Single result card — used both for queue items and the manual-lookup result.
+function ResultCard({ result, previewUrl, onDismiss, onManualEditFromVisionOnly }) {
+  const { artist, album } = extractIdentity(result)
+  const recognized = result && (artist || album) && !result.error
+  const links = extractLinks(result)
+  const tracks = extractTracks(result)
+  const coverImage = result?.album?.image || result?.album_image
+  const confidence = result?.identification?.confidence ?? result?.confidence
+  const visionOnly = !!result?.vision_only
+  const visibleText = result?.vision_visible_text
+  const evidence = result?.vision_evidence
+
+  if (!recognized) {
+    // Couldn't identify — surface evidence + retry affordances.
+    return (
+      <article className="cratemate-card cratemate-card--miss">
+        {previewUrl && <img className="cratemate-card__thumb" src={previewUrl} alt="Uploaded cover" />}
+        <div className="cratemate-card__body">
+          <h3>Couldn't identify this cover.</h3>
+          <p className="cratemate-card__sub">
+            {result?.error
+              ? result.error
+              : 'Use the text below to refine a manual search, or try a tighter crop.'}
+          </p>
+          {(visibleText || evidence) && (
             <div className="cratemate-evidence">
-              {result.vision_visible_text && (
+              {visibleText && (
                 <>
                   <span className="cratemate-evidence__label">Text on cover</span>
-                  <span className="cratemate-evidence__value">{result.vision_visible_text}</span>
+                  <span className="cratemate-evidence__value">{visibleText}</span>
                 </>
               )}
-              {result.vision_evidence && (
+              {evidence && (
                 <>
                   <span className="cratemate-evidence__label">What I saw</span>
-                  <span className="cratemate-evidence__value">{result.vision_evidence}</span>
+                  <span className="cratemate-evidence__value">{evidence}</span>
                 </>
               )}
             </div>
           )}
-          <div className="cratemate-actions cratemate-actions--center">
+          <div className="cratemate-actions">
+            {visibleText && (
+              <a
+                className="btn"
+                href={`https://www.discogs.com/search/?q=${encodeURIComponent(visibleText.replace(/\s*\|\s*/g, ' '))}&type=release`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Search Discogs
+              </a>
+            )}
             <button
               type="button"
-              className="btn"
-              onClick={() => {
-                // Pre-fill manual lookup with what Claude saw, let user edit + retry.
-                setManualArtist(identifiedArtist || '')
-                setManualAlbum(identifiedAlbum || '')
-                setResult(null)
-                setManualMode(true)
-              }}
-            >
-              Edit + retry lookup
-            </button>
-            <a
               className="btn btn-primary"
-              href={`https://www.discogs.com/search/?q=${encodeURIComponent(`${identifiedArtist || ''} ${identifiedAlbum || ''}`.trim())}&type=release`}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={() => onManualEditFromVisionOnly?.('', '')}
             >
-              Search Discogs
-            </a>
+              Enter manually
+            </button>
           </div>
-          <button type="button" className="cratemate-reset btn" onClick={reset}>
-            Identify another
-          </button>
-        </section>
-      )}
+        </div>
+        <button type="button" className="cratemate-card__remove" onClick={onDismiss} aria-label="Dismiss">×</button>
+      </article>
+    )
+  }
 
-      {result && recognized && !result.vision_only && (
-        <section className="cratemate-result">
-          {coverImage && (
-            <img className="cratemate-cover" src={coverImage} alt={`Cover art for ${identifiedAlbum}`} />
+  return (
+    <article className={`cratemate-card cratemate-card--result${visionOnly ? ' cratemate-card--vision-only' : ''}`}>
+      {(coverImage || previewUrl) && (
+        <img className="cratemate-card__thumb" src={coverImage || previewUrl} alt={`${artist} — ${album}`} />
+      )}
+      <div className="cratemate-card__body">
+        <div className="cratemate-identity">
+          <span className="cratemate-identity__artist">{artist || '—'}</span>
+          <h3 className="cratemate-identity__album">{album || '—'}</h3>
+          {typeof confidence === 'number' && (
+            <span className="cratemate-confidence">
+              {Math.round(confidence * 100)}% confident{visionOnly ? ' · vision only' : ''}
+            </span>
           )}
-          <div className="cratemate-identity">
-            <span className="cratemate-identity__artist">{identifiedArtist || '—'}</span>
-            <h2 className="cratemate-identity__album">{identifiedAlbum || '—'}</h2>
-            {typeof confidence === 'number' && (
-              <span className="cratemate-confidence">
-                {Math.round(confidence * 100)}% confident
-              </span>
-            )}
+        </div>
+
+        {visionOnly && (
+          <div className="cratemate-banner cratemate-banner--warn">
+            {result.warning || 'No Discogs match — verify before adding to wantlist.'}
           </div>
+        )}
 
-          <ul className="cratemate-links">
-            {links.discogs && links.discogs !== 'unavailable' && (
-              <li><a href={links.discogs} target="_blank" rel="noopener noreferrer">Discogs</a></li>
-            )}
-            {links.spotify && links.spotify !== 'unavailable' && (
-              <li><a href={links.spotify} target="_blank" rel="noopener noreferrer">Spotify</a></li>
-            )}
-            {links.youtube && links.youtube !== 'unavailable' && (
-              <li><a href={links.youtube} target="_blank" rel="noopener noreferrer">YouTube</a></li>
-            )}
-            {links.bandcamp && (
-              <li><a href={links.bandcamp} target="_blank" rel="noopener noreferrer">Bandcamp</a></li>
-            )}
-          </ul>
-
-          {tracklist.length > 0 && (
-            <details className="cratemate-tracklist">
-              <summary>Tracklist · {tracklist.length}</summary>
-              <ol>
-                {tracklist.map((t, i) => (
-                  <li key={i}>
-                    <span className="cratemate-track-title">
-                      {t.position ? `${t.position} · ` : ''}{t.title || t.name}
-                    </span>
-                    {t.duration && <span className="cratemate-track-duration">{t.duration}</span>}
-                  </li>
-                ))}
-              </ol>
-            </details>
+        {/* Platform links — Discogs/Spotify/YouTube/Bandcamp pills. */}
+        <ul className="cratemate-links">
+          {links.discogs && links.discogs !== 'unavailable' && (
+            <li><a href={links.discogs} target="_blank" rel="noopener noreferrer">Discogs</a></li>
           )}
+          {links.spotify && links.spotify !== 'unavailable' && (
+            <li><a href={links.spotify} target="_blank" rel="noopener noreferrer">Spotify</a></li>
+          )}
+          {links.youtube && links.youtube !== 'unavailable' && (
+            <li><a href={links.youtube} target="_blank" rel="noopener noreferrer">YouTube</a></li>
+          )}
+          {links.bandcamp && (
+            <li><a href={links.bandcamp} target="_blank" rel="noopener noreferrer">Bandcamp</a></li>
+          )}
+        </ul>
 
-          <button type="button" className="btn cratemate-reset" onClick={reset}>
-            Identify another
-          </button>
-        </section>
-      )}
-    </div>
+        {/* Tracklist — each row is a clickable link to the direct YouTube
+            video for that track when available. This is the headline
+            feature: tap a track, hear it. Search-page fallbacks render as
+            a smaller "search" link so they're visually distinct. */}
+        {tracks.length > 0 && (
+          <Tracklist tracks={tracks} />
+        )}
+      </div>
+      <button type="button" className="cratemate-card__remove" onClick={onDismiss} aria-label="Dismiss">×</button>
+    </article>
+  )
+}
+
+
+function Tracklist({ tracks }) {
+  return (
+    <details className="cratemate-tracklist" open>
+      <summary>Tracklist · {tracks.length}</summary>
+      <ol>
+        {tracks.map((t, i) => {
+          const yt = t.youtube
+          const isDirect = yt?.url && yt.is_search === false
+          const isSearch = yt?.url && yt.is_search === true
+          const url = yt?.url
+          const titleNode = (
+            <>
+              {t.position && <span className="cratemate-track-pos">{t.position}</span>}
+              <span className="cratemate-track-title">{t.title || t.name}</span>
+              {t.duration && <span className="cratemate-track-duration">{t.duration}</span>}
+            </>
+          )
+          return (
+            <li key={i} className={`cratemate-track${isDirect ? ' cratemate-track--direct' : isSearch ? ' cratemate-track--search' : ''}`}>
+              {url ? (
+                <a href={url} target="_blank" rel="noopener noreferrer" className="cratemate-track-link">
+                  {titleNode}
+                  <span className="cratemate-track-badge" aria-hidden="true">
+                    {isDirect ? '▶' : '⌕'}
+                  </span>
+                </a>
+              ) : (
+                <div className="cratemate-track-row">{titleNode}</div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </details>
   )
 }
 
