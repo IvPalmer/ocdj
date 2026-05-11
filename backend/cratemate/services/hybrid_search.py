@@ -735,6 +735,18 @@ class HybridSearch:
                 logger.info(f"Fetching details for Discogs release ID: {discogs_data['id']}")
                 details = self.discogs.get_release_details(str(discogs_data["id"]))
                 if details.get("success"):
+                    # Use the FULL artists list from the release-detail
+                    # endpoint when available — search results only return
+                    # the primary artist, so split releases like "Magic
+                    # Touch & Sapphire Slows / Just Wanna Feel" only show
+                    # one name. The detail endpoint has both, joined with
+                    # the standard ' & ' separator.
+                    detail_artists = details.get("artists") or []
+                    if len(detail_artists) > 1:
+                        artist = " & ".join(
+                            a.get("name") for a in detail_artists if a.get("name")
+                        )
+                        logger.info(f"Multi-artist release: using full list {artist!r}")
                     if details.get("tracklist"):
                         discogs_data["tracklist"] = details["tracklist"]
                         logger.info(f"Fetched {len(details['tracklist'])} tracks from Discogs")
