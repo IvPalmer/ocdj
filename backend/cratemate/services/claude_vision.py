@@ -1,26 +1,16 @@
-"""Claude vision album-cover identification — V3 (direct image blocks).
+"""Claude vision album-cover identification — V4 (simple).
 
-V2 failed in production because images were being double-compressed before
-Claude saw them: our 1024-JPEG-q88 resize, then the Claude Code Read-tool
-hook resized again to 1000-JPEG-q70 (the parent CLI's CLAUDE_IMAGE_*
-env). Real phone uploads of small DJ-record typography became blurry
-mush; the model hallucinated text that wasn't there ("polo | polo i b"
-on a sleeve with no such word, per user report).
+V3 over-engineered: extraction-first prompts, evidence_quality gates, pHash
+voting, fuzz floors. The user's complaint was correct — Gemini worked
+because it just IDENTIFIED the cover the way a DJ would. This module is
+now back to that.
 
-V3 strategy (per codex review 2026-05-10):
- - Skip the Read tool entirely. Pass the image as a base64 image block
-   directly in the user message via the SDK's streaming-input mode.
- - `setting_sources=[]` so user hooks (incl. the image-resize hook)
-   don't touch our payload.
- - `allowed_tools=[]` — model has no tools, just text in / text out.
- - Higher fidelity: max 1600px, JPEG quality 92, with EXIF transpose so
-   phone photos in landscape aren't analyzed sideways.
- - Extraction-first prompt: transcribe text first, ID only if evidence
-   supports it. Aggressive `unknown` over hallucination.
+Single call, image in, JSON out:
+   { artist, album, label, confidence, evidence }
 
-Auth path is unchanged — still goes through CLAUDE_CODE_OAUTH_TOKEN
-(Max subscription, $0/call). Same SDK that organize/services/agent_enrich.py
-uses, just streaming-input mode this time.
+Auth: Claude Max via CLAUDE_CODE_OAUTH_TOKEN ($0/call). Direct image block
+via streaming-input mode + setting_sources=[] so the Claude Code Read-tool
+hook can't downscale our payload (V2's biggest mistake).
 """
 from __future__ import annotations
 
@@ -38,84 +28,49 @@ from PIL import Image, ImageOps
 logger = logging.getLogger(__name__)
 
 
-_SYSTEM_PROMPT = """You are an OCR + visual-evidence extractor for a DJ's album-cover
-identification tool.
+_SYSTEM_PROMPT = """You identify album covers for a DJ.
 
-You will receive ONE image of a record sleeve, CD case, or digital cover. Your job
-is to extract the visible evidence carefully, then ONLY identify the release if
-the evidence supports a confident match.
+Look at the image and tell me what release this is — the way you would
+recognize a record while crate-digging. Trust your visual recognition.
 
-DO NOT GUESS FROM MEMORY. If the evidence is weak, say so.
-
-Return ONLY a JSON object with this exact shape:
+Return ONLY a JSON object:
 
 {
-  "visible_text": "string — every legible word/character on the cover, in reading order, separated by ' | '. Be literal. Don't fix typos. Don't expand abbreviations. If you cannot read text confidently, set this to '' (empty), not your guess.",
-  "description": "string — short factual visual description: dominant colors, layout, key visual element. Helps disambiguate if the text is sparse.",
-  "is_iconic": "boolean — true ONLY if you immediately recognize this as a famous, widely-photographed cover (e.g. Dark Side of the Moon, Joy Division Unknown Pleasures, Daft Punk Discovery). False for everything else, especially obscure DJ 12\\"s.",
-  "evidence_quality": "strong | weak | none — how confident are you that the visible_text + description uniquely identify a real release?",
-  "artist": "string or null — the performing artist, if you can identify it from the visible text or iconic recognition. NEVER fill from the label name. NEVER invent.",
-  "album": "string or null — the release/album/EP/12\\" title, from visible text or iconic recognition. NEVER invent.",
-  "label": "string or null — the record label, ONLY if its name is clearly visible on the cover (e.g. 'Sound Signature', 'Strictly Rhythm', 'Warp Records'). NULL if the label is not printed.",
-  "confidence": "high | medium | low — your overall confidence the artist/album are correct"
+  "artist": "string or null — the performing artist",
+  "album": "string or null — the release/album/EP title",
+  "label": "string or null — record label if printed prominently",
+  "confidence": "high | medium | low",
+  "evidence": "string — short note on what you saw (visible text, iconic
+    artwork, photo features) that supports the identification"
 }
 
-Critical rules:
+Rules:
 
-1. EXTRACTION FIRST. Read the image carefully and transcribe every legible
-   character into `visible_text` BEFORE deciding artist/album. Use ' | ' to
-   separate distinct text blocks (logo / album title / track listing / tiny
-   credits). Reading order: top-to-bottom, left-to-right.
+- BE A DJ, not an OCR scanner. If you recognize the cover (iconic, well-known,
+  or you can read the artist+title clearly), say so confidently.
 
-2. NO HALLUCINATION. If you can't confidently read a word, omit it. Don't
-   guess what blurry text "probably" says. An empty `visible_text` is far
-   better than fabricated text — the downstream system has a manual fallback.
+- The biggest text on a record sleeve is sometimes the LABEL, not the
+  artist. If only the label is printed prominently (e.g. 'Sound Signature',
+  'Strictly Rhythm', 'Warp'), put it in `label`. Don't fake an artist.
 
-3. ARTIST vs LABEL distinction (DJ records constantly trip this up):
-   - The biggest text on an obscure 12" is usually the LABEL (Sound Signature,
-     DW Art, Strictly Rhythm), not the artist. Put the label in `label`,
-     leave `artist` null unless the actual performer is also visible.
-   - Iconic exception: if the cover IS the artist's logo (Daft Punk chrome
-     graffiti, Aphex Twin black-A-on-white), that logotype IS the artist.
-   - Examples:
-     * Cover shows 'SOUND SIGNATURE' top + 'Parallel Dimensions' bottom →
-       {artist: null, album: "Parallel Dimensions", label: "Sound Signature",
-        evidence_quality: "strong"}
-     * Cover shows just chrome 'daft punk' graffiti →
-       {artist: "Daft Punk", album: "Discovery", label: null, is_iconic: true,
-        evidence_quality: "strong"}
-     * Cover is a record-store photo with no text →
-       {artist: "DJ Shadow", album: "Endtroducing", label: null, is_iconic: true,
-        evidence_quality: "strong" — only because it's iconic}
-     * Cover is unfamiliar lavender collage with unclear text →
-       {visible_text: "", description: "...", is_iconic: false,
-        evidence_quality: "none", artist: null, album: null, label: null,
-        confidence: "low"}
+- DECODE stylized text into the dictionary word it represents. Mixed
+  Latin/katakana/cyrillic substitutions are common (ヤ for U, ナ for N,
+  ル for L, Cyrillic Я for R, V for U). 'JヤSト WAナ FイEル' = 'Just Wanna
+  Feel'. 'SPECTRVM' = 'Spectrum' or 'Spectral'. 'FLΞSH' = 'Flash' or
+  'Flesh' (prefer dictionary + common record-title words).
 
-4. PRESERVE original casing, punctuation, accents (e.g. 'D. W. Art' not 'DW Art';
-   'NOMA' not 'Noma'; 'Sound Signature' not 'sound signature').
+- If you cannot identify the release, set artist+album to null. The user
+  has a manual lookup fallback — empty is better than wrong.
 
-5. PROOFREAD your visible_text against common English words and music
-   terminology BEFORE returning. Stylized record sleeves often disguise
-   familiar words:
-   - "FLΞSH" or "fl3sh" → "FLESH" or "FLASH" (decide by context — DJ records
-     use "Flash Fried", "Flash Cut" much more than "Flesh Fried")
-   - "SPECTRVM" with sharp V → almost certainly "SPECTRUM" or "SPECTRAL"
-     (Latin V was used for U; record sleeves rarely use literal "SPECTRVM")
-   - Mixed Latin/katakana/cyrillic substitutions where shape mimics Latin
-     (ヤ for U, ナ for N, ル for L, Cyrillic Я for R) → DECODE to the Latin
-     reading. The cover "JヤSト WAナ FイEル" reads "JUST WANNA FEEL". Put the
-     decoded English in `album` and the literal characters in `visible_text`.
-   - Rotated/upside-down text — orient mentally and read normally.
-   When ambiguous, prefer the dictionary-word reading. Note alternates in
-   `description` so the downstream search can try both.
+- Preserve original casing, accents, punctuation in the names you DO emit
+  (e.g. 'D. W. Art', 'NOMA', 'Sound Signature').
 
-6. NO PROSE outside the JSON. NO code fences. NO explanation.
+- NO PROSE outside the JSON. NO code fences. NO explanation.
 """
 
 
 class ClaudeVisionCollector:
-    """Drop-in replacement for `GeminiCollector`. Same return shape as V2:
+    """Drop-in replacement for the V3 collector. Same return shape:
 
         {"success": bool, "result": {...}, "raw_response": str}
         OR {"success": False, "error": str}
@@ -130,14 +85,10 @@ class ClaudeVisionCollector:
                 '/identify will return 503 until env is set.'
             )
         else:
-            logger.info('ClaudeVisionCollector V3 initialized (direct image blocks)')
+            logger.info('ClaudeVisionCollector V4 initialized (DJ-style identification)')
 
     async def identify_album(self, image: Image.Image, timeout_seconds: int = 90) -> Dict:
-        """Identify album from a PIL Image.
-
-        Sends the image as a base64 block in the streaming-input format so
-        the Claude Code Read-tool image hook can't downscale our payload.
-        """
+        """Identify album from a PIL Image."""
         if not self.configured:
             return {'success': False, 'error': 'CLAUDE_CODE_OAUTH_TOKEN not configured'}
 
@@ -153,14 +104,12 @@ class ClaudeVisionCollector:
             logger.error('claude-agent-sdk not installed: %s', e)
             return {'success': False, 'error': f'sdk import: {e}'}
 
-        # Prep the image: EXIF rotate (phones store landscape with rotation
-        # metadata), cap at 1600 (was 1024 — V2's biggest mistake), JPEG q92
-        # (was 88). RGB conversion handles HEIC-derived RGBA / palette modes.
+        # Image prep: EXIF rotate (phone landscape), max 1600 to preserve
+        # cover-text legibility, JPEG q92. Skip the Read tool entirely so
+        # Claude Code's image hook can't double-compress.
         try:
             img = ImageOps.exif_transpose(image)
-            if img.mode in ('RGBA', 'P', 'L'):
-                img = img.convert('RGB')
-            elif img.mode != 'RGB':
+            if img.mode in ('RGBA', 'P', 'L') or img.mode != 'RGB':
                 img = img.convert('RGB')
             max_dim = 1600
             if max(img.size) > max_dim:
@@ -173,17 +122,13 @@ class ClaudeVisionCollector:
             img.save(buf, format='JPEG', quality=92)
             image_b64 = base64.standard_b64encode(buf.getvalue()).decode('ascii')
             logger.info(
-                'claude_vision: prepared image %dx%d, %d KB base64',
+                'claude_vision: prepared image %dx%d, %d KB',
                 img.size[0], img.size[1], len(image_b64) // 1024,
             )
         except Exception as e:
             logger.error('claude_vision: image prep failed: %s', e)
             return {'success': False, 'error': f'image prep: {e}'}
 
-        # Build the streaming user message. Anthropic's image content block
-        # format — the CLI passes this through to the model unchanged when
-        # we're in streaming-input mode and bypass user hooks via
-        # setting_sources=[].
         async def _prompts():
             yield {
                 'type': 'user',
@@ -200,12 +145,7 @@ class ClaudeVisionCollector:
                         },
                         {
                             'type': 'text',
-                            'text': (
-                                'Extract the visible text and visual evidence from this '
-                                'album cover, then identify the release ONLY if the '
-                                'evidence supports it. Return the JSON object as '
-                                'specified in the system prompt. No prose, no code fences.'
-                            ),
+                            'text': 'Identify this album cover. Return the JSON object.',
                         },
                     ],
                 },
@@ -216,8 +156,8 @@ class ClaudeVisionCollector:
         options = ClaudeAgentOptions(
             max_turns=1,
             system_prompt=_SYSTEM_PROMPT,
-            allowed_tools=[],          # text in, text out
-            setting_sources=[],        # bypass user hooks (incl. image-resize hook)
+            allowed_tools=[],
+            setting_sources=[],
         )
 
         collected: list[str] = []
@@ -230,7 +170,7 @@ class ClaudeVisionCollector:
                                 collected.append(block.text)
                     elif isinstance(msg, ResultMessage):
                         if msg.is_error:
-                            logger.warning('claude_vision: SDK returned is_error=True')
+                            logger.warning('claude_vision: SDK is_error=True')
                         break
         except asyncio.TimeoutError:
             logger.warning('claude_vision: query timed out after %ss', timeout_seconds)
@@ -245,23 +185,22 @@ class ClaudeVisionCollector:
             logger.warning('claude_vision: unparseable response: %r', raw[:200])
             return {'success': False, 'error': 'unparseable response', 'raw_response': raw}
 
-        # Normalize fields. New fields from V3 prompt: is_iconic, evidence_quality.
         result = {
             'artist': self._clean(parsed.get('artist')),
             'album': self._clean(parsed.get('album')),
             'label': self._clean(parsed.get('label')),
-            'visible_text': parsed.get('visible_text') or '',
-            'description': parsed.get('description') or '',
-            'is_iconic': bool(parsed.get('is_iconic')),
-            'evidence_quality': (parsed.get('evidence_quality') or 'none').lower(),
-            'genre': self._clean(parsed.get('genre')) or 'unknown',
-            'era': self._clean(parsed.get('era')) or 'unknown',
             'confidence': (parsed.get('confidence') or 'low').lower(),
+            'evidence': parsed.get('evidence') or '',
+            # Legacy field retained for the views/serializer flatten — empty
+            # because V4 prompt doesn't ask for separate visible_text.
+            'visible_text': '',
+            'description': parsed.get('evidence') or '',
+            'genre': 'unknown',
+            'era': 'unknown',
         }
         logger.info(
-            'claude_vision: %r / %r (label=%r, conf=%s, iconic=%s, evidence=%s)',
-            result['artist'], result['album'], result['label'],
-            result['confidence'], result['is_iconic'], result['evidence_quality'],
+            'claude_vision: %r / %r (label=%r, conf=%s)',
+            result['artist'], result['album'], result['label'], result['confidence'],
         )
         return {'success': True, 'result': result, 'raw_response': raw}
 
