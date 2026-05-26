@@ -134,6 +134,7 @@ services:
       - /srv/ocdj/pipeline:/srv/ocdj/pipeline
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
+      - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     healthcheck:
@@ -199,6 +200,7 @@ services:
       - /srv/ocdj/pipeline:/srv/ocdj/pipeline
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
+      - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
       - huey_volume:/app/huey
     logging:
       driver: json-file
