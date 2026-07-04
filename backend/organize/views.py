@@ -14,6 +14,7 @@ from django.http import FileResponse
 from django.urls import reverse
 from django.utils import timezone
 
+from .auth import require_kick_token
 from .models import PipelineItem
 from .serializers import PipelineItemSerializer
 
@@ -665,6 +666,7 @@ def pipeline_upload(request):
 
 
 @api_view(['POST'])
+@require_kick_token
 def pipeline_kick(request):
     """Trigger process_all_pending without uploading anything.
 
@@ -672,6 +674,10 @@ def pipeline_kick(request):
     `/srv/ocdj/pipeline/01_downloaded/` via SSH+rsync (no HTTP upload to
     avoid re-encoding multipart for multi-GB days), then hits this to
     start processing. Also hit by the Upload-UI after a scan run.
+
+    Sits behind the ocdj-kick Traefik priority-300 bypass router (exact
+    path + method) so unauthenticated hosts can reach it at all; bearer
+    token here (KICK_TOKEN) is the actual gate — mirrors drain/auth.py.
 
     Returns 409 if a pipeline run is already in progress.
     """

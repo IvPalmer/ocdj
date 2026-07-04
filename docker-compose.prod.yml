@@ -119,6 +119,7 @@ services:
       # VPS-mode flags
       OCDJ_AUTOPUBLISH: "1"
       DRAIN_TOKEN: ${DRAIN_TOKEN}
+      KICK_TOKEN: ${KICK_TOKEN}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       # Cratemate vision: pin Opus 4.7 — the strongest vision model on
       # the Max subscription. Without an explicit pin, Claude Code's
