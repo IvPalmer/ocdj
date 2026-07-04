@@ -1,17 +1,13 @@
 ---
-goal: "Manage DJ music acquisition: wants, recognition, Soulseek downloads, TraxDB sync, organization, and library."
+goal: 'Manage DJ music acquisition: wants, recognition, Soulseek downloads, TraxDB sync, organization,
+  and library.'
 owner: operator
 lead: ocdj-lead
-status: draft
-next: "Resolve the CrateMate branch/canonical-branch decision: vps-deploy contains the module and KICK_TOKEN, feat/cratemate-module is parked, and main is behind."
-decisions_needed:
-  - "CrateMate branch fate: delete or park feat/cratemate-module, or promote vps-deploy/main as canonical."
-  - "CrateMate standalone fate: retire the old repo/HuggingFace Space with redirect, or keep a parallel product surface."
-  - "CrateMate credential/model posture: rotate or decommission old GCP/Gemini/ResNet paths after the Claude SDK switch, or keep them as fallback."
-  - "Auth documentation posture: replace stale Cloudflare Access setup docs with oauth2-proxy plus KICK_TOKEN reality, or archive them."
-  - "Standalone extension launch posture: keep parked until the primary product stabilizes, or approve CWS/paywall work."
+status: active
+next: 'Resolve branch policy per D1: fast-forward main to vps-deploy, delete feat/cratemate-module.'
+decisions_needed: []
 blocked_by:
-  - "Operator approval of branch, credential, auth-doc, and launch-posture decisions."
+- Operator approval of branch, credential, auth-doc, and launch-posture decisions.
 ---
 
 ## Open tasks
@@ -25,6 +21,14 @@ blocked_by:
 - [ ] Finish the H7 low-risk refactor/polish backlog: shared `StatusBadge`, Dashboard recent activity, Library density toggle, shared Pipeline component, and Soulseek filename cleanup [T-007] #autonomous-safe
 - [ ] Design the H8 SourceAdapter and scheduler migration for SoundCloud Likes, YouTube Watch Later, Shazam history, and Safari Tab Group before touching schemas or OAuth flows [T-008]
 - [ ] Build a TraxDB-to-library adoption/reporting bridge that respects the current decision "TraxDB stays separate archive" while surfacing probably-want tracks in the workflow [T-009]
+
+## Decisions (2026-07-04, HQ with operator veto)
+
+- **D1 Branches:** fast-forward `main` to `vps-deploy` so they're equal; `vps-deploy` stays the deploy branch (VPS checkout untouched — zero prod risk); delete `feat/cratemate-module` (verified ancestor of vps-deploy, fully contained).
+- **D2 Old crate-mate:** archive the GitHub repo + HF Space redirect (was already plan 1b).
+- **D3 Gemini/GCP:** DECOMMISSION (operator: "nevermind gemini") — remove Gemini fallback paths, revoke the GCP key (it was assumed leaked in the absorption punch list anyway).
+- **D4 Auth docs:** replace the stale CF-Access doc with oauth2-proxy + KICK_TOKEN reality (T-005 proceeds).
+- **D5 Standalone extension launch:** stays parked until the primary product stabilizes.
 
 ## Path forward
 
