@@ -43,6 +43,14 @@ STAGE_FOLDERS = {
     'published': '06_publish',
 }
 
+SKIPPABLE_STAGE_ORDER = ['downloaded', 'tagged', 'renamed', 'converted', 'ready']
+
+ACTIVE_STAGE_TO_DONE = {
+    'tagging': 'tagged',
+    'renaming': 'renamed',
+    'converting': 'converted',
+}
+
 
 def get_pipeline_root():
     return get_config('SOULSEEK_DOWNLOAD_ROOT')
@@ -52,6 +60,30 @@ def ensure_pipeline_folders():
     root = get_pipeline_root()
     for folder in STAGE_FOLDERS.values():
         os.makedirs(os.path.join(root, folder), exist_ok=True)
+
+
+def stage_folder_path(stage):
+    """Return the absolute folder for a durable pipeline stage.
+
+    The stage names are the database vocabulary; the numbered folders are an
+    operator-facing workbench. Keeping the mapping here prevents views and
+    services from quietly diverging on where a file should live.
+    """
+    return os.path.join(get_pipeline_root(), STAGE_FOLDERS[stage])
+
+
+def _available_path(dest_folder, basename):
+    """Return a non-conflicting destination path inside dest_folder."""
+    dest_path = os.path.join(dest_folder, basename)
+    if not os.path.exists(dest_path):
+        return dest_path
+
+    name, ext = os.path.splitext(basename)
+    counter = 1
+    while os.path.exists(dest_path):
+        dest_path = os.path.join(dest_folder, f"{name}_{counter}{ext}")
+        counter += 1
+    return dest_path
 
 
 def _find_file_on_disk(root, basename):
@@ -112,23 +144,91 @@ def reconstruct_download_path(download):
 
 def _move_to_stage(filepath, stage):
     """Move a file to a pipeline stage folder. Returns new path."""
-    root = get_pipeline_root()
     ensure_pipeline_folders()
-    dest_folder = os.path.join(root, STAGE_FOLDERS[stage])
+    dest_folder = stage_folder_path(stage)
     basename = os.path.basename(filepath)
     dest_path = os.path.join(dest_folder, basename)
-
-    # Handle name collision
     if os.path.exists(dest_path) and dest_path != filepath:
-        name, ext = os.path.splitext(basename)
-        counter = 1
-        while os.path.exists(dest_path):
-            dest_path = os.path.join(dest_folder, f"{name}_{counter}{ext}")
-            counter += 1
+        dest_path = _available_path(dest_folder, basename)
 
     if filepath != dest_path:
         shutil.move(filepath, dest_path)
     return dest_path
+
+
+def move_item_to_stage(item, stage):
+    """Move an item file to a durable stage folder and persist that stage."""
+    item.current_path = _move_to_stage(item.current_path, stage)
+    item.stage = stage
+    item.save(update_fields=['current_path', 'stage'])
+    return item
+
+
+def write_uploaded_file_to_downloaded(uploaded_file):
+    """Store an uploaded audio file in 01_downloaded using pipeline collision rules."""
+    ensure_pipeline_folders()
+    dest_path = _available_path(
+        stage_folder_path('downloaded'),
+        os.path.basename(uploaded_file.name),
+    )
+    with open(dest_path, 'wb') as out:
+        for chunk in uploaded_file.chunks():
+            out.write(chunk)
+    return dest_path
+
+
+def completed_stage_for(stage):
+    """Normalize transient working stages before calculating manual skips."""
+    return ACTIVE_STAGE_TO_DONE.get(stage, stage)
+
+
+def next_skippable_stage(stage):
+    """Return the next manual-skip target, or None when skipping is invalid."""
+    current_base = completed_stage_for(stage)
+    if current_base not in SKIPPABLE_STAGE_ORDER:
+        return None
+    idx = SKIPPABLE_STAGE_ORDER.index(current_base)
+    if idx >= len(SKIPPABLE_STAGE_ORDER) - 1:
+        return None
+    return SKIPPABLE_STAGE_ORDER[idx + 1]
+
+
+def _update_wanted_status(item, wanted_status):
+    if item.wanted_item and wanted_status:
+        item.wanted_item.status = wanted_status
+        item.wanted_item.save(update_fields=['status'])
+
+
+def _mark_failed(item, label, exc):
+    item.stage = 'failed'
+    item.error_message = f"{label} failed: {exc}"
+    item.save(update_fields=['stage', 'error_message'])
+
+
+def _run_stage_step(item, *, source_stage, working_stage, done_stage, label, action,
+                    wanted_status=None):
+    """Run one service-owned stage and make the disk move match the DB stage.
+
+    Tagging, renaming, and conversion each mutate file metadata or filename in
+    place, then the pipeline moves the result to the next numbered folder. This
+    helper keeps that contract explicit and identical across stages.
+    """
+    if item.stage != source_stage:
+        return True
+
+    item.stage = working_stage
+    item.save(update_fields=['stage'])
+
+    try:
+        action(item)
+        item.refresh_from_db()
+        move_item_to_stage(item, done_stage)
+        _update_wanted_status(item, wanted_status)
+        return True
+    except Exception as e:
+        logger.error(f"{label} failed for item {item.id}: {e}")
+        _mark_failed(item, label, e)
+        return False
 
 
 def discover_and_ingest(download_id):
@@ -155,6 +255,9 @@ def discover_and_ingest(download_id):
 
     # Move to 01_downloaded
     new_path = _move_to_stage(filepath, 'downloaded')
+    if dl.local_path != new_path:
+        dl.local_path = new_path
+        dl.save(update_fields=['local_path'])
 
     # Pre-fill metadata from WantedItem if available
     wanted = dl.wanted_item
@@ -275,28 +378,16 @@ def process_pipeline_item(item_id):
         item = PipelineItem.objects.get(id=item_id)
 
         # Stage 1: Tag
-        if item.stage == 'downloaded':
-            item.stage = 'tagging'
-            item.save(update_fields=['stage'])
-
-            try:
-                tag_file(item)
-                item.refresh_from_db()
-                new_path = _move_to_stage(item.current_path, 'tagged')
-                item.current_path = new_path
-                item.stage = 'tagged'
-                item.save(update_fields=['current_path', 'stage'])
-
-                # Update WantedItem status
-                if item.wanted_item:
-                    item.wanted_item.status = 'tagged'
-                    item.wanted_item.save(update_fields=['status'])
-            except Exception as e:
-                logger.error(f"Tagging failed for item {item_id}: {e}")
-                item.stage = 'failed'
-                item.error_message = f"Tagging failed: {e}"
-                item.save(update_fields=['stage', 'error_message'])
-                return
+        if not _run_stage_step(
+            item,
+            source_stage='downloaded',
+            working_stage='tagging',
+            done_stage='tagged',
+            label='Tagging',
+            action=tag_file,
+            wanted_status='tagged',
+        ):
+            return
 
         # Stage 1.5: Agent-enrich if Discogs/MusicBrainz couldn't fix
         # garbage file tags. Gated on env (CLAUDE_CODE_OAUTH_TOKEN) and
@@ -313,55 +404,33 @@ def process_pipeline_item(item_id):
                 logger.warning(f'agent enrich skipped for item {item_id}: {e}')
 
         # Stage 2: Rename
-        if item.stage == 'tagged':
-            item.stage = 'renaming'
-            item.save(update_fields=['stage'])
-
-            try:
-                rename_file(item)
-                item.refresh_from_db()
-                new_path = _move_to_stage(item.current_path, 'renamed')
-                item.current_path = new_path
-                item.stage = 'renamed'
-                item.save(update_fields=['current_path', 'stage'])
-            except Exception as e:
-                logger.error(f"Renaming failed for item {item_id}: {e}")
-                item.stage = 'failed'
-                item.error_message = f"Renaming failed: {e}"
-                item.save(update_fields=['stage', 'error_message'])
-                return
+        if not _run_stage_step(
+            item,
+            source_stage='tagged',
+            working_stage='renaming',
+            done_stage='renamed',
+            label='Renaming',
+            action=rename_file,
+        ):
+            return
 
         # Stage 3: Convert
         if item.stage == 'renamed':
-            item.stage = 'converting'
-            item.save(update_fields=['stage'])
-
-            try:
-                from .converter import convert_pipeline_item
-                convert_pipeline_item(item)
-                item.refresh_from_db()
-                new_path = _move_to_stage(item.current_path, 'converted')
-                item.current_path = new_path
-                item.stage = 'converted'
-                item.save(update_fields=['current_path', 'stage'])
-            except Exception as e:
-                logger.error(f"Conversion failed for item {item_id}: {e}")
-                item.stage = 'failed'
-                item.error_message = f"Conversion failed: {e}"
-                item.save(update_fields=['stage', 'error_message'])
+            from .converter import convert_pipeline_item
+            if not _run_stage_step(
+                item,
+                source_stage='renamed',
+                working_stage='converting',
+                done_stage='converted',
+                label='Conversion',
+                action=convert_pipeline_item,
+            ):
                 return
 
         # Stage 4: Move to ready
         if item.stage == 'converted':
-            new_path = _move_to_stage(item.current_path, 'ready')
-            item.current_path = new_path
-            item.stage = 'ready'
-            item.save(update_fields=['current_path', 'stage'])
-
-            # Update WantedItem status
-            if item.wanted_item:
-                item.wanted_item.status = 'organized'
-                item.wanted_item.save(update_fields=['status'])
+            move_item_to_stage(item, 'ready')
+            _update_wanted_status(item, 'organized')
 
             # Stage 5: VPS mode — auto-publish into 06_publish/<id>/ so the
             # Mac drain daemon can fetch. No-op on Mac dev.
