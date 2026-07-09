@@ -57,11 +57,16 @@ def pipeline_detail(request, pk):
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
     if request.method == 'PATCH':
+        from .services.tagger import _clean_genre
         editable = ['artist', 'title', 'album', 'label', 'catalog_number', 'genre', 'year', 'track_number']
         updated = []
         for field in editable:
             if field in request.data:
-                setattr(item, field, request.data[field])
+                value = request.data[field]
+                if field == 'genre':
+                    # Guard the same varchar(200) overflow the tagger path hits.
+                    value = _clean_genre(value)
+                setattr(item, field, value)
                 updated.append(field)
         if updated:
             item.metadata_source = 'manual'
@@ -168,14 +173,12 @@ def pipeline_skip(request, pk):
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
-    STAGE_ORDER = ['downloaded', 'tagged', 'renamed', 'converted', 'ready']
-    current_base = item.stage.replace('ing', 'ed') if item.stage.endswith('ing') else item.stage
-    if current_base in STAGE_ORDER:
-        idx = STAGE_ORDER.index(current_base)
-        if idx < len(STAGE_ORDER) - 1:
-            item.stage = STAGE_ORDER[idx + 1]
-            item.save()
-            return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
+    from .services.pipeline import next_skippable_stage
+    next_stage = next_skippable_stage(item.stage)
+    if next_stage:
+        item.stage = next_stage
+        item.save(update_fields=['stage'])
+        return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
 
     return Response({'error': 'Cannot skip from this stage'}, status=http_status.HTTP_400_BAD_REQUEST)
 
@@ -599,7 +602,7 @@ def pipeline_upload(request):
     POST to trigger processing).
     """
     from .services.pipeline import (
-        STAGE_FOLDERS, get_pipeline_root, ensure_pipeline_folders,
+        write_uploaded_file_to_downloaded,
         process_all_pending, try_claim_processing_all, release_processing_all,
     )
     files = request.FILES.getlist('files') or (
@@ -611,9 +614,6 @@ def pipeline_upload(request):
             status=http_status.HTTP_400_BAD_REQUEST,
         )
 
-    ensure_pipeline_folders()
-    dest_dir = os.path.join(get_pipeline_root(), STAGE_FOLDERS['downloaded'])
-
     created = []
     skipped = []
     for f in files:
@@ -622,18 +622,7 @@ def pipeline_upload(request):
             skipped.append({'name': f.name, 'reason': f'unsupported extension {ext}'})
             continue
 
-        # Collision handling: append _<n> until we find a free slot.
-        basename = f.name
-        dest_path = os.path.join(dest_dir, basename)
-        counter = 1
-        while os.path.exists(dest_path):
-            stem, ext_ = os.path.splitext(f.name)
-            dest_path = os.path.join(dest_dir, f'{stem}_{counter}{ext_}')
-            counter += 1
-
-        with open(dest_path, 'wb') as out:
-            for chunk in f.chunks():
-                out.write(chunk)
+        dest_path = write_uploaded_file_to_downloaded(f)
 
         item = PipelineItem.objects.create(
             original_filename=os.path.basename(dest_path),

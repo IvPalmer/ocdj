@@ -4,6 +4,7 @@ import shutil
 import threading
 
 from django import db
+from django.conf import settings
 
 from core.services.config import get_config
 from recognize.models import RecognizeJob
