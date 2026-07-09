@@ -1,6 +1,10 @@
 # TraxDB Auth — Long-Term Fix (scope)
 
-Status: scoped 2026-07-09, not started. Owner: operator decision on Option A vs B.
+Status: **Option A IMPLEMENTED + PROVEN** 2026-07-09. The headless chain
+(refresh token → access token → Blogger API v3) resolves the private blog and
+returns pixeldrain links end-to-end from the prod backend container. Cookie path
+retained as fallback; `TRAXDB_FETCH_MODE` defaults to `api`. Remaining TODO: the
+monthly pixeldrain keepalive guard (see "Keepalive").
 
 ## Problem
 
@@ -58,38 +62,40 @@ Replace HTML scraping+cookies with the official API and a durable OAuth grant.
   time on Google's app-verification process unless more users ever need
   access.
 
-### Spike first (half-day, gates everything)
+### Spike (completed — all green)
 
-1. Create GCP project + OAuth desktop client, publish consent screen to
-   Production (checklist item: NOT left in "Testing").
-2. Consent as `raphaelpalmer42@gmail.com` (a **reader**, not author, of the blog).
-3. Against real TraxDB data, all of: `blogs/byurl` resolves the private
-   blog → `posts.list(view=READER, fetchBodies=true)` returns post
-   `content` → pagination via `nextPageToken` works → pixeldrain/MIRROR1
-   links extract → dates infer (from post `published` or body text).
+The gating spike ran 2026-07-09 against the live private blog and every check
+passed: GCP project `ocdj-traxdb` + desktop OAuth client created, consent
+screen published to Production, consent granted as `raphaelpalmer42@gmail.com`
+(a **reader** of the blog), `blogs/byurl` resolved the private blog,
+`posts.list(view=READER, fetchBodies=true)` returned post `content`,
+`nextPageToken` pagination worked, pixeldrain/MIRROR1 links extracted, and
+dates inferred from post `published`. Reader-access via the API — the biggest
+unknown — is confirmed.
 
-**Kill criterion:** any of those five failing on the private blog kills
-Option A → pivot to B. Reader-access is the biggest unknown, but a green
-spike requires the full chain, not just auth.
+### Implementation
 
-### Implementation (after green spike)
+| Step | Work | Est | Status |
+| --- | --- | --- | --- |
+| 0 | Extract `parse_traxdb_links_from_html()` from `scrape_blog_links()`; regression-test against current fixtures | 0.5d | ✅ done |
+| 1 | `traxdb/services/blogger_api.py`: token refresh (incl. `invalid_grant` → re-bootstrap error), posts iterator with fields projection + backoff | 0.5d | ✅ done |
+| 2 | Wire into `run_sync` behind config flag `TRAXDB_FETCH_MODE=api\|cookies` (cookies path kept as fallback; `api` is the default) | 0.5d | ✅ done |
+| 3 | Config schema entries + one-time token bootstrap script (`tools/traxdb_sync/blogger_oauth_bootstrap.py`, runs on Mac, writes the refresh token to a file) | 0.25d | ✅ done |
+| 4 | Unit tests: parser against fixture post bodies; token-refresh error paths | 0.25d | ✅ done |
+| 5 | Prod verify + retire cookie path & `refresh_cookies.py` docs; re-bootstrap runbook | 0.25d | ⏳ cookie path kept as fallback for now; monthly pixeldrain keepalive still TODO |
 
-| Step | Work | Est |
-| --- | --- | --- |
-| 0 | Extract `parse_traxdb_links_from_html()` from `scrape_blog_links()`; regression-test against current fixtures | 0.5d |
-| 1 | `traxdb/services/blogger_api.py`: token refresh (incl. `invalid_grant` → re-bootstrap error), posts iterator with fields projection + backoff | 0.5d |
-| 2 | Wire into `run_sync` behind config flag `TRAXDB_FETCH_MODE=api\|cookies` (cookies path kept as fallback until A proves out in prod) | 0.5d |
-| 3 | Config schema entries + one-time token bootstrap script (`tools/traxdb_sync/oauth_bootstrap.py`, runs on Mac, prints the three config values) | 0.25d |
-| 4 | Unit tests: parser against fixture post bodies; token-refresh error paths | 0.25d |
-| 5 | Prod verify + retire cookie path & `refresh_cookies.py` docs; re-bootstrap runbook | 0.25d |
+**Total: 2–3 days** including the spike. Delivered: the full chain is proven in
+prod — a live sync via `TRAXDB_FETCH_MODE=api` returns TraxDB links. The bootstrap
+script generalises the working token-mint flow for re-bootstrap on revocation.
 
-**Total: 2–3 days** including the spike.
+### Risks (residual)
 
-### Risks
-
-- Reader-access-via-API unknown → that's why the spike is first.
+- Refresh token revocation (Google-side or manual) → sync fails loudly with
+  the re-bootstrap message; runbook is
+  `tools/traxdb_sync/blogger_oauth_bootstrap.py`.
 - OAuth consent screen misconfig (left in Testing) silently kills refresh
-  tokens after 7 days — checklist item in the bootstrap script.
+  tokens after 7 days — verified published to Production; noted in the
+  bootstrap script docstring.
 - Blog owner revokes operator's reader invite — orthogonal, breaks every option.
 
 ## Option B — Mac-side fetch agent (fallback)
@@ -110,7 +116,8 @@ downloads with its stable API key.
 ## Option C — Status quo
 
 The documented one-shot dance. Zero dev cost, real friction every sync.
-Acceptable interim while A is spiked; not a destination.
+Superseded by Option A; only relevant if the API path ever dies with no
+refresh token available (`TRAXDB_FETCH_MODE=cookies`).
 
 ## Rejected
 
@@ -128,6 +135,8 @@ including test.
 
 ## Recommendation
 
-Run the Option A spike (half-day). Green → build A, retire cookies.
-Red → build B. Either way add the keepalive. Interim: Option C dance,
-procedure in session memory (`traxdb_dual_credentials`).
+Option A is live: `TRAXDB_FETCH_MODE=api` is the default sync path. The cookie
+fallback (`TRAXDB_FETCH_MODE=cookies`) is retained temporarily until the API
+path has a few clean prod syncs behind it, then it and `refresh_cookies.py`
+can be retired. Remaining work: the monthly Pixeldrain keepalive guard
+(see "Keepalive") — still TODO.

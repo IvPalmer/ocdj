@@ -131,6 +131,17 @@ SCHEMA: list[ConfigSpec] = [
                description='Pixeldrain API key (boosts download throughput).'),
     ConfigSpec('TRAXDB_COOKIES', 'traxdb', 'str', '',
                description='Path inside the container to a Netscape-format cookies.txt for blog auth.'),
+    ConfigSpec('TRAXDB_FETCH_MODE', 'traxdb', 'str', 'api',
+               choices=['api', 'cookies'],
+               description="How to fetch blog links: 'api' (headless Blogger API v3 via OAuth "
+                           "refresh token, default) or 'cookies' (legacy Google-cookie scraping)."),
+    ConfigSpec('BLOGGER_CLIENT_ID', 'traxdb', 'str', '', is_secret=True,
+               description='OAuth desktop client id (GCP project ocdj-traxdb) for the Blogger API fetch path.'),
+    ConfigSpec('BLOGGER_CLIENT_SECRET', 'traxdb', 'str', '', is_secret=True,
+               description='OAuth desktop client secret for the Blogger API fetch path.'),
+    ConfigSpec('BLOGGER_REFRESH_TOKEN', 'traxdb', 'str', '', is_secret=True,
+               description='Durable OAuth refresh token minted by tools/traxdb_sync/blogger_oauth_bootstrap.py. '
+                           'Re-bootstrap if invalid_grant.'),
 
     # ── automation ───────────────────────────────────────────
     ConfigSpec('AUTOMATION_ENABLED', 'automation', 'bool', False,
