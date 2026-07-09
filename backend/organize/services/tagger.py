@@ -47,6 +47,33 @@ def _clean_catalog_number(value):
     return cleaned.strip()
 
 
+# Derived from the model so it can never drift out of sync with the column.
+# Beatport compilation rips stamp the whole genre taxonomy into one tag
+# (e.g. "House, Deep House, Tech House, ...", 261 chars), which overflows the
+# column and fails tagging with a Postgres
+# "value too long for type character varying(200)" error.
+from organize.models import PipelineItem
+
+_GENRE_MAX_LEN = PipelineItem._meta.get_field('genre').max_length
+
+
+def _clean_genre(value):
+    """Keep the primary genre when a tag crams a whole comma-separated list.
+
+    Only intervenes when the value would overflow the DB column, so legitimate
+    single genres containing commas (rare) or normal names pass through
+    untouched. Falls back to a hard truncation if even the first segment is
+    somehow over the limit.
+    """
+    if not value:
+        return ''
+    value = value.strip()
+    if len(value) <= _GENRE_MAX_LEN:
+        return value
+    primary = value.split(',', 1)[0].strip()
+    return primary[:_GENRE_MAX_LEN]
+
+
 def _parse_title_from_filename(filename):
     """Extract artist and title from a Soulseek-style filename, preserving mix info."""
     name = os.path.splitext(filename)[0]
@@ -405,6 +432,8 @@ def tag_file(pipeline_item):
         metadata['year'] = _clean_year(metadata['year'])
     if metadata.get('catalog_number'):
         metadata['catalog_number'] = _clean_catalog_number(metadata['catalog_number'])
+    if metadata.get('genre'):
+        metadata['genre'] = _clean_genre(metadata['genre'])
 
     # Write tags to file
     write_tags(filepath, metadata)

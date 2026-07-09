@@ -185,3 +185,33 @@ class PipelineServiceTestCase(TestCase):
         self.assertEqual(next_skippable_stage('converting'), 'ready')
         self.assertIsNone(next_skippable_stage('ready'))
         self.assertIsNone(next_skippable_stage('failed'))
+
+
+class CleanGenreTestCase(TestCase):
+    """Regression: Beatport compilation dumps overflow PipelineItem.genre (200)."""
+
+    def test_short_genre_passes_through(self):
+        from organize.services.tagger import _clean_genre
+        self.assertEqual(_clean_genre('Drum & Bass'), 'Drum & Bass')
+
+    def test_empty_genre(self):
+        from organize.services.tagger import _clean_genre
+        self.assertEqual(_clean_genre(''), '')
+        self.assertEqual(_clean_genre(None), '')
+
+    def test_overlong_genre_keeps_primary(self):
+        from organize.services.tagger import _clean_genre, _GENRE_MAX_LEN
+        blob = ('House, Deep House, Tech House, Techno (Peak Time / Driving), '
+                'Afro House, Melodic House & Techno, Minimal / Deep Tech, '
+                'Nu Disco / Disco, Funky / Groove / Jackin’ House, '
+                'Dance / Electro Pop, Bass House, Progressive House, '
+                'Drum & Bass, Trance, UK Garage / Bassline')
+        self.assertGreater(len(blob), _GENRE_MAX_LEN)
+        cleaned = _clean_genre(blob)
+        self.assertEqual(cleaned, 'House')
+        self.assertLessEqual(len(cleaned), _GENRE_MAX_LEN)
+
+    def test_overlong_single_segment_is_truncated(self):
+        from organize.services.tagger import _clean_genre, _GENRE_MAX_LEN
+        cleaned = _clean_genre('x' * 300)
+        self.assertEqual(len(cleaned), _GENRE_MAX_LEN)
