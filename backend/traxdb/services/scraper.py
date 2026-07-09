@@ -139,7 +139,111 @@ def _make_session(*, cookies_path: Optional[str], user_agent: str = "traxdb_sync
     return s
 
 
-# ── Blog scraping ─────────────────────────────────────────────
+# ── HTML → links (shared by cookie + API fetchers) ────────────
+
+
+def parse_traxdb_links_from_html(
+    html: str,
+    source_url: str,
+    fallback_date: Optional[str] = None,
+) -> List[TraxDBLink]:
+    """Extract Pixeldrain list links from a chunk of TraxDB blog HTML.
+
+    Pure function shared by both fetch paths:
+      * the cookie scraper feeds it a full rendered Blogspot page, and
+      * the Blogger API fetcher feeds it a single post's ``content`` body.
+
+    Preference order matches the blog format: ``div.post.hentry`` /
+    ``article`` post containers first (structured mode, one link per post via
+    MIRROR1 → PIXELDRAIN_LIST_RE → ``<a href>``), otherwise a flat-text regex
+    scan pairing each pixeldrain link with the nearest preceding ISO date, with
+    an ``<a href>`` fallback for links present only as attributes (API bodies).
+    Links are deduped by list_id; ``fallback_date`` fills in when the body has
+    no nearer date.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    found: Dict[str, TraxDBLink] = {}
+
+    def _list_id(url: str) -> str:
+        return url.split("/l/", 1)[1].split("?", 1)[0].split("#", 1)[0].strip("/")
+
+    # The blog moved away from `div.post.hentry` containers to a flat text
+    # format: each "post" is a date heading followed by a track list, with
+    # `MIRROR1: https://pixeldrain.com/l/...` lines at the bottom. We honour the
+    # old structure first (in case it ever returns) but fall back to a regex
+    # scan over the full text so we keep working when the template changes again.
+    posts = soup.select("div.post.hentry") or soup.find_all("article", class_=re.compile(r"post", re.I))
+
+    if posts:
+        for post in posts:
+            post_date = _infer_post_date(post) or fallback_date
+            u = _pick_one_pixeldrain_url(post)
+            if not u:
+                continue
+            list_id = _list_id(u)
+            if list_id in found:
+                continue
+            found[list_id] = TraxDBLink(
+                pixeldrain_url=u,
+                list_id=list_id,
+                source_url=source_url,
+                inferred_date=post_date,
+            )
+        return list(found.values())
+
+    # Flat-text mode — scan body for pixeldrain links and pair each one with the
+    # nearest preceding ISO date header in the document text.
+    body_text = soup.get_text("\n", strip=False)
+    date_positions = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r'(\b\d{4}-\d{2}-\d{2}\b)', body_text)
+    ]
+
+    for m in re.finditer(r'https?://pixeldrain\.com/l/([A-Za-z0-9]+)', body_text):
+        list_id = m.group(1)
+        if list_id in found:
+            continue
+        # nearest preceding date
+        inferred = None
+        pos = m.start()
+        for dpos, ddate in reversed(date_positions):
+            if dpos < pos:
+                inferred = ddate
+                break
+        found[list_id] = TraxDBLink(
+            pixeldrain_url=m.group(0),
+            list_id=list_id,
+            source_url=source_url,
+            inferred_date=inferred or fallback_date,
+        )
+
+    # `<a href>` fallback: catch links that appear only as attributes (common in
+    # Blogger API post bodies where the URL isn't rendered as visible text).
+    # Only used when the text scan found nothing, so the cookie full-page path
+    # is unaffected.
+    if not found:
+        for a in soup.find_all("a", href=True):
+            href = a.get("href")
+            if not isinstance(href, str):
+                continue
+            hm = PIXELDRAIN_LIST_RE.search(href)
+            if not hm:
+                continue
+            u = hm.group(0)
+            list_id = _list_id(u)
+            if list_id in found:
+                continue
+            found[list_id] = TraxDBLink(
+                pixeldrain_url=u,
+                list_id=list_id,
+                source_url=source_url,
+                inferred_date=fallback_date,
+            )
+
+    return list(found.values())
+
+
+# ── Blog scraping (cookie path) ───────────────────────────────
 
 
 def scrape_blog_links(
@@ -149,7 +253,7 @@ def scrape_blog_links(
     max_pages: int = 50,
     stop_at_or_before_date: Optional[str] = None,
 ) -> List[TraxDBLink]:
-    """Scrape a Blogspot page for Pixeldrain list links."""
+    """Scrape a Blogspot page for Pixeldrain list links (cookie-auth path)."""
     found: Dict[str, TraxDBLink] = {}
     next_url = start_url
 
@@ -173,68 +277,22 @@ def scrape_blog_links(
 
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # The blog moved away from `div.post.hentry` containers to a flat
-        # text format: each "post" is a date heading followed by a track list,
-        # with `MIRROR1: https://pixeldrain.com/l/...` lines at the bottom.
-        # We honour the old structure first (in case it ever returns) but fall
-        # back to a regex scan over the full text so we keep working when the
-        # template changes again.
-        posts = soup.select("div.post.hentry") or soup.find_all("article", class_=re.compile(r"post", re.I))
+        # Extract this page's links via the shared parser (structured or
+        # flat-text mode is decided inside it), merging with cross-page dedupe.
+        for link in parse_traxdb_links_from_html(r.text, next_url, None):
+            if link.list_id not in found:
+                found[link.list_id] = link
+        pages_done += 1
 
-        if posts:
-            pages_done += 1
-        else:
-            # Flat-text mode — scan body for pixeldrain links and pair each one
-            # with the nearest preceding ISO date header in the document text.
-            body_text = soup.get_text("\n", strip=False)
-            # Index every (position, date) pair so we can look up the nearest
-            # heading before each link match.
-            date_positions = [
-                (m.start(), m.group(1))
-                for m in re.finditer(r'(\b\d{4}-\d{2}-\d{2}\b)', body_text)
-            ]
-
-            link_iter = re.finditer(
-                r'https?://pixeldrain\.com/l/([A-Za-z0-9]+)', body_text
-            )
-            for m in link_iter:
-                list_id = m.group(1)
-                if list_id in found:
-                    continue
-                # nearest preceding date
-                inferred = None
-                pos = m.start()
-                for dpos, ddate in reversed(date_positions):
-                    if dpos < pos:
-                        inferred = ddate
-                        break
-                found[list_id] = TraxDBLink(
-                    pixeldrain_url=m.group(0),
-                    list_id=list_id,
-                    source_url=next_url,
-                    inferred_date=inferred,
-                )
-            pages_done += 1
-            posts = []  # skip the structured-loop below
-
+        # Compute the oldest structured post date so the early-stop below keeps
+        # working exactly as before. Flat-text pages have no post containers, so
+        # this stays None and the sync pages on until max_pages / no next link.
         oldest_post_date: Optional[str] = None
+        posts = soup.select("div.post.hentry") or soup.find_all("article", class_=re.compile(r"post", re.I))
         for post in posts:
-            post_date = _infer_post_date(post) if post is not soup else _infer_date_from_text(soup.get_text(" ", strip=True))
+            post_date = _infer_post_date(post)
             if post_date and (oldest_post_date is None or post_date < oldest_post_date):
                 oldest_post_date = post_date
-
-            u = _pick_one_pixeldrain_url(post)
-            if not u:
-                continue
-            list_id = u.split("/l/", 1)[1].split("?", 1)[0].split("#", 1)[0].strip("/")
-            if list_id in found:
-                continue
-            found[list_id] = TraxDBLink(
-                pixeldrain_url=u,
-                list_id=list_id,
-                source_url=next_url,
-                inferred_date=post_date,
-            )
 
         # Find next page link
         nxt = soup.find("a", attrs={"rel": "next"})
@@ -353,13 +411,30 @@ def run_sync(operation_id: int, max_pages: int = 50):
         db_folder_ids = set(ScrapedFolder.objects.values_list('folder_id', flat=True))
         seen_ids = seen_ids | db_folder_ids
 
-        session = _make_session(cookies_path=cookies_path or None)
-        links = scrape_blog_links(
-            session,
-            start_url=start_url,
-            max_pages=max_pages,
-            stop_at_or_before_date=max_date,
-        )
+        fetch_mode = (get_config('TRAXDB_FETCH_MODE') or 'api').lower()
+        if fetch_mode == 'api':
+            # Default: headless Blogger API v3 via OAuth refresh token.
+            from . import blogger_api
+            links = blogger_api.iter_blog_links(
+                start_url,
+                max_pages=max_pages,
+                stop_at_or_before_date=max_date,
+            )
+        elif fetch_mode == 'cookies':
+            # Legacy cookie-scraping fallback path.
+            session = _make_session(cookies_path=cookies_path or None)
+            links = scrape_blog_links(
+                session,
+                start_url=start_url,
+                max_pages=max_pages,
+                stop_at_or_before_date=max_date,
+            )
+        else:
+            # A typo'd mode must not silently take the API path.
+            op.status = 'failed'
+            op.error_message = f'invalid TRAXDB_FETCH_MODE: {fetch_mode}'
+            op.save()
+            return
 
         # Filter: only new links not already seen
         new_links = [l for l in links if l.list_id not in seen_ids]

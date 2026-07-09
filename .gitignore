@@ -61,3 +61,6 @@ tools/bin/
 # Claude Code
 .claude/
 .research/
+
+# TraxDB OAuth bootstrap output (belt-and-braces; --out should be outside the repo)
+tools/traxdb_sync/blogger_refresh_token.txt
