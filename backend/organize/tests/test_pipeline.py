@@ -142,6 +142,9 @@ class PipelineServiceTestCase(TestCase):
     @patch('organize.services.renamer.rename_file')
     @patch('organize.services.tagger.tag_file')
     @patch('organize.services.agent_enrich.looks_like_garbage', return_value=False)
+    # Prod compose sets OCDJ_AUTOPUBLISH=1; without this the item lands on
+    # 'published' instead of 'ready' when the suite runs in a prod-env container.
+    @patch.dict(os.environ, {'OCDJ_AUTOPUBLISH': '0'})
     def test_process_pipeline_item_moves_through_owned_stages(
         self,
         _looks_like_garbage,
