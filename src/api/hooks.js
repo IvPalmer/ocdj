@@ -658,6 +658,17 @@ export function useRetryItem() {
   })
 }
 
+export function useRemovePipelineItem() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.delete(`/organize/pipeline/${id}/`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+    },
+  })
+}
+
 export function useSkipStage() {
   const qc = useQueryClient()
   return useMutation({

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
-  useProcessSingle, useRetryItem, useSkipStage, useScanDownloads,
+  useProcessSingle, useRetryItem, useSkipStage, useRemovePipelineItem, useScanDownloads,
   useUpdatePipelineItem, useRetagItem,
   useConversionRules, useUpdateConversionRules,
 } from '../../api/hooks'
@@ -337,6 +337,7 @@ function OrganizePanel() {
   const processSingle = useProcessSingle()
   const retryItem = useRetryItem()
   const skipStage = useSkipStage()
+  const removeItem = useRemovePipelineItem()
   const scanDownloads = useScanDownloads()
 
   const items = itemsData?.results || []
@@ -468,7 +469,7 @@ function OrganizePanel() {
                       Retry
                     </button>
                   )}
-                  {!['ready', 'failed'].includes(item.stage) && !item.stage.endsWith('ing') && (
+                  {!['ready', 'failed', 'published'].includes(item.stage) && !item.stage.endsWith('ing') && (
                     <button
                       className="btn btn-xs"
                       onClick={() => skipStage.mutate(item.id)}
@@ -478,6 +479,17 @@ function OrganizePanel() {
                     </button>
                   )}
                   <DownloadButton item={item} />
+                  <button
+                    className="btn btn-xs btn-danger"
+                    onClick={() => {
+                      if (window.confirm(`Remove "${item.final_filename || item.original_filename}" from the workbench? Files still on the workbench are deleted too.`)) {
+                        removeItem.mutate(item.id)
+                      }
+                    }}
+                    disabled={removeItem.isPending}
+                  >
+                    Remove
+                  </button>
                 </span>
               </div>
               )

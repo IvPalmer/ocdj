@@ -48,13 +48,60 @@ def pipeline_list(request):
     return paginator.get_paginated_response(serializer.data)
 
 
-@api_view(['GET', 'PATCH'])
+def _remove_item_files(item):
+    """Delete the files this item tracks, but only inside OCDJ-owned roots.
+
+    Users delete tracks out-of-band (Finder, drain, iTunes) and the DB row
+    lingers with no way to clear it — DELETE is the escape hatch. Guarding on
+    the pipeline/publish roots means a corrupted path can never make us
+    reach outside the workbench.
+    """
+    from core.services.config import get_config
+
+    roots = [
+        get_config('SOULSEEK_DOWNLOAD_ROOT') or '',
+        os.environ.get('OCDJ_PUBLISH_ROOT', ''),
+    ]
+    roots = [os.path.realpath(r) for r in roots if r]
+    removed = []
+
+    def _safe_unlink(path):
+        if not path:
+            return
+        real = os.path.realpath(path)
+        if not any(real == r or real.startswith(r + os.sep) for r in roots):
+            return
+        if os.path.isfile(real):
+            os.remove(real)
+            removed.append(real)
+
+    _safe_unlink(item.current_path)
+    _safe_unlink(item.work_path)
+    # Publish packages live in a per-item directory; drop it if now empty.
+    for p in (item.current_path, item.work_path):
+        d = os.path.dirname(os.path.realpath(p)) if p else ''
+        if d and os.path.basename(d) == str(item.id) and os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+    return removed
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
 def pipeline_detail(request, pk):
-    """Get or update a single pipeline item."""
+    """Get, update, or remove a single pipeline item."""
     try:
         item = PipelineItem.objects.get(pk=pk)
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'DELETE':
+        try:
+            removed = _remove_item_files(item)
+        except OSError as e:
+            return Response({'error': f'File removal failed: {e}'},
+                            status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+        item_id = item.id
+        item.delete()
+        return Response({'message': f'Removed item {item_id}', 'files_removed': removed})
 
     if request.method == 'PATCH':
         from .services.tagger import _clean_genre
