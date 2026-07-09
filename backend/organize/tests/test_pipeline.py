@@ -218,3 +218,58 @@ class CleanGenreTestCase(TestCase):
         from organize.services.tagger import _clean_genre, _GENRE_MAX_LEN
         cleaned = _clean_genre('x' * 300)
         self.assertEqual(len(cleaned), _GENRE_MAX_LEN)
+
+
+class PipelineDeleteTestCase(TestCase):
+    """DELETE removes the row and any files still inside OCDJ-owned roots."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        Config.objects.update_or_create(
+            key='SOULSEEK_DOWNLOAD_ROOT',
+            defaults={'value': self.tmpdir.name},
+        )
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def _mk_item(self, path):
+        return PipelineItem.objects.create(
+            original_filename=os.path.basename(path),
+            current_path=path,
+            stage='downloaded',
+        )
+
+    def test_delete_removes_row_and_workbench_file(self):
+        path = os.path.join(self.tmpdir.name, '01_downloaded', 'x.mp3')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as fh:
+            fh.write(b'audio')
+        item = self._mk_item(path)
+
+        resp = self.client.delete(f'/api/organize/pipeline/{item.id}/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(PipelineItem.objects.filter(id=item.id).exists())
+        self.assertFalse(os.path.exists(path))
+
+    def test_delete_with_missing_file_still_removes_row(self):
+        path = os.path.join(self.tmpdir.name, '01_downloaded', 'gone.mp3')
+        item = self._mk_item(path)
+
+        resp = self.client.delete(f'/api/organize/pipeline/{item.id}/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(PipelineItem.objects.filter(id=item.id).exists())
+
+    def test_delete_never_touches_files_outside_roots(self):
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as fh:
+            fh.write(b'audio')
+            outside = fh.name
+        try:
+            item = self._mk_item(outside)
+            resp = self.client.delete(f'/api/organize/pipeline/{item.id}/')
+            self.assertEqual(resp.status_code, 200)
+            self.assertFalse(PipelineItem.objects.filter(id=item.id).exists())
+            self.assertTrue(os.path.exists(outside))  # untouched
+        finally:
+            if os.path.exists(outside):
+                os.unlink(outside)
