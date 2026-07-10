@@ -1,0 +1,169 @@
+.yt-panel {
+}
+
+/* ── Header ── */
+.yt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.yt-header .page-title {
+  margin: 0;
+}
+
+.yt-intro {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 0 0 16px;
+  max-width: 640px;
+}
+
+/* ── Fetch form ── */
+.yt-fetch-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.yt-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.yt-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+/* ── Jobs table ── */
+.yt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.yt-table thead th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.yt-table tbody td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.yt-row--failed {
+  background: color-mix(in srgb, var(--accent-red) 4%, transparent);
+}
+
+.yt-td-title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.yt-title {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.yt-pipeline-link {
+  font-size: 11px;
+  color: var(--accent-violet);
+  font-weight: 600;
+}
+
+.yt-error {
+  font-size: 11px;
+  color: var(--accent-red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.yt-td-uploader {
+  color: var(--text-secondary);
+}
+
+.yt-td-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ── Status pill (mirrors the Soulseek/Organize pill language) ── */
+.yt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.yt-pill--queued {
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+  color: var(--accent-amber);
+}
+
+.yt-pill--fetching {
+  background: color-mix(in srgb, var(--accent-blue) 10%, transparent);
+  color: var(--accent-blue);
+}
+
+.yt-pill--downloaded {
+  background: color-mix(in srgb, #047857 10%, transparent);
+  color: #047857;
+}
+
+.yt-pill--failed {
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+  color: var(--accent-red);
+}
+
+/* ── Empty state ── */
+.yt-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* ── Spinner ── */
+.yt-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: yt-spin 0.7s linear infinite;
+}
+
+@keyframes yt-spin {
+  to { transform: rotate(360deg); }
+}

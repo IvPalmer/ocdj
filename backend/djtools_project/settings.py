@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'library',
     'drain',
     'cratemate',
+    'ytfetch',
 ]
 
 MIDDLEWARE = [

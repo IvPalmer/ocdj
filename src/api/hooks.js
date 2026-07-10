@@ -593,6 +593,43 @@ export function useTraxDBFolderTracks(id) {
   })
 }
 
+// ── YouTube Fetch ────────────────────────────────────────────
+
+export function useYtJobs() {
+  return useQuery({
+    queryKey: ['yt-jobs'],
+    queryFn: () => api.get('/ytfetch/jobs/'),
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.results || []
+      return jobs.some(j => j.status === 'queued' || j.status === 'fetching') ? 4000 : false
+    },
+  })
+}
+
+export function useYtFetch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (url) => api.post('/ytfetch/fetch/', { url }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['yt-jobs'] }),
+  })
+}
+
+export function useYtRetry() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/ytfetch/jobs/${id}/retry/`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['yt-jobs'] }),
+  })
+}
+
+export function useYtDeleteJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.delete(`/ytfetch/jobs/${id}/`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['yt-jobs'] }),
+  })
+}
+
 // ── Organize Pipeline ────────────────────────────────────────
 
 export function usePipelineStats() {
