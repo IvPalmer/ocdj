@@ -119,11 +119,19 @@
   background: color-mix(in srgb, var(--accent-red) 4%, transparent);
 }
 
+/* Must stay a real table-cell — display:flex here detaches it from the
+   table layout, so the columns stop filling the row and the border lines
+   render only part-way across. Stack the contents with block children. */
 .yt-td-title {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
   min-width: 0;
+}
+
+.yt-td-title > * {
+  display: block;
+}
+
+.yt-td-title > * + * {
+  margin-top: 3px;
 }
 
 .yt-title {
