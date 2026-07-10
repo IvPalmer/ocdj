@@ -11,6 +11,20 @@ const STATUS_LABELS = {
   failed: 'Failed',
 }
 
+function failureSummary(message) {
+  const text = message || ''
+  if (text.toLowerCase().includes('bot-check')) {
+    return {
+      title: 'YouTube sign-in required',
+      detail: 'The server needs a fresh YouTube session cookie. Retry after the server authentication is refreshed.',
+    }
+  }
+  return {
+    title: 'Download failed',
+    detail: text || 'yt-dlp could not download this video.',
+  }
+}
+
 function StatusPill({ status }) {
   if (status === 'fetching') {
     return (
@@ -33,18 +47,20 @@ function YouTubePanel() {
   const deleteMutation = useYtDeleteJob()
 
   const [url, setUrl] = useState('')
+  const [submitError, setSubmitError] = useState('')
   const jobs = jobsData?.results || []
 
   const handleFetch = async (e) => {
     e.preventDefault()
     const trimmed = url.trim()
     if (!trimmed) return
+    setSubmitError('')
     try {
       await fetchMutation.mutateAsync(trimmed)
       setUrl('')
     } catch (err) {
       const detail = err?.data?.url?.[0] || err?.data?.error || err.message
-      alert('Fetch failed: ' + detail)
+      setSubmitError(detail)
     }
   }
 
@@ -76,9 +92,13 @@ function YouTubePanel() {
           {fetchMutation.isPending ? 'Fetching…' : 'Fetch'}
         </button>
       </form>
+      {submitError && (
+        <div className="yt-submit-error" role="alert">{submitError}</div>
+      )}
 
       {jobs.length > 0 ? (
-        <table className="yt-table">
+        <div className="yt-table-wrap">
+          <table className="yt-table">
           <thead>
             <tr>
               <th>Title</th>
@@ -99,11 +119,15 @@ function YouTubePanel() {
                       in pipeline #{job.pipeline_item}
                     </span>
                   )}
-                  {job.status === 'failed' && job.error_message && (
-                    <span className="yt-error" title={job.error_message}>
-                      {job.error_message}
-                    </span>
-                  )}
+                  {job.status === 'failed' && (() => {
+                    const summary = failureSummary(job.error_message)
+                    return (
+                      <span className="yt-error" role="alert">
+                        <strong>{summary.title}</strong>
+                        <span>{summary.detail}</span>
+                      </span>
+                    )
+                  })()}
                 </td>
                 <td className="yt-td-uploader">{job.uploader || '—'}</td>
                 <td>
@@ -133,7 +157,8 @@ function YouTubePanel() {
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       ) : (
         <div className="yt-empty">
           No fetches yet. Paste a YouTube URL above to download its audio into

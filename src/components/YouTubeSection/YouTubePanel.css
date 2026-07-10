@@ -27,6 +27,15 @@
   margin-bottom: 24px;
 }
 
+.yt-submit-error {
+  margin: -12px 0 20px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 6%, transparent);
+  color: var(--accent-red);
+  font-size: 13px;
+}
+
 .yt-input {
   flex: 1;
   padding: 8px 12px;
@@ -47,6 +56,11 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.yt-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid var(--border);
 }
 
 .yt-table thead th {
@@ -80,8 +94,9 @@
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 420px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 560px;
 }
 
 .yt-pipeline-link {
@@ -91,12 +106,21 @@
 }
 
 .yt-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   font-size: 11px;
   color: var(--accent-red);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 420px;
+  line-height: 1.4;
+  max-width: 560px;
+}
+
+.yt-error strong {
+  font-size: 12px;
+}
+
+.yt-error span {
+  overflow-wrap: anywhere;
 }
 
 .yt-td-uploader {
