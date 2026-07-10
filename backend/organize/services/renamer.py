@@ -51,6 +51,22 @@ _NON_REMIX_LABEL_RE = re.compile(
     r'\s*\((?:original(?:\s+mix)?|main\s+mix|album\s+version)\)\s*',
     re.IGNORECASE,
 )
+# Release-page annotations that are not part of a release or track title.
+_RELEASE_NOISE_RE = re.compile(
+    r'\s*[\(\[]\s*(?:'
+    r'vinyl\s+(?:available|only)'
+    r'|available\s+on\s+vinyl'
+    r'|digital\s+(?:available|only)'
+    r'|bandcamp(?:\s+exclusive)?'
+    r')\s*[\)\]]',
+    re.IGNORECASE,
+)
+# Release pages often encode an album and track position in the title:
+# "Album - 01 Track Name". For a track title, keep only the final part.
+_EMBEDDED_TRACK_TITLE_RE = re.compile(
+    r'^.+?\s+[-–—]\s+0*\d{1,3}\s*[\.\)\-_]?\s+(?=\S)',
+    re.IGNORECASE,
+)
 
 
 def _clean_segment(s: str) -> str:
@@ -65,6 +81,7 @@ def _clean_segment(s: str) -> str:
     s = _TRAILING_EXT_RE.sub('', s)
     s = _URL_STAMP_RE.sub('', s)
     s = _CATALOG_BRACKET_RE.sub('', s)
+    s = _RELEASE_NOISE_RE.sub(' ', s)
     s = _TRACK_PREFIX_RE.sub('', s)
     # Plain leading number: strip only when the value is within the normal
     # track-position range. Preserves titles like "97 Sounds Better".
@@ -102,7 +119,14 @@ def clean_artist(artist: str) -> str:
 
 
 def clean_title(title: str) -> str:
-    return _clean_segment(title or '')
+    cleaned = _clean_segment(title or '')
+    cleaned = _EMBEDDED_TRACK_TITLE_RE.sub('', cleaned, count=1)
+    return re.sub(r'\s+', ' ', cleaned).strip(' -–—.')
+
+
+def clean_album(album: str) -> str:
+    """Remove release-page annotations while preserving real album editions."""
+    return _clean_segment(album or '')
 
 
 def sanitize_filename(name: str) -> str:
@@ -128,7 +152,7 @@ def rename_file(pipeline_item):
     vars_ = {
         'artist': artist,
         'title': title,
-        'album': pipeline_item.album or '',
+        'album': clean_album(pipeline_item.album or ''),
         'label': pipeline_item.label or '',
         'catalog': pipeline_item.catalog_number or '',
         'genre': pipeline_item.genre or '',

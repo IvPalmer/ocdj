@@ -360,7 +360,7 @@ def pipeline_retag_clean(request):
     same basename under MUSIC_ROOT and retags wherever it actually lives.
     """
     from .services.tagger import write_tags
-    from .services.renamer import clean_artist, clean_title, _strip_artist_prefix
+    from .services.renamer import clean_artist, clean_title, clean_album, _strip_artist_prefix
     from core.services.config import get_config
 
     stage = request.data.get('stage', 'ready')
@@ -374,6 +374,7 @@ def pipeline_retag_clean(request):
         try:
             new_a = clean_artist(item.artist or '')
             new_t = clean_title(item.title or '')
+            new_album = clean_album(item.album or '')
             if new_a:
                 new_t = _strip_artist_prefix(new_t, new_a)
             target_path = item.current_path
@@ -394,17 +395,22 @@ def pipeline_retag_clean(request):
                     continue
             metadata = {
                 'artist': new_a, 'title': new_t,
-                'album': item.album, 'label': item.label,
+                'album': new_album, 'label': item.label,
                 'catalog_number': item.catalog_number,
                 'genre': item.genre, 'year': item.year,
                 'track_number': item.track_number,
             }
             write_tags(target_path, metadata)
-            changed = (new_a != item.artist) or (new_t != item.title)
+            changed = (
+                (new_a != item.artist)
+                or (new_t != item.title)
+                or (new_album != item.album)
+            )
             if changed:
                 item.artist = new_a
                 item.title = new_t
-                item.save(update_fields=['artist', 'title'])
+                item.album = new_album
+                item.save(update_fields=['artist', 'title', 'album'])
                 cleaned += 1
         except Exception as e:
             errors.append({'id': item.id, 'error': str(e)})
