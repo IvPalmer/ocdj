@@ -15,6 +15,7 @@ urlpatterns = [
     path('api/library/', include('library.urls')),
     path('api/drain/', include('drain.urls')),
     path('api/cratemate/', include('cratemate.urls')),
+    path('api/ytfetch/', include('ytfetch.urls')),
 ]
 
 if settings.DEBUG:

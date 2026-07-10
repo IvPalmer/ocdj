@@ -22,7 +22,13 @@ const NAV_GROUPS = [
     ],
   },
   { label: 'Curate', items: [{ to: '/wanted', label: 'Wanted' }] },
-  { label: 'Fetch', items: [{ to: '/soulseek', label: 'Soulseek' }] },
+  {
+    label: 'Fetch',
+    items: [
+      { to: '/soulseek', label: 'Soulseek' },
+      { to: '/youtube', label: 'YouTube' },
+    ],
+  },
   { label: 'Process', items: [{ to: '/organize', label: 'Organize' }] },
   {
     label: 'Library',
