@@ -13,16 +13,20 @@ const STATUS_LABELS = {
 
 function failureSummary(message) {
   const text = message || ''
-  if (text.toLowerCase().includes('blocked the production server')) {
+  const lowered = text.toLowerCase()
+  if (
+    lowered.includes('blocked the production server')
+    || lowered.includes('cookies are configured')
+  ) {
     return {
-      title: 'YouTube blocked the production server',
-      detail: 'This video works from the local Mac but YouTube is refusing the VPS request. Retrying unchanged will likely fail.',
+      title: 'YouTube blocked this server',
+      detail: 'The video is available from your local session, but YouTube is refusing the production server. Refreshing the same job will not change that network block.',
     }
   }
-  if (text.toLowerCase().includes('bot-check')) {
+  if (lowered.includes('bot-check')) {
     return {
-      title: 'YouTube sign-in required',
-      detail: 'The server needs a fresh YouTube session cookie. Retry after the server authentication is refreshed.',
+      title: 'YouTube authentication required',
+      detail: 'The production worker needs a current YouTube session cookie before this job can be retried.',
     }
   }
   return {
@@ -86,6 +90,7 @@ function YouTubePanel() {
         <input
           type="text"
           className="yt-input"
+          aria-label="YouTube URL"
           placeholder="https://www.youtube.com/watch?v=…"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -100,6 +105,14 @@ function YouTubePanel() {
       </form>
       {submitError && (
         <div className="yt-submit-error" role="alert">{submitError}</div>
+      )}
+
+      {jobs.some(job => job.status === 'failed' && (
+        job.error_message || '').toLowerCase().includes('blocked the production server')) && (
+        <div className="yt-auth-banner" role="status">
+          <strong>Production downloads are currently blocked by YouTube.</strong>
+          <span>Jobs that work in Chrome can still be completed from the local session. Retrying here will remain blocked until the server network is accepted.</span>
+        </div>
       )}
 
       {jobs.length > 0 ? (
@@ -135,8 +148,8 @@ function YouTubePanel() {
                     )
                   })()}
                 </td>
-                <td className="yt-td-uploader">{job.uploader || '—'}</td>
-                <td>
+                <td className="yt-td-uploader" data-label="Uploader">{job.uploader || '—'}</td>
+                <td className="yt-td-status" data-label="Status">
                   <StatusPill status={job.status} />
                 </td>
                 <td className="yt-td-actions">
@@ -145,6 +158,7 @@ function YouTubePanel() {
                       className="btn btn-xs btn-primary"
                       onClick={() => retryMutation.mutate(job.id)}
                       disabled={retryMutation.isPending}
+                      aria-label={`Retry ${job.title || job.url}`}
                     >
                       Retry
                     </button>
@@ -155,6 +169,7 @@ function YouTubePanel() {
                       onClick={() => deleteMutation.mutate(job.id)}
                       disabled={deleteMutation.isPending}
                       title="Remove from list (files unaffected)"
+                      aria-label={`Remove ${job.title || job.url} from the list`}
                     >
                       ✕
                     </button>

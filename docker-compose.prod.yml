@@ -117,8 +117,8 @@ services:
       DISCOGS_PERSONAL_TOKEN: ${DISCOGS_PERSONAL_TOKEN:-}
       DISCOGS_USERNAME: ${DISCOGS_USERNAME:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
-      YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-/srv/ocdj/secrets/youtube_cookies.txt}
-      YOUTUBE_COOKIES_FROM_BROWSER: ${YOUTUBE_COOKIES_FROM_BROWSER:-}
+      YOUTUBE_FETCH_MODE: ${YOUTUBE_FETCH_MODE:-local}
+      YOUTUBE_WORKER_TOKEN: ${YOUTUBE_WORKER_TOKEN:-}
       SC_CLIENT_ID: ${SC_CLIENT_ID:-}
       SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
       # Recognize (ACRCloud)
@@ -145,7 +145,6 @@ services:
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
-      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:rw
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     healthcheck:
@@ -200,8 +199,7 @@ services:
       DISCOGS_PERSONAL_TOKEN: ${DISCOGS_PERSONAL_TOKEN:-}
       DISCOGS_USERNAME: ${DISCOGS_USERNAME:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
-      YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-/srv/ocdj/secrets/youtube_cookies.txt}
-      YOUTUBE_COOKIES_FROM_BROWSER: ${YOUTUBE_COOKIES_FROM_BROWSER:-}
+      YOUTUBE_FETCH_MODE: ${YOUTUBE_FETCH_MODE:-local}
       SC_CLIENT_ID: ${SC_CLIENT_ID:-}
       SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
       ACR_ACCESS_KEY: ${ACR_ACCESS_KEY:-}
@@ -214,7 +212,6 @@ services:
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
-      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:rw
       - huey_volume:/app/huey
     logging:
       driver: json-file
