@@ -601,7 +601,10 @@ export function useYtJobs() {
     queryFn: () => api.get('/ytfetch/jobs/'),
     refetchInterval: (query) => {
       const jobs = query.state.data?.results || []
-      return jobs.some(j => j.status === 'queued' || j.status === 'fetching') ? 4000 : false
+      // Keep polling while a job waits on the Mac daemon (needs_local) so the
+      // row flips to downloaded on its own once the Mac delivers.
+      const active = ['queued', 'fetching', 'needs_local']
+      return jobs.some(j => active.includes(j.status)) ? 4000 : false
     },
   })
 }

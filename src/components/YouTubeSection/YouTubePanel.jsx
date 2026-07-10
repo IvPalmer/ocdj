@@ -7,6 +7,7 @@ import './YouTubePanel.css'
 const STATUS_LABELS = {
   queued: 'Queued',
   fetching: 'Fetching',
+  needs_local: 'Downloading on Mac',
   downloaded: 'Downloaded',
   failed: 'Failed',
 }
