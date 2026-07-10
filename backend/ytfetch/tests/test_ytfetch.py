@@ -251,9 +251,13 @@ class TaskFailureTests(TestCase):
         return {'SOULSEEK_DOWNLOAD_ROOT': self.root}.get(key, '')
 
     def test_failure_stores_stderr_tail_and_bot_hint(self):
+        # The bot-hint _fail path only applies when the Mac fallback is OFF;
+        # with it on, a bot-check routes to needs_local (covered elsewhere).
         job = FetchJob.objects.create(url='https://youtu.be/abc123')
         stderr = 'ERROR: Sign in to confirm you’re not a bot. Use --cookies.'
+        env = {k: v for k, v in os.environ.items() if k != 'YTFETCH_LOCAL_FALLBACK'}
         with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, env, clear=True), \
              patch.object(ytfetch_tasks.subprocess, 'run',
                           side_effect=[_proc(1, ''), _proc(1, '', stderr)]):
             ytfetch_tasks.run_fetch_job(job.id)
@@ -393,9 +397,12 @@ class YtdlpPotAndFallbackTestCase(TestCase):
         )
 
     def test_no_fallback_when_mac_proxy_unset(self):
+        # Neither the Mac proxy retry nor the needs_local routing: a bot-check
+        # with both YOUTUBE_MAC_PROXY and YTFETCH_LOCAL_FALLBACK unset fails.
         job = FetchJob.objects.create(url='https://youtu.be/abc123')
         botcheck = _proc(1, '', 'ERROR: Sign in to confirm you’re not a bot.')
-        env = {k: v for k, v in os.environ.items() if k != 'YOUTUBE_MAC_PROXY'}
+        env = {k: v for k, v in os.environ.items()
+               if k not in ('YOUTUBE_MAC_PROXY', 'YTFETCH_LOCAL_FALLBACK')}
         with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
              patch.dict(os.environ, env, clear=True), \
              patch.object(ytfetch_tasks.subprocess, 'run',
