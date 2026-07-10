@@ -26,30 +26,50 @@ FETCH_TIMEOUT = 900
 META_TIMEOUT = 120
 
 
-def _prepare_auth():
-    """Return (auth_args, temp_cookie_path_or_None).
+# Writable directory holding the live, self-refreshing cookie jar. yt-dlp
+# rewrites the cookie file whenever YouTube rotates a session cookie
+# mid-request; letting it persist that write means the session maintains
+# itself for as long as the account stays valid (months) instead of the
+# static export going stale in days. A directory (not a single-file) mount is
+# required — yt-dlp saves via a temp-file + atomic rename, which breaks a
+# single-file bind mount (new inode) but works fine within a mounted dir.
+COOKIE_STATE_DIR = os.environ.get(
+    'YOUTUBE_COOKIE_STATE_DIR', '/srv/ocdj/ytcookies'
+)
 
-    yt-dlp rewrites the cookie jar back to the --cookies path when YouTube
-    rotates a session cookie mid-request. The prod cookies secret is
-    bind-mounted read-only, so pointing --cookies straight at it makes yt-dlp
-    crash on the save (PermissionError) even after a successful download. We
-    hand yt-dlp a throwaway writable copy instead and delete it afterward;
-    the caller must clean up the returned path. Falls back to
-    --cookies-from-browser (no file to copy) or no auth at all — in which case
-    yt-dlp runs anonymously, which still succeeds most of the time.
+
+def _prepare_auth():
+    """Return yt-dlp auth flags, using a self-refreshing live cookie copy.
+
+    The configured YOUTUBE_COOKIES path is the read-only *seed*. On first use
+    we copy it into COOKIE_STATE_DIR (writable) and thereafter point yt-dlp at
+    that live copy, which it keeps fresh via YouTube's own rotation. Falls back
+    to --cookies-from-browser, or to no auth at all — anonymous yt-dlp still
+    succeeds most of the time, so a missing/expired jar degrades rather than
+    breaks.
     """
-    cookies = str(get_config('YOUTUBE_COOKIES') or '').strip()
-    if cookies and os.path.exists(cookies):
-        fd, tmp = tempfile.mkstemp(prefix='ytdlp-cookies-', suffix='.txt')
-        os.close(fd)
-        shutil.copyfile(cookies, tmp)
-        return ['--cookies', tmp], tmp
+    seed = str(get_config('YOUTUBE_COOKIES') or '').strip()
+    if seed and os.path.exists(seed):
+        try:
+            os.makedirs(COOKIE_STATE_DIR, exist_ok=True)
+            live = os.path.join(COOKIE_STATE_DIR, 'youtube_cookies.txt')
+            if not os.path.exists(live):
+                shutil.copyfile(seed, live)  # seed once; yt-dlp maintains it after
+            return ['--cookies', live]
+        except OSError as e:
+            # State dir not writable/mountable — fall back to a throwaway copy
+            # so a rotation write can't crash the run on the read-only seed.
+            logger.warning(f'ytfetch: cookie state dir unusable ({e}); using temp copy')
+            fd, tmp = tempfile.mkstemp(prefix='ytdlp-cookies-', suffix='.txt')
+            os.close(fd)
+            shutil.copyfile(seed, tmp)
+            return ['--cookies', tmp]
 
     browser = str(get_config('YOUTUBE_COOKIES_FROM_BROWSER') or '').strip()
     if browser:
-        return ['--cookies-from-browser', browser], None
+        return ['--cookies-from-browser', browser]
 
-    return [], None
+    return []
 
 
 def _yt_dlp_network_args():
@@ -118,20 +138,8 @@ def run_fetch_job(job_id):
     )
     os.makedirs(download_dir, exist_ok=True)
 
-    auth_args, cookies_tmp = _prepare_auth()
+    auth_args = _prepare_auth()
     network_args = _yt_dlp_network_args()
-    try:
-        _run_fetch(job, download_dir, auth_args, network_args)
-    finally:
-        if cookies_tmp and os.path.exists(cookies_tmp):
-            try:
-                os.remove(cookies_tmp)
-            except OSError:
-                pass
-
-
-def _run_fetch(job, download_dir, auth_args, network_args):
-    job_id = job.id
     # Metadata pre-pass (best effort). Populates title/uploader/id so the job
     # row reads nicely while the download runs. If it fails we still download.
     try:

@@ -131,18 +131,22 @@ class TaskSuccessTests(TestCase):
         self.assertIn('[%(id)s]', output_tmpl)
         self.assertIn('%(artist,creator,uploader|YouTube)s', output_tmpl)
 
-    def test_cookie_file_auth_uses_writable_copy_and_cleans_up(self):
-        # yt-dlp rewrites the cookie jar on exit; the prod secret is mounted
-        # read-only, so the task must pass a writable COPY and delete it after.
+    def test_cookie_file_seeds_persistent_self_refreshing_copy(self):
+        # The read-only secret is the seed; the task copies it once into a
+        # writable state dir and points yt-dlp at that live copy, which yt-dlp
+        # keeps fresh via YouTube's rotation. The live copy must PERSIST (not be
+        # deleted) so the refresh survives to the next run, and must never be
+        # the read-only seed itself.
         job = FetchJob.objects.create(url='https://youtu.be/abc123')
-        src = os.path.join(self.root, 'youtube_cookies.txt')
-        with open(src, 'w') as fh:
-            fh.write('# Netscape HTTP Cookie File\nSOURCE_COOKIE_CONTENT\n')
+        seed = os.path.join(self.root, 'seed_cookies.txt')
+        with open(seed, 'w') as fh:
+            fh.write('# Netscape HTTP Cookie File\nSEED_COOKIE_CONTENT\n')
+        state_dir = os.path.join(self.root, 'ytcookies')
 
         def config(key, *a, **k):
             return {
                 'SOULSEEK_DOWNLOAD_ROOT': self.root,
-                'YOUTUBE_COOKIES': src,
+                'YOUTUBE_COOKIES': seed,
                 'YOUTUBE_COOKIES_FROM_BROWSER': 'chrome',
             }.get(key, '')
 
@@ -151,17 +155,17 @@ class TaskSuccessTests(TestCase):
         def run_side_effect(argv, *a, **k):
             self.assertIn('--cookies', argv)
             path = argv[argv.index('--cookies') + 1]
-            self.assertNotEqual(path, src)  # a copy, never the read-only source
+            self.assertNotEqual(path, seed)  # live copy, never the read-only seed
+            self.assertEqual(os.path.dirname(path), state_dir)
             self.assertNotIn('--cookies-from-browser', argv)
-            with open(path) as fh:  # the copy exists and matches the source
-                self.assertEqual(fh.read(), open(src).read())
+            with open(path) as fh:
+                self.assertEqual(fh.read(), open(seed).read())  # seeded from source
             seen['path'] = path
-            # First call = metadata pre-pass (returns no tab-separated meta so
-            # it's skipped); the download call returns the final filepath.
             seen['calls'] = seen.get('calls', 0) + 1
             return _proc(0, '') if seen['calls'] == 1 else _proc(0, self.filepath)
 
         with patch.object(ytfetch_tasks, 'get_config', side_effect=config), \
+             patch.object(ytfetch_tasks, 'COOKIE_STATE_DIR', state_dir), \
              patch.object(ytfetch_tasks.subprocess, 'run',
                           side_effect=run_side_effect), \
              patch('organize.services.pipeline.scan_completed_downloads'), \
@@ -169,7 +173,7 @@ class TaskSuccessTests(TestCase):
             ytfetch_tasks.run_fetch_job(job.id)
 
         self.assertIn('path', seen)
-        self.assertFalse(os.path.exists(seen['path']))  # temp copy cleaned up
+        self.assertTrue(os.path.exists(seen['path']))  # persists for self-refresh
 
     def test_browser_cookie_auth_is_used_when_cookie_file_is_empty(self):
         job = FetchJob.objects.create(url='https://youtu.be/abc123')
