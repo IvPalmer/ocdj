@@ -101,6 +101,26 @@ def task_fetch(job_id: int):
         run_fetch_job(job_id)
 
 
+def _apply_stream_details(job, abr=None, duration=None, ext=None):
+    """Set the display-only source-stream fields, tolerating yt-dlp's 'NA'/''.
+
+    yt-dlp prints 'NA' (or empty) for unknown fields; coerce to None so the
+    UI shows a clean dash instead of junk. Mutates job in place (no save).
+    """
+    def _num(v, cast):
+        s = str(v or '').strip()
+        if not s or s.upper() == 'NA':
+            return None
+        try:
+            return cast(float(s))
+        except (TypeError, ValueError):
+            return None
+    job.abr = _num(abr, float)
+    job.duration = _num(duration, int)
+    e = str(ext or '').strip()
+    job.ext = '' if e.upper() == 'NA' else e[:16]
+
+
 def _is_bot_check(text):
     lowered = (text or '').lower()
     return (
@@ -241,18 +261,22 @@ def run_fetch_job(job_id):
                 '--remote-components', 'ejs:github',
                 *network_args, *pot_args,
                 *auth_args, '--no-playlist',
-                '--skip-download', '--print', '%(id)s\t%(uploader)s\t%(title)s',
+                '--skip-download', '--print',
+                '%(id)s\t%(uploader)s\t%(title)s\t%(abr)s\t%(duration)s\t%(ext)s',
                 '--', job.url,
             ],
             capture_output=True, text=True, timeout=META_TIMEOUT,
         )
         if meta.returncode == 0 and meta.stdout.strip():
             parts = meta.stdout.strip().splitlines()[-1].split('\t')
-            if len(parts) == 3:
+            if len(parts) >= 3:
                 job.video_id = parts[0][:32]
                 job.uploader = parts[1][:500]
                 job.title = parts[2][:500]
-                job.save(update_fields=['video_id', 'uploader', 'title'])
+                _apply_stream_details(job, *parts[3:6])
+                job.save(update_fields=[
+                    'video_id', 'uploader', 'title', 'abr', 'duration', 'ext',
+                ])
     except Exception as e:
         logger.warning(f'ytfetch metadata pre-pass failed for job {job_id}: {e}')
 

@@ -155,9 +155,25 @@ def deliver_local(request, pk):
         for chunk in upload.chunks():
             fh.write(chunk)
 
+    # The VPS meta pre-pass was bot-checked, so the Mac (which actually
+    # downloaded) sends the display metadata alongside the file.
+    from .tasks import _apply_stream_details
+    if request.data.get('title'):
+        job.title = str(request.data['title'])[:500]
+    if request.data.get('uploader'):
+        job.uploader = str(request.data['uploader'])[:500]
+    if request.data.get('video_id'):
+        job.video_id = str(request.data['video_id'])[:32]
+    _apply_stream_details(
+        job, request.data.get('abr'), request.data.get('duration'),
+        request.data.get('ext'),
+    )
     job.downloaded_path = dest_path
     job.status = 'downloaded'
-    job.save(update_fields=['downloaded_path', 'status'])
+    job.save(update_fields=[
+        'title', 'uploader', 'video_id', 'abr', 'duration', 'ext',
+        'downloaded_path', 'status',
+    ])
 
     # Ingest is best-effort: bytes are safely on disk and the job is already
     # 'downloaded', so a pipeline hiccup won't lose the file (ingest_and_process

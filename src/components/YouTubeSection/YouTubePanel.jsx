@@ -12,6 +12,29 @@ const STATUS_LABELS = {
   failed: 'Failed',
 }
 
+function displayTitle(job) {
+  if (job.title) return job.title
+  if (job.video_id) return `YouTube · ${job.video_id}`
+  return job.url
+}
+
+function formatDuration(sec) {
+  if (!sec && sec !== 0) return null
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+// Source-stream details: what YouTube served, before the lossless conversion.
+function sourceDetails(job) {
+  const parts = []
+  if (job.abr) parts.push(`${Math.round(job.abr)} kbps`)
+  const dur = formatDuration(job.duration)
+  if (dur) parts.push(dur)
+  if (job.ext) parts.push(job.ext)
+  return parts.join('  ·  ')
+}
+
 function failureSummary(message) {
   const text = message || ''
   const lowered = text.toLowerCase()
@@ -124,22 +147,27 @@ function YouTubePanel() {
           <table className="yt-table">
           <thead>
             <tr>
-              <th>Title</th>
-              <th>Uploader</th>
+              <th>Track</th>
+              <th>Source</th>
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {jobs.map(job => (
+            {jobs.map(job => {
+              const details = sourceDetails(job)
+              return (
               <tr key={job.id} className={job.status === 'failed' ? 'yt-row--failed' : ''}>
                 <td className="yt-td-title">
-                  <span className="yt-title" title={job.url}>
-                    {job.title || job.url}
+                  <span className="yt-title" title={job.title || job.url}>
+                    {displayTitle(job)}
                   </span>
+                  {job.uploader && (
+                    <span className="yt-uploader-sub">{job.uploader}</span>
+                  )}
                   {job.pipeline_item && (
                     <span className="yt-pipeline-link" title="Ingested into the organize pipeline">
-                      in pipeline #{job.pipeline_item}
+                      ✓ in organize pipeline #{job.pipeline_item}
                     </span>
                   )}
                   {job.status === 'failed' && (() => {
@@ -152,7 +180,9 @@ function YouTubePanel() {
                     )
                   })()}
                 </td>
-                <td className="yt-td-uploader" data-label="Uploader">{job.uploader || '—'}</td>
+                <td className="yt-td-source" data-label="Source">
+                  {details ? <span className="yt-source">{details}</span> : '—'}
+                </td>
                 <td className="yt-td-status" data-label="Status">
                   <StatusPill status={job.status} />
                 </td>
@@ -180,7 +210,8 @@ function YouTubePanel() {
                   )}
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
           </table>
         </div>
