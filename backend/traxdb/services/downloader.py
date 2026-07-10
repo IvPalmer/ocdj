@@ -101,9 +101,46 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
                 for f in pending_folders
             ]
 
+        # Never add tracks to an existing destination directory. This is a
+        # deliberate collection boundary: an existing date folder may have
+        # been pruned manually and must not be filled back in by a later sync.
+        skipped_existing_directories = []
+        eligible_links = []
+        for link in links:
+            list_id = str(link.get('list_id') or '').strip()
+            if not list_id:
+                continue
+            inferred_date = link.get('inferred_date')
+            dest_dir = _pick_dest_dir(traxdb_root, inferred_date, list_id)
+            if os.path.isdir(dest_dir):
+                skipped_existing_directories.append({
+                    'list_id': list_id,
+                    'pixeldrain_url': link.get('pixeldrain_url'),
+                    'inferred_date': inferred_date,
+                    'dest_dir': dest_dir,
+                    'skipped': True,
+                    'skip_reason': 'destination_directory_exists',
+                    'files': [],
+                })
+                _mark_list_ids_seen(traxdb_root, [list_id])
+                folder = ScrapedFolder.objects.filter(folder_id=list_id).first()
+                if folder:
+                    folder.download_status = 'skipped'
+                    folder.save(update_fields=['download_status'])
+            else:
+                eligible_links.append(link)
+        links = eligible_links
+
         if not links:
             op.status = 'completed'
-            op.summary = {'lists_total': 0, 'lists_completed': 0, 'files_total': 0, 'files_completed': 0}
+            op.summary = {
+                'lists_total': 0,
+                'lists_completed': 0,
+                'lists_skipped_existing_directory': len(skipped_existing_directories),
+                'files_total': 0,
+                'files_completed': 0,
+                'lists': skipped_existing_directories,
+            }
             op.save()
             return
 
@@ -155,10 +192,11 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
         }
         _write_progress(progress_path, progress)
 
-        out_lists = []
+        out_lists = list(skipped_existing_directories)
         dead_links = []
         errors = []
         downloaded_signatures: Dict[tuple, str] = {}
+        claimed_destinations: Set[str] = set()
         last_progress_time = 0.0
 
         for l in links:
@@ -169,14 +207,7 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
             inferred_date = l.get('inferred_date')
             dest_dir = _pick_dest_dir(traxdb_root, inferred_date, list_id)
 
-            # Update folder status in DB
-            try:
-                folder = ScrapedFolder.objects.filter(folder_id=list_id).first()
-                if folder:
-                    folder.download_status = 'downloading'
-                    folder.save(update_fields=['download_status'])
-            except Exception:
-                pass
+            folder = ScrapedFolder.objects.filter(folder_id=list_id).first()
 
             try:
                 files = files_cache.get(list_id) or list(client.iter_list_files(list_id))
@@ -201,6 +232,30 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
                         folder.save(update_fields=['download_status'])
                     continue
                 downloaded_signatures[sig] = list_id
+
+                # Two distinct lists can resolve to the same post date. Once
+                # one claims that destination, subsequent lists must be
+                # skipped just like a directory that existed before this run.
+                if dest_dir in claimed_destinations or os.path.isdir(dest_dir):
+                    out_lists.append({
+                        'list_id': list_id,
+                        'pixeldrain_url': l.get('pixeldrain_url'),
+                        'inferred_date': inferred_date,
+                        'dest_dir': dest_dir,
+                        'skipped': True,
+                        'skip_reason': 'destination_directory_exists',
+                        'files': [],
+                    })
+                    _mark_list_ids_seen(traxdb_root, [list_id])
+                    if folder:
+                        folder.download_status = 'skipped'
+                        folder.save(update_fields=['download_status'])
+                    continue
+
+                claimed_destinations.add(dest_dir)
+                if folder:
+                    folder.download_status = 'downloading'
+                    folder.save(update_fields=['download_status'])
 
                 os.makedirs(dest_dir, exist_ok=True)
 
@@ -313,6 +368,10 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
         summary = {
             'lists_total': total_lists,
             'lists_completed': progress['lists_completed'],
+            'lists_skipped_existing_directory': sum(
+                1 for item in out_lists
+                if item.get('skip_reason') == 'destination_directory_exists'
+            ),
             'lists_dead': progress.get('lists_dead', 0),
             'files_total': total_files,
             'files_completed': progress['files_completed'],

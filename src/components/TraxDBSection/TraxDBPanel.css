@@ -665,6 +665,7 @@
 .status-badge--completed { color: var(--accent-green); }
 .status-badge--failed { color: var(--accent-red); }
 .status-badge--pending { color: var(--text-muted); }
+.status-badge--skipped { color: var(--accent-amber); }
 
 .traxdb-history-summary {
   font-family: var(--mono);

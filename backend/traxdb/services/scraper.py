@@ -37,6 +37,12 @@ class TraxDBLink:
     inferred_date: Optional[str] = None
 
 
+def _pick_dest_dir(traxdb_root: str, inferred_date: Optional[str], list_id: str) -> str:
+    if inferred_date:
+        return os.path.join(traxdb_root, inferred_date)
+    return os.path.join(traxdb_root, '_inbox', list_id)
+
+
 # ── HTML parsing helpers ──────────────────────────────────────
 
 
@@ -451,6 +457,25 @@ def run_sync(operation_id: int, max_pages: int = 50):
                     kept.append(l)
             new_links = kept
 
+        # A date directory is the atomic unit of a TraxDB import. Never queue
+        # a newly discovered list into a directory that already exists: it may
+        # be a deliberately pruned collection, and re-syncing must not restore
+        # files the operator removed.
+        skipped_by_existing_directory = []
+        kept = []
+        for link in new_links:
+            dest_dir = _pick_dest_dir(traxdb_root, link.inferred_date, link.list_id)
+            if os.path.isdir(dest_dir):
+                skipped_by_existing_directory.append(link)
+            else:
+                kept.append(link)
+        new_links = kept
+        if skipped_by_existing_directory:
+            _mark_list_ids_seen(
+                traxdb_root,
+                [link.list_id for link in skipped_by_existing_directory],
+            )
+
         # Query Pixeldrain for file plans if we have an API key
         client = PixeldrainClient(api_key=pixeldrain_key) if pixeldrain_key else None
 
@@ -525,6 +550,7 @@ def run_sync(operation_id: int, max_pages: int = 50):
             'links_found_count': len(links),
             'links_new_count': len(new_links),
             'links_skipped_by_cutoff_date': len(skipped_by_cutoff),
+            'links_skipped_by_existing_directory': len(skipped_by_existing_directory),
             'pages_scraped': getattr(links, '_pages_scraped', max_pages),
             'errors_count': len(errors),
             'links_found': links_found_data,

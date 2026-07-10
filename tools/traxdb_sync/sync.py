@@ -134,6 +134,28 @@ def main(argv: Optional[List[str]] = None) -> int:
                 kept.append(l)
         new_links = kept
 
+    # Do not add a later list to an existing date directory. Existing folders
+    # are treated as intentionally curated, even when individual files were
+    # removed from them.
+    skipped_by_existing_directory = []
+    kept = []
+    inbox_root = os.path.join(inv.traxdb_root, "_inbox")
+    for l in new_links:
+        dest_dir = (
+            os.path.join(inv.traxdb_root, l.inferred_date)
+            if l.inferred_date else os.path.join(inbox_root, l.list_id)
+        )
+        if os.path.isdir(dest_dir):
+            skipped_by_existing_directory.append(l)
+        else:
+            kept.append(l)
+    new_links = kept
+    if skipped_by_existing_directory:
+        mark_list_ids_seen(
+            inv.traxdb_root,
+            [l.list_id for l in skipped_by_existing_directory],
+        )
+
     if (args.download or args.plan_files) and not pixeldrain_api_key:
         print("ERROR: --download requires Pixeldrain API key (PIXELDRAIN_API_KEY or config.json)", file=sys.stderr)
         return 2
@@ -147,6 +169,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "links_found": [l.__dict__ for l in links],
         "links_new": [l.__dict__ for l in new_links],
         "links_skipped_by_cutoff_date": [l.__dict__ for l in skipped_by_cutoff],
+        "links_skipped_by_existing_directory": [
+            l.__dict__ for l in skipped_by_existing_directory
+        ],
         "download_enabled": bool(args.download),
         "config_used": {
             "traxdb_start_url": traxdb_start_url,
@@ -161,8 +186,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Decide where to put files:
     # - If we can infer a date from the page, put them in traxdb/<date>/
     # - Otherwise, put them in traxdb/_inbox/<list_id>/
-    inbox_root = os.path.join(inv.traxdb_root, "_inbox")
-
     for l in new_links:
         try:
             if l.inferred_date:
@@ -256,5 +279,4 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
