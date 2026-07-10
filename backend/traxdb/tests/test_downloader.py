@@ -24,7 +24,9 @@ class RunDownloadDestinationTestCase(TestCase):
             inferred_date='2026-05-01',
             download_status='pending',
         )
-        Path(self.tmpdir.name, '2026-05-01').mkdir()
+        dest = Path(self.tmpdir.name, '2026-05-01')
+        dest.mkdir()
+        (dest / 'existing.flac').write_bytes(b'existing')
         op = TraxDBOperation.objects.create(op_type='download', status='pending')
         values = {
             'TRAXDB_ROOT': self.tmpdir.name,
@@ -41,3 +43,32 @@ class RunDownloadDestinationTestCase(TestCase):
         self.assertEqual(op.summary['lists_skipped_existing_directory'], 1)
         self.assertEqual(folder.download_status, 'skipped')
         mock_client.return_value.iter_list_files.assert_not_called()
+
+    def test_empty_date_destination_is_downloadable(self):
+        folder = ScrapedFolder.objects.create(
+            folder_id='empty-list',
+            pixeldrain_url='https://pixeldrain.com/l/empty-list',
+            inferred_date='2026-05-02',
+            download_status='pending',
+        )
+        Path(self.tmpdir.name, '2026-05-02').mkdir()
+        op = TraxDBOperation.objects.create(op_type='download', status='pending')
+        values = {
+            'TRAXDB_ROOT': self.tmpdir.name,
+            'PIXELDRAIN_API_KEY': 'test-key',
+        }
+
+        with patch.object(downloader, 'get_config', side_effect=values.get), \
+             patch.object(downloader, 'PixeldrainClient') as mock_client:
+            mock_client.return_value.iter_list_files.return_value = []
+            downloader.run_download(op.id)
+
+        op.refresh_from_db()
+        folder.refresh_from_db()
+        self.assertEqual(op.status, 'completed')
+        self.assertEqual(folder.download_status, 'downloaded')
+        self.assertEqual(
+            mock_client.return_value.iter_list_files.call_count,
+            2,
+        )
+        mock_client.return_value.iter_list_files.assert_called_with('empty-list')

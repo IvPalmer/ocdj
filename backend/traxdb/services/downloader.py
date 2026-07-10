@@ -19,6 +19,7 @@ from django import db
 from core.services.config import get_config
 
 from .pixeldrain import PixeldrainClient, is_pixeldrain_not_found
+from .filesystem import directory_has_media_files
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,12 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
                 continue
             inferred_date = link.get('inferred_date')
             dest_dir = _pick_dest_dir(traxdb_root, inferred_date, list_id)
-            if os.path.isdir(dest_dir):
+            # Empty date folders are incomplete leftovers and may be reused.
+            # A populated destination remains a hard boundary so a later run
+            # cannot refill a collection the operator intentionally pruned.
+            if os.path.isdir(dest_dir) and (
+                not inferred_date or directory_has_media_files(dest_dir)
+            ):
                 skipped_existing_directories.append({
                     'list_id': list_id,
                     'pixeldrain_url': link.get('pixeldrain_url'),
@@ -236,7 +242,10 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
                 # Two distinct lists can resolve to the same post date. Once
                 # one claims that destination, subsequent lists must be
                 # skipped just like a directory that existed before this run.
-                if dest_dir in claimed_destinations or os.path.isdir(dest_dir):
+                if dest_dir in claimed_destinations or (
+                    os.path.isdir(dest_dir)
+                    and (not inferred_date or directory_has_media_files(dest_dir))
+                ):
                     out_lists.append({
                         'list_id': list_id,
                         'pixeldrain_url': l.get('pixeldrain_url'),

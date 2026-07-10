@@ -21,6 +21,7 @@ from core.services.config import get_config
 from django import db
 
 from .pixeldrain import PixeldrainClient, PixeldrainFile, is_pixeldrain_not_found
+from .filesystem import directory_has_media_files, latest_media_date
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +355,7 @@ def _scan_local_inventory(traxdb_root: str):
                         flac_basenames.add(os.path.basename(f))
 
     date_dirs.sort()
-    max_date = date_dirs[-1] if date_dirs else None
+    max_date = latest_media_date(traxdb_root, date_dirs)
 
     seen_ids: Set[str] = set()
     seen_path = os.path.join(traxdb_root, ".pixeldrain_lists_seen.json")
@@ -465,7 +466,12 @@ def run_sync(operation_id: int, max_pages: int = 50):
         kept = []
         for link in new_links:
             dest_dir = _pick_dest_dir(traxdb_root, link.inferred_date, link.list_id)
-            if os.path.isdir(dest_dir):
+            # An empty date directory can be left behind by an interrupted or
+            # cleaned-up download. It is not a completed library boundary and
+            # must remain eligible for the next run.
+            if os.path.isdir(dest_dir) and (
+                not link.inferred_date or directory_has_media_files(dest_dir)
+            ):
                 skipped_by_existing_directory.append(link)
             else:
                 kept.append(link)
