@@ -21,6 +21,13 @@
   max-width: 640px;
 }
 
+/* Cap the content width so the table reads dense instead of a lone track
+   name floating across a wide screen. */
+.yt-fetch-form,
+.yt-table-wrap {
+  max-width: 920px;
+}
+
 /* ── Fetch form ── */
 .yt-fetch-form {
   display: flex;
@@ -122,6 +129,8 @@
 .yt-title {
   display: block;
   font-weight: 600;
+  font-size: 14px;
+  line-height: 1.35;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
