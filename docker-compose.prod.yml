@@ -36,6 +36,15 @@ services:
     networks:
       - internal
 
+  # Proof-of-origin token provider for yt-dlp. YouTube challenges datacenter
+  # IPs with a bot-check; the ytfetch worker asks this sidecar for a PO token
+  # (HTTP mode, port 4416, internal network only) to get past it. Stateless.
+  bgutil-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    networks:
+      - internal
+
   slskd:
     image: slskd/slskd:0.24.5
     restart: unless-stopped
@@ -119,6 +128,7 @@ services:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       YOUTUBE_PROXY: ${YOUTUBE_PROXY:-}
       YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-}
+      YOUTUBE_POT_BASE_URL: ${YOUTUBE_POT_BASE_URL:-http://bgutil-pot:4416}
       SC_CLIENT_ID: ${SC_CLIENT_ID:-}
       SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
       # Recognize (ACRCloud)
@@ -203,6 +213,7 @@ services:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       YOUTUBE_PROXY: ${YOUTUBE_PROXY:-}
       YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-}
+      YOUTUBE_POT_BASE_URL: ${YOUTUBE_POT_BASE_URL:-http://bgutil-pot:4416}
       SC_CLIENT_ID: ${SC_CLIENT_ID:-}
       SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
       ACR_ACCESS_KEY: ${ACR_ACCESS_KEY:-}

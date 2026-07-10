@@ -334,3 +334,72 @@ class JobsListTests(TestCase):
         self.assertEqual(len(resp.data['results']), 3)
         # Ordering -id: newest first.
         self.assertGreater(resp.data['results'][0]['id'], resp.data['results'][1]['id'])
+
+
+class YtdlpPotAndFallbackTestCase(TestCase):
+    """PO-token args + Mac-tunnel bot-check fallback."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self.yt_dir = os.path.join(self.root, '01_downloaded', 'YouTube')
+        os.makedirs(self.yt_dir, exist_ok=True)
+        self.filepath = os.path.join(self.yt_dir, 'U - T [abc123].wav')
+        with open(self.filepath, 'wb') as fh:
+            fh.write(b'audio')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _config(self, key, *a, **k):
+        return {'SOULSEEK_DOWNLOAD_ROOT': self.root}.get(key, '')
+
+    def test_pot_extractor_arg_present_when_provider_configured(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, {'YOUTUBE_POT_BASE_URL': 'http://bgutil-pot:4416'}, clear=False), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), _proc(0, self.filepath)]) as mock_run, \
+             patch('organize.services.pipeline.scan_completed_downloads'), \
+             patch('organize.services.pipeline.process_pipeline_item'):
+            ytfetch_tasks.run_fetch_job(job.id)
+        argv = mock_run.call_args_list[1].args[0]
+        self.assertIn('--extractor-args', argv)
+        self.assertEqual(
+            argv[argv.index('--extractor-args') + 1],
+            'youtubepot-bgutilhttp:base_url=http://bgutil-pot:4416',
+        )
+
+    def test_bot_check_retries_through_mac_proxy(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        botcheck = _proc(1, '', 'ERROR: Sign in to confirm you’re not a bot.')
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, {'YOUTUBE_MAC_PROXY': 'socks5://172.22.0.1:1080'}, clear=False), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), botcheck, _proc(0, self.filepath)]) as mock_run, \
+             patch('organize.services.pipeline.scan_completed_downloads'), \
+             patch('organize.services.pipeline.process_pipeline_item'):
+            ytfetch_tasks.run_fetch_job(job.id)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'downloaded')
+        # 3 calls: meta, primary (bot-checked), fallback via proxy.
+        self.assertEqual(mock_run.call_count, 3)
+        fallback_argv = mock_run.call_args_list[2].args[0]
+        self.assertIn('--proxy', fallback_argv)
+        self.assertEqual(
+            fallback_argv[fallback_argv.index('--proxy') + 1],
+            'socks5://172.22.0.1:1080',
+        )
+
+    def test_no_fallback_when_mac_proxy_unset(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        botcheck = _proc(1, '', 'ERROR: Sign in to confirm you’re not a bot.')
+        env = {k: v for k, v in os.environ.items() if k != 'YOUTUBE_MAC_PROXY'}
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, env, clear=True), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), botcheck]) as mock_run:
+            ytfetch_tasks.run_fetch_job(job.id)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'failed')
+        self.assertEqual(mock_run.call_count, 2)  # meta + primary only, no fallback
