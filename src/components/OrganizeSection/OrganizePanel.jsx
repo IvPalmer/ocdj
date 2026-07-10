@@ -16,6 +16,7 @@ const STAGES = [
   { key: 'converting', label: 'Converting', color: 'var(--accent-amber)' },
   { key: 'converted', label: 'Converted', color: 'var(--accent-green)' },
   { key: 'ready', label: 'Ready', color: 'var(--accent-green)' },
+  { key: 'published', label: 'Published', color: 'var(--accent-purple, var(--accent-blue))' },
   { key: 'failed', label: 'Failed', color: 'var(--accent-red)' },
 ]
 
@@ -329,6 +330,7 @@ function ConversionRules() {
 
 function OrganizePanel() {
   const [stageFilter, setStageFilter] = useState(null)
+  const [showArchived, setShowArchived] = useState(false)
   const [editingItem, setEditingItem] = useState(null)
 
   const { data: stats } = usePipelineStats()
@@ -340,7 +342,11 @@ function OrganizePanel() {
   const removeItem = useRemovePipelineItem()
   const scanDownloads = useScanDownloads()
 
-  const items = itemsData?.results || []
+  const allItems = itemsData?.results || []
+  // Archived = drained to the Mac and confirmed. Done work — hide it from the
+  // workbench by default so the list only shows items needing attention.
+  const archivedCount = allItems.filter(i => i.archive_state === 'archived').length
+  const items = showArchived ? allItems : allItems.filter(i => i.archive_state !== 'archived')
 
   return (
     <div className="organize-panel">
@@ -389,6 +395,11 @@ function OrganizePanel() {
           {stageFilter && (
             <button className="btn btn-sm" onClick={() => setStageFilter(null)}>
               Show All
+            </button>
+          )}
+          {archivedCount > 0 && (
+            <button className="btn btn-sm" onClick={() => setShowArchived(v => !v)}>
+              {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
             </button>
           )}
         </div>
