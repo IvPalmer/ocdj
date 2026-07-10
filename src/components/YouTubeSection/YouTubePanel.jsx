@@ -13,6 +13,12 @@ const STATUS_LABELS = {
 
 function failureSummary(message) {
   const text = message || ''
+  if (text.toLowerCase().includes('blocked the production server')) {
+    return {
+      title: 'YouTube blocked the production server',
+      detail: 'This video works from the local Mac but YouTube is refusing the VPS request. Retrying unchanged will likely fail.',
+    }
+  }
   if (text.toLowerCase().includes('bot-check')) {
     return {
       title: 'YouTube sign-in required',
