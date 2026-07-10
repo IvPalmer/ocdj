@@ -85,3 +85,20 @@ class RunSyncFetchModeTestCase(TestCase):
         self.assertEqual(self.op.summary['links_new_count'], 0)
         self.assertEqual(self.op.summary['links_skipped_by_existing_directory'], 1)
         self.assertFalse(ScrapedFolder.objects.filter(folder_id='existing').exists())
+
+    def test_empty_date_destination_remains_eligible(self):
+        Path(self.tmpdir.name, '2026-05-01').mkdir(parents=True)
+        link = scraper.TraxDBLink(
+            pixeldrain_url='https://pixeldrain.com/l/empty-date',
+            list_id='empty-date',
+            source_url='https://traxdb2.blogspot.com/post',
+            inferred_date='2026-05-01',
+        )
+
+        with patch.object(scraper, 'get_config', side_effect=self._config('api')), \
+             patch.object(blogger_api, 'iter_blog_links', return_value=[link]):
+            scraper.run_sync(self.op.id)
+
+        self.op.refresh_from_db()
+        self.assertEqual(self.op.summary['links_new_count'], 1)
+        self.assertTrue(ScrapedFolder.objects.filter(folder_id='empty-date').exists())
