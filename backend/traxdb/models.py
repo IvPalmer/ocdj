@@ -46,6 +46,7 @@ class ScrapedFolder(models.Model):
         ('pending', 'Pending'),
         ('downloading', 'Downloading'),
         ('downloaded', 'Downloaded'),
+        ('skipped', 'Skipped'),
         ('failed', 'Failed'),
     ]
 

@@ -6,7 +6,7 @@ import os
 import shutil
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 try:
     from .config import load_config
@@ -159,6 +159,35 @@ def main(argv: Optional[List[str]] = None) -> int:
             },
         }
 
+        # A destination directory is a complete collection boundary. Skip it
+        # rather than adding files that may have been removed intentionally.
+        skipped_existing_directories = []
+        eligible_links = []
+        for l in links:
+            list_id = str(l.get("list_id") or "").strip()
+            if not list_id:
+                continue
+            inferred_date = l.get("inferred_date")
+            dest_dir = _pick_dest_dir(inv.traxdb_root, inferred_date, list_id)
+            if os.path.isdir(dest_dir):
+                skipped_existing_directories.append(
+                    {
+                        "list_id": list_id,
+                        "pixeldrain_url": l.get("pixeldrain_url"),
+                        "inferred_date": inferred_date,
+                        "dest_dir": dest_dir,
+                        "skipped": True,
+                        "skip_reason": "destination_directory_exists",
+                        "files": [],
+                    }
+                )
+                mark_list_ids_seen(inv.traxdb_root, [list_id])
+            else:
+                eligible_links.append(l)
+        links = eligible_links
+        out["lists"].extend(skipped_existing_directories)
+        out["summary"]["lists_skipped_existing_directory"] = len(skipped_existing_directories)
+
         # Pre-compute totals for better progress/ETA and cache list files to
         # avoid fetching each list twice (best-effort; list API calls may fail).
         total_lists = 0
@@ -216,6 +245,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"Progress file: {progress_path}", flush=True)
 
         downloaded_signatures: Dict[tuple, str] = {}
+        claimed_destinations: Set[str] = set()
 
         for l in links:
             list_id = str(l.get("list_id") or "").strip()
@@ -248,6 +278,29 @@ def main(argv: Optional[List[str]] = None) -> int:
                         write_progress(force=True)
                         continue
                     downloaded_signatures[sig] = list_id
+
+                if dest_dir in claimed_destinations or os.path.isdir(dest_dir):
+                    if not args.quiet:
+                        print(f"[list skip] {list_id} target already exists: {dest_dir}", flush=True)
+                    out["lists"].append(
+                        {
+                            "list_id": list_id,
+                            "pixeldrain_url": l.get("pixeldrain_url"),
+                            "inferred_date": inferred_date,
+                            "dest_dir": dest_dir,
+                            "skipped": True,
+                            "skip_reason": "destination_directory_exists",
+                            "files": [],
+                        }
+                    )
+                    mark_list_ids_seen(inv.traxdb_root, [list_id])
+                    out["summary"]["lists_skipped_existing_directory"] = (
+                        out["summary"].get("lists_skipped_existing_directory", 0) + 1
+                    )
+                    write_progress(force=True)
+                    continue
+
+                claimed_destinations.add(dest_dir)
 
                 # Only create the destination folder once we know the list exists and
                 # we're actually going to process it. This avoids leaving lots of empty
@@ -361,5 +414,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
