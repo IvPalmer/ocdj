@@ -86,6 +86,34 @@ def delete_job(request, pk):
 # Both endpoints are gated by the same KICK_TOKEN bearer as pipeline/kick/.
 
 
+def _apply_posted_meta(job, data):
+    """Set the display fields the Mac daemon posts (shared by meta/deliver)."""
+    from .tasks import _apply_stream_details
+    if data.get('title'):
+        job.title = str(data['title'])[:500]
+    if data.get('uploader'):
+        job.uploader = str(data['uploader'])[:500]
+    if data.get('video_id'):
+        job.video_id = str(data['video_id'])[:32]
+    _apply_stream_details(job, data.get('abr'), data.get('duration'), data.get('ext'))
+
+
+@api_view(['POST'])
+@require_kick_token
+def meta_local(request, pk):
+    """Mac daemon posts display metadata early — as soon as it claims a job,
+    before the (multi-second) download — so the row shows title/artist/bitrate
+    while it's "Downloading on Mac" instead of a bare URL. Status untouched.
+    """
+    try:
+        job = FetchJob.objects.get(pk=pk)
+    except FetchJob.DoesNotExist:
+        return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    _apply_posted_meta(job, request.data)
+    job.save(update_fields=['title', 'uploader', 'video_id', 'abr', 'duration', 'ext'])
+    return Response(FetchJobSerializer(job).data)
+
+
 @api_view(['GET'])
 @require_kick_token
 def pending_local(request):
@@ -157,17 +185,7 @@ def deliver_local(request, pk):
 
     # The VPS meta pre-pass was bot-checked, so the Mac (which actually
     # downloaded) sends the display metadata alongside the file.
-    from .tasks import _apply_stream_details
-    if request.data.get('title'):
-        job.title = str(request.data['title'])[:500]
-    if request.data.get('uploader'):
-        job.uploader = str(request.data['uploader'])[:500]
-    if request.data.get('video_id'):
-        job.video_id = str(request.data['video_id'])[:32]
-    _apply_stream_details(
-        job, request.data.get('abr'), request.data.get('duration'),
-        request.data.get('ext'),
-    )
+    _apply_posted_meta(job, request.data)
     job.downloaded_path = dest_path
     job.status = 'downloaded'
     job.save(update_fields=[
