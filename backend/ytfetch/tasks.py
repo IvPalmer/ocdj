@@ -7,7 +7,9 @@ duplicate enqueue from spawning two concurrent yt-dlp runs for the same job.
 """
 import logging
 import os
+import shutil
 import subprocess
+import tempfile
 
 from huey.contrib.djhuey import db_task, lock_task
 
@@ -24,17 +26,30 @@ FETCH_TIMEOUT = 900
 META_TIMEOUT = 120
 
 
-def _yt_dlp_auth_args():
-    """Return yt-dlp auth flags from config."""
+def _prepare_auth():
+    """Return (auth_args, temp_cookie_path_or_None).
+
+    yt-dlp rewrites the cookie jar back to the --cookies path when YouTube
+    rotates a session cookie mid-request. The prod cookies secret is
+    bind-mounted read-only, so pointing --cookies straight at it makes yt-dlp
+    crash on the save (PermissionError) even after a successful download. We
+    hand yt-dlp a throwaway writable copy instead and delete it afterward;
+    the caller must clean up the returned path. Falls back to
+    --cookies-from-browser (no file to copy) or no auth at all — in which case
+    yt-dlp runs anonymously, which still succeeds most of the time.
+    """
     cookies = str(get_config('YOUTUBE_COOKIES') or '').strip()
-    if cookies:
-        return ['--cookies', cookies]
+    if cookies and os.path.exists(cookies):
+        fd, tmp = tempfile.mkstemp(prefix='ytdlp-cookies-', suffix='.txt')
+        os.close(fd)
+        shutil.copyfile(cookies, tmp)
+        return ['--cookies', tmp], tmp
 
     browser = str(get_config('YOUTUBE_COOKIES_FROM_BROWSER') or '').strip()
     if browser:
-        return ['--cookies-from-browser', browser]
+        return ['--cookies-from-browser', browser], None
 
-    return []
+    return [], None
 
 
 def _yt_dlp_network_args():
@@ -103,10 +118,22 @@ def run_fetch_job(job_id):
     )
     os.makedirs(download_dir, exist_ok=True)
 
+    auth_args, cookies_tmp = _prepare_auth()
+    network_args = _yt_dlp_network_args()
+    try:
+        _run_fetch(job, download_dir, auth_args, network_args)
+    finally:
+        if cookies_tmp and os.path.exists(cookies_tmp):
+            try:
+                os.remove(cookies_tmp)
+            except OSError:
+                pass
+
+
+def _run_fetch(job, download_dir, auth_args, network_args):
+    job_id = job.id
     # Metadata pre-pass (best effort). Populates title/uploader/id so the job
     # row reads nicely while the download runs. If it fails we still download.
-    auth_args = _yt_dlp_auth_args()
-    network_args = _yt_dlp_network_args()
     try:
         meta = subprocess.run(
             [
