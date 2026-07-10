@@ -24,6 +24,19 @@ FETCH_TIMEOUT = 900
 META_TIMEOUT = 120
 
 
+def _yt_dlp_auth_args():
+    """Return yt-dlp auth flags from config."""
+    cookies = str(get_config('YOUTUBE_COOKIES') or '').strip()
+    if cookies:
+        return ['--cookies', cookies]
+
+    browser = str(get_config('YOUTUBE_COOKIES_FROM_BROWSER') or '').strip()
+    if browser:
+        return ['--cookies-from-browser', browser]
+
+    return []
+
+
 @db_task(retries=0)
 def task_fetch(job_id: int):
     with lock_task(f'ytfetch-job-{job_id}'):
@@ -39,13 +52,22 @@ def _is_bot_check(text):
     )
 
 
-def _fail(job, stderr, bot_check=False):
+def _fail(job, stderr, bot_check=False, auth_configured=False):
     msg = (stderr or '').strip()[-500:]
     if bot_check:
-        msg = (
-            "YouTube bot-check triggered (\"Sign in to confirm you're not a "
-            "bot\"). The server likely needs fresh YouTube cookies. "
-        ) + msg
+        if auth_configured:
+            hint = (
+                "YouTube blocked the production server with a bot-check even "
+                "though cookies are configured. This video may require a "
+                "different session or a non-server network; retrying unchanged "
+                "will likely fail. "
+            )
+        else:
+            hint = (
+                "YouTube bot-check triggered (\"Sign in to confirm you're not a "
+                "bot\"). The production worker needs YouTube cookies. "
+            )
+        msg = hint + msg
     job.status = 'failed'
     job.error_message = msg
     job.save(update_fields=['status', 'error_message'])
@@ -75,10 +97,13 @@ def run_fetch_job(job_id):
 
     # Metadata pre-pass (best effort). Populates title/uploader/id so the job
     # row reads nicely while the download runs. If it fails we still download.
+    auth_args = _yt_dlp_auth_args()
     try:
         meta = subprocess.run(
             [
-                'yt-dlp', '--js-runtimes', 'node', '--no-playlist',
+                'yt-dlp', '--js-runtimes', 'node',
+                '--remote-components', 'ejs:github',
+                *auth_args, '--no-playlist',
                 '--skip-download', '--print', '%(id)s\t%(uploader)s\t%(title)s',
                 '--', job.url,
             ],
@@ -109,7 +134,9 @@ def run_fetch_job(job_id):
     # gave us. `--audio-quality 0` is a no-op for wav but guards if the target
     # format is ever changed to a lossy one.
     cmd = [
-        'yt-dlp', '--js-runtimes', 'node', '--no-playlist',
+        'yt-dlp', '--js-runtimes', 'node',
+        '--remote-components', 'ejs:github',
+        *auth_args, '--no-playlist',
         '-f', 'bestaudio/best',
         '--extract-audio', '--audio-format', 'wav', '--audio-quality', '0',
         '--output', output_tmpl,
@@ -126,7 +153,12 @@ def run_fetch_job(job_id):
 
     if proc.returncode != 0:
         stderr = proc.stderr or ''
-        _fail(job, stderr, bot_check=_is_bot_check(stderr))
+        _fail(
+            job,
+            stderr,
+            bot_check=_is_bot_check(stderr),
+            auth_configured=bool(auth_args),
+        )
         return
 
     # `--print after_move:filepath` emits the final path on stdout; take the
@@ -135,7 +167,12 @@ def run_fetch_job(job_id):
     filepath = lines[-1].strip() if lines else ''
     if not filepath or not os.path.exists(filepath):
         stderr = proc.stderr or 'yt-dlp produced no output file'
-        _fail(job, stderr, bot_check=_is_bot_check(stderr))
+        _fail(
+            job,
+            stderr,
+            bot_check=_is_bot_check(stderr),
+            auth_configured=bool(auth_args),
+        )
         return
 
     job.downloaded_path = filepath
