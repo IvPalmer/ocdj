@@ -25,8 +25,8 @@ function failureSummary(message) {
   }
   if (lowered.includes('bot-check')) {
     return {
-      title: 'YouTube authentication required',
-      detail: 'The production worker needs a current YouTube session cookie before this job can be retried.',
+      title: 'Production server blocked',
+      detail: 'YouTube is rejecting the VPS network. This needs an accepted server-side egress route; retrying unchanged will fail.',
     }
   }
   return {
@@ -107,11 +107,14 @@ function YouTubePanel() {
         <div className="yt-submit-error" role="alert">{submitError}</div>
       )}
 
-      {jobs.some(job => job.status === 'failed' && (
-        job.error_message || '').toLowerCase().includes('blocked the production server')) && (
+      {jobs.some(job => {
+        if (job.status !== 'failed') return false
+        const error = (job.error_message || '').toLowerCase()
+        return error.includes('blocked the production server') || error.includes('bot-check')
+      }) && (
         <div className="yt-auth-banner" role="status">
           <strong>Production downloads are currently blocked by YouTube.</strong>
-          <span>Jobs that work in Chrome can still be completed from the local session. Retrying here will remain blocked until the server network is accepted.</span>
+          <span>The downloader remains VPS-only. It needs an accepted server-side egress route before these jobs can run.</span>
         </div>
       )}
 
