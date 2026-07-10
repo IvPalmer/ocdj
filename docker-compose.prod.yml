@@ -145,7 +145,7 @@ services:
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
-      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:ro
+      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:rw
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     healthcheck:
@@ -214,7 +214,7 @@ services:
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
-      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:ro
+      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:rw
       - huey_volume:/app/huey
     logging:
       driver: json-file
