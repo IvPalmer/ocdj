@@ -27,7 +27,8 @@ class FetchJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = FetchJob
         fields = [
-            'id', 'url', 'video_id', 'title', 'uploader', 'status',
+            'id', 'url', 'video_id', 'title', 'uploader',
+            'abr', 'duration', 'ext', 'status',
             'error_message', 'downloaded_path', 'pipeline_item',
             'created', 'updated',
         ]

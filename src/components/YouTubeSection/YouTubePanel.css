@@ -130,10 +130,25 @@
   max-width: 100%;
 }
 
+.yt-uploader-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .yt-pipeline-link {
   font-size: 11px;
   color: var(--accent-violet);
   font-weight: 600;
+}
+
+.yt-td-source {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.yt-source {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
 }
 
 .yt-error {
@@ -272,12 +287,12 @@
     grid-column: 1 / -1;
   }
 
-  .yt-td-uploader,
+  .yt-td-source,
   .yt-td-status {
     font-size: 12px;
   }
 
-  .yt-td-uploader::before,
+  .yt-td-source::before,
   .yt-td-status::before {
     content: attr(data-label) ': ';
     color: var(--text-muted);

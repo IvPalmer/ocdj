@@ -18,6 +18,11 @@ class FetchJob(models.Model):
     video_id = models.CharField(max_length=32, blank=True)
     title = models.CharField(max_length=500, blank=True)
     uploader = models.CharField(max_length=500, blank=True)
+    # Source-stream details for display (what YouTube served, before the
+    # lossless WAV/AIFF conversion). abr = average bitrate in kbps.
+    abr = models.FloatField(null=True, blank=True)
+    duration = models.IntegerField(null=True, blank=True)  # seconds
+    ext = models.CharField(max_length=16, blank=True)  # source container, e.g. opus/m4a
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='queued')
     error_message = models.TextField(blank=True)

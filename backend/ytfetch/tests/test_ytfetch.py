@@ -80,7 +80,7 @@ class TaskSuccessTests(TestCase):
             stage='downloaded',
         )
 
-        meta_out = 'abc123\tUploader\tTitle'
+        meta_out = 'abc123\tUploader\tTitle\t160.5\t355\topus'
         with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
              patch.object(ytfetch_tasks.subprocess, 'run',
                           side_effect=[_proc(0, meta_out), _proc(0, self.filepath)]), \
@@ -94,6 +94,9 @@ class TaskSuccessTests(TestCase):
         self.assertEqual(job.video_id, 'abc123')
         self.assertEqual(job.uploader, 'Uploader')
         self.assertEqual(job.title, 'Title')
+        self.assertEqual(job.abr, 160.5)
+        self.assertEqual(job.duration, 355)
+        self.assertEqual(job.ext, 'opus')
         self.assertEqual(job.pipeline_item_id, item.id)
         mock_scan.assert_called_once()
         mock_proc.assert_called_once_with(item.id)
@@ -573,7 +576,9 @@ class DeliverLocalEndpointTests(TestCase):
             mock_scan.side_effect = fake_scan
             resp = self.client.post(
                 f'/api/ytfetch/{job.id}/deliver-local/',
-                {'file': upload}, format='multipart',
+                {'file': upload, 'title': 'Real Title', 'uploader': 'Real Artist',
+                 'abr': '160.5', 'duration': '355', 'ext': 'opus'},
+                format='multipart',
                 HTTP_AUTHORIZATION='Bearer secret',
             )
 
@@ -582,6 +587,12 @@ class DeliverLocalEndpointTests(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.status, 'downloaded')
         self.assertEqual(job.downloaded_path, dest)
+        # The Mac sends the display metadata the bot-checked VPS couldn't get.
+        self.assertEqual(job.title, 'Real Title')
+        self.assertEqual(job.uploader, 'Real Artist')
+        self.assertEqual(job.abr, 160.5)
+        self.assertEqual(job.duration, 355)
+        self.assertEqual(job.ext, 'opus')
         item = PipelineItem.objects.get()
         self.assertEqual(job.pipeline_item_id, item.id)
         mock_scan.assert_called_once()
@@ -609,3 +620,28 @@ class DeliverLocalEndpointTests(TestCase):
                 HTTP_AUTHORIZATION='Bearer secret',
             )
         self.assertEqual(resp.status_code, 400)
+
+
+class ApplyStreamDetailsTests(TestCase):
+    """_apply_stream_details coerces yt-dlp's NA/empty to clean nulls."""
+
+    def test_valid_values(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a')
+        ytfetch_tasks._apply_stream_details(job, '160.5', '355', 'opus')
+        self.assertEqual(job.abr, 160.5)
+        self.assertEqual(job.duration, 355)
+        self.assertEqual(job.ext, 'opus')
+
+    def test_na_and_empty_become_none(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a')
+        ytfetch_tasks._apply_stream_details(job, 'NA', '', 'NA')
+        self.assertIsNone(job.abr)
+        self.assertIsNone(job.duration)
+        self.assertEqual(job.ext, '')
+
+    def test_missing_args_default_none(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a')
+        ytfetch_tasks._apply_stream_details(job)
+        self.assertIsNone(job.abr)
+        self.assertIsNone(job.duration)
+        self.assertEqual(job.ext, '')
