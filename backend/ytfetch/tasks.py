@@ -37,6 +37,12 @@ def _yt_dlp_auth_args():
     return []
 
 
+def _yt_dlp_network_args():
+    """Return optional VPS egress arguments for YouTube requests."""
+    proxy = str(os.environ.get('YOUTUBE_PROXY') or '').strip()
+    return ['--proxy', proxy] if proxy else []
+
+
 @db_task(retries=0)
 def task_fetch(job_id: int):
     with lock_task(f'ytfetch-job-{job_id}'):
@@ -64,8 +70,10 @@ def _fail(job, stderr, bot_check=False, auth_configured=False):
             )
         else:
             hint = (
-                "YouTube bot-check triggered (\"Sign in to confirm you're not a "
-                "bot\"). The production worker needs YouTube cookies. "
+                "YouTube bot-check blocked the production server's network "
+                "egress. "
+                "Configure an accepted server-side YouTube proxy or network "
+                "route; cookies are not a durable fix. "
             )
         msg = hint + msg
     job.status = 'failed'
@@ -98,11 +106,13 @@ def run_fetch_job(job_id):
     # Metadata pre-pass (best effort). Populates title/uploader/id so the job
     # row reads nicely while the download runs. If it fails we still download.
     auth_args = _yt_dlp_auth_args()
+    network_args = _yt_dlp_network_args()
     try:
         meta = subprocess.run(
             [
                 'yt-dlp', '--js-runtimes', 'node',
                 '--remote-components', 'ejs:github',
+                *network_args,
                 *auth_args, '--no-playlist',
                 '--skip-download', '--print', '%(id)s\t%(uploader)s\t%(title)s',
                 '--', job.url,
@@ -136,6 +146,7 @@ def run_fetch_job(job_id):
     cmd = [
         'yt-dlp', '--js-runtimes', 'node',
         '--remote-components', 'ejs:github',
+        *network_args,
         *auth_args, '--no-playlist',
         '-f', 'bestaudio/best',
         '--extract-audio', '--audio-format', 'wav', '--audio-quality', '0',
