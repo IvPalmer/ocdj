@@ -190,11 +190,15 @@
   color: var(--text-secondary);
 }
 
+/* Keep as a table-cell (not flex) so it holds its column width and the row
+   border spans the full table. Buttons align right inline. */
 .yt-td-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  align-items: center;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.yt-td-actions button + button {
+  margin-left: 6px;
 }
 
 /* ── Status pill (mirrors the Soulseek/Organize pill language) ── */
