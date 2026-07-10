@@ -131,29 +131,45 @@ class TaskSuccessTests(TestCase):
         self.assertIn('[%(id)s]', output_tmpl)
         self.assertIn('%(artist,creator,uploader|YouTube)s', output_tmpl)
 
-    def test_cookie_file_auth_is_passed_to_metadata_and_download(self):
+    def test_cookie_file_auth_uses_writable_copy_and_cleans_up(self):
+        # yt-dlp rewrites the cookie jar on exit; the prod secret is mounted
+        # read-only, so the task must pass a writable COPY and delete it after.
         job = FetchJob.objects.create(url='https://youtu.be/abc123')
-        cookie_path = '/srv/ocdj/secrets/youtube_cookies.txt'
+        src = os.path.join(self.root, 'youtube_cookies.txt')
+        with open(src, 'w') as fh:
+            fh.write('# Netscape HTTP Cookie File\nSOURCE_COOKIE_CONTENT\n')
 
         def config(key, *a, **k):
             return {
                 'SOULSEEK_DOWNLOAD_ROOT': self.root,
-                'YOUTUBE_COOKIES': cookie_path,
+                'YOUTUBE_COOKIES': src,
                 'YOUTUBE_COOKIES_FROM_BROWSER': 'chrome',
             }.get(key, '')
 
+        seen = {}
+
+        def run_side_effect(argv, *a, **k):
+            self.assertIn('--cookies', argv)
+            path = argv[argv.index('--cookies') + 1]
+            self.assertNotEqual(path, src)  # a copy, never the read-only source
+            self.assertNotIn('--cookies-from-browser', argv)
+            with open(path) as fh:  # the copy exists and matches the source
+                self.assertEqual(fh.read(), open(src).read())
+            seen['path'] = path
+            # First call = metadata pre-pass (returns no tab-separated meta so
+            # it's skipped); the download call returns the final filepath.
+            seen['calls'] = seen.get('calls', 0) + 1
+            return _proc(0, '') if seen['calls'] == 1 else _proc(0, self.filepath)
+
         with patch.object(ytfetch_tasks, 'get_config', side_effect=config), \
              patch.object(ytfetch_tasks.subprocess, 'run',
-                          side_effect=[_proc(1, ''), _proc(0, self.filepath)]) as mock_run, \
+                          side_effect=run_side_effect), \
              patch('organize.services.pipeline.scan_completed_downloads'), \
              patch('organize.services.pipeline.process_pipeline_item'):
             ytfetch_tasks.run_fetch_job(job.id)
 
-        for call in mock_run.call_args_list:
-            argv = call.args[0]
-            self.assertIn('--cookies', argv)
-            self.assertEqual(argv[argv.index('--cookies') + 1], cookie_path)
-            self.assertNotIn('--cookies-from-browser', argv)
+        self.assertIn('path', seen)
+        self.assertFalse(os.path.exists(seen['path']))  # temp copy cleaned up
 
     def test_browser_cookie_auth_is_used_when_cookie_file_is_empty(self):
         job = FetchJob.objects.create(url='https://youtu.be/abc123')
