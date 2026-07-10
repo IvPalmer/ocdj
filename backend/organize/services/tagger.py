@@ -237,9 +237,10 @@ def _clean_metadata(metadata: dict) -> dict:
     """Normalize artist/title in place before writing to tags.
 
     Filename and tag display should match: both strip catalog brackets,
-    URL stamps, track prefixes, 'Original Mix' baseline, and artist
-    repetition in title. Applied here so any code path that writes tags
-    produces the same clean result.
+    URL stamps, release-page annotations, track prefixes, and artist
+    repetition in title. Musical version labels such as Remix, Edit, Dub,
+    and Original Mix are intentionally retained. Applied here so any code
+    path that writes tags produces the same clean result.
     """
     from .renamer import clean_artist, clean_title, clean_album, _strip_artist_prefix
     out = dict(metadata)
