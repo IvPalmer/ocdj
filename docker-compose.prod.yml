@@ -46,9 +46,16 @@ services:
       SLSKD_SLSK_LISTEN_PORT: 50300
       SLSKD_SLSK_USERNAME: ${SOULSEEK_USERNAME}
       SLSKD_SLSK_PASSWORD: ${SOULSEEK_PASSWORD}
+      # Bot shares a copy of the operator's collection. An empty-share client
+      # gets auto-banned by many uploaders, which starves OCDJ downloads —
+      # and the operator's own account must NOT be reused here (one login per
+      # account; two clients kick each other and the 0-share bot session made
+      # the operator look like a leech network-wide).
+      SLSKD_SHARED_DIR: /share
     volumes:
       - slskd_app:/app
       - /srv/ocdj/pipeline/01_downloaded:/app/downloads
+      - /srv/ocdj/slskd-share:/share:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5030 || exit 1"]
       interval: 30s
