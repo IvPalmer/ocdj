@@ -9,6 +9,7 @@ class FetchJob(models.Model):
     STATUS_CHOICES = [
         ('queued', 'Queued'),
         ('fetching', 'Fetching'),
+        ('needs_local', 'Needs local download'),
         ('downloaded', 'Downloaded'),
         ('failed', 'Failed'),
     ]

@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -403,3 +404,201 @@ class YtdlpPotAndFallbackTestCase(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.status, 'failed')
         self.assertEqual(mock_run.call_count, 2)  # meta + primary only, no fallback
+
+
+class LocalFallbackRoutingTests(TestCase):
+    """Bot-check → 'needs_local' parking when YTFETCH_LOCAL_FALLBACK is set."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def _config(self, key, *a, **k):
+        return {'SOULSEEK_DOWNLOAD_ROOT': self.root}.get(key, '')
+
+    def _env(self, **extra):
+        # Start from a clean slate so an ambient YTFETCH_LOCAL_FALLBACK /
+        # YOUTUBE_MAC_PROXY in the runner's environment can't skew the test.
+        base = {
+            k: v for k, v in os.environ.items()
+            if k not in ('YTFETCH_LOCAL_FALLBACK', 'YOUTUBE_MAC_PROXY')
+        }
+        base.update(extra)
+        return base
+
+    def test_bot_check_routes_to_needs_local_when_flag_set(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        botcheck = _proc(1, '', 'ERROR: Sign in to confirm you’re not a bot.')
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, self._env(YTFETCH_LOCAL_FALLBACK='1'), clear=True), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), botcheck]):
+            ytfetch_tasks.run_fetch_job(job.id)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'needs_local')
+        self.assertIn('Mac local download', job.error_message)
+
+    def test_bot_check_still_fails_without_flag(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        botcheck = _proc(1, '', 'ERROR: Sign in to confirm you’re not a bot.')
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, self._env(), clear=True), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), botcheck]):
+            ytfetch_tasks.run_fetch_job(job.id)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'failed')
+
+    def test_non_bot_check_failure_still_fails_with_flag(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        other = _proc(1, '', 'ERROR: Video unavailable')
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=self._config), \
+             patch.dict(os.environ, self._env(YTFETCH_LOCAL_FALLBACK='1'), clear=True), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), other]):
+            ytfetch_tasks.run_fetch_job(job.id)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'failed')
+
+
+class IngestAndProcessTests(TestCase):
+    """The extracted shared ingest helper links a scan-created item + processes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+        self.yt_dir = os.path.join(self.root, '01_downloaded', 'YouTube')
+        os.makedirs(self.yt_dir)
+        self.filepath = os.path.join(self.yt_dir, 'U - T [abc123].wav')
+        open(self.filepath, 'w').close()
+
+    def test_links_scan_created_item_and_processes(self):
+        job = FetchJob.objects.create(
+            url='https://youtu.be/abc123', status='downloaded',
+            downloaded_path=self.filepath,
+        )
+
+        def fake_scan():
+            PipelineItem.objects.create(
+                original_filename=os.path.basename(self.filepath),
+                current_path=self.filepath,
+                stage='downloaded',
+            )
+            return 1
+
+        with patch('organize.services.pipeline.scan_completed_downloads',
+                   side_effect=fake_scan), \
+             patch('organize.services.pipeline.process_pipeline_item') as mock_proc:
+            ytfetch_tasks.ingest_and_process(job, self.filepath)
+
+        job.refresh_from_db()
+        item = PipelineItem.objects.get()
+        self.assertEqual(job.pipeline_item_id, item.id)
+        mock_proc.assert_called_once_with(item.id)
+
+
+class PendingLocalEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_requires_bearer(self):
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False):
+            resp = self.client.get('/api/ytfetch/pending-local/')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_lists_needs_local_oldest_first(self):
+        a = FetchJob.objects.create(url='https://youtu.be/a', status='needs_local',
+                                    title='A')
+        b = FetchJob.objects.create(url='https://youtu.be/b', status='needs_local',
+                                    title='B')
+        FetchJob.objects.create(url='https://youtu.be/c', status='failed')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False):
+            resp = self.client.get(
+                '/api/ytfetch/pending-local/', HTTP_AUTHORIZATION='Bearer secret'
+            )
+        self.assertEqual(resp.status_code, 200)
+        ids = [j['id'] for j in resp.data['jobs']]
+        self.assertEqual(ids, [a.id, b.id])  # oldest first, failed excluded
+        self.assertEqual(resp.data['jobs'][0]['title'], 'A')
+
+
+class DeliverLocalEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def _config(self, key, *a, **k):
+        return {'SOULSEEK_DOWNLOAD_ROOT': self.root}.get(key, '')
+
+    def test_requires_bearer(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a', status='needs_local')
+        upload = SimpleUploadedFile('x.wav', b'audio', content_type='audio/wav')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False):
+            resp = self.client.post(
+                f'/api/ytfetch/{job.id}/deliver-local/',
+                {'file': upload}, format='multipart',
+            )
+        self.assertEqual(resp.status_code, 401)
+
+    def test_delivers_writes_file_and_ingests(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a', status='needs_local',
+                                      video_id='abc123')
+        upload = SimpleUploadedFile('Track [abc123].wav', b'audio',
+                                    content_type='audio/wav')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False), \
+             patch('ytfetch.views.get_config', side_effect=self._config), \
+             patch('organize.services.pipeline.scan_completed_downloads') as mock_scan, \
+             patch('organize.services.pipeline.process_pipeline_item') as mock_proc:
+            # Pre-create the item the scan would have produced so the ingest links it.
+            dest = os.path.join(self.root, '01_downloaded', 'YouTube',
+                                'Track [abc123].wav')
+
+            def fake_scan():
+                PipelineItem.objects.create(
+                    original_filename='Track [abc123].wav',
+                    current_path=dest, stage='downloaded',
+                )
+                return 1
+            mock_scan.side_effect = fake_scan
+            resp = self.client.post(
+                f'/api/ytfetch/{job.id}/deliver-local/',
+                {'file': upload}, format='multipart',
+                HTTP_AUTHORIZATION='Bearer secret',
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(os.path.exists(dest))
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'downloaded')
+        self.assertEqual(job.downloaded_path, dest)
+        item = PipelineItem.objects.get()
+        self.assertEqual(job.pipeline_item_id, item.id)
+        mock_scan.assert_called_once()
+        mock_proc.assert_called_once_with(item.id)
+
+    def test_wrong_status_returns_409(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a', status='downloaded')
+        upload = SimpleUploadedFile('x.wav', b'audio', content_type='audio/wav')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False), \
+             patch('ytfetch.views.get_config', side_effect=self._config):
+            resp = self.client.post(
+                f'/api/ytfetch/{job.id}/deliver-local/',
+                {'file': upload}, format='multipart',
+                HTTP_AUTHORIZATION='Bearer secret',
+            )
+        self.assertEqual(resp.status_code, 409)
+
+    def test_missing_file_returns_400(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a', status='needs_local')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False), \
+             patch('ytfetch.views.get_config', side_effect=self._config):
+            resp = self.client.post(
+                f'/api/ytfetch/{job.id}/deliver-local/',
+                {}, format='multipart',
+                HTTP_AUTHORIZATION='Bearer secret',
+            )
+        self.assertEqual(resp.status_code, 400)

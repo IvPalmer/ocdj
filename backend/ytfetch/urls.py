@@ -6,4 +6,6 @@ urlpatterns = [
     path('jobs/', views.jobs),
     path('jobs/<int:pk>/retry/', views.retry_job),
     path('jobs/<int:pk>/', views.delete_job),
+    path('pending-local/', views.pending_local),
+    path('<int:pk>/deliver-local/', views.deliver_local),
 ]

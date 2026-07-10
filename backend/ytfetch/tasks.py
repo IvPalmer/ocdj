@@ -133,6 +133,80 @@ def _fail(job, stderr, bot_check=False, auth_configured=False):
     job.save(update_fields=['status', 'error_message'])
 
 
+def _route_local_or_fail(job, stderr, auth_configured):
+    """Decide a bot-check's fate: park for the Mac daemon, or fail.
+
+    When YTFETCH_LOCAL_FALLBACK is set and the failure is a YouTube bot-check,
+    the VPS can't finish this one — its datacenter IP is flagged even with the
+    PO token and (if configured) the Mac proxy tunnel. Instead of failing, we
+    move the job to 'needs_local' so the home Mac's daemon can pick it up over
+    GET /pending-local/, download on its residential IP, and POST the bytes
+    back to /deliver-local/. Any non-bot-check failure still fails normally.
+    """
+    bot_check = _is_bot_check(stderr)
+    if bot_check and os.environ.get('YTFETCH_LOCAL_FALLBACK'):
+        job.status = 'needs_local'
+        job.error_message = (
+            'Bot-checked on the VPS; routed to Mac local download.'
+        )
+        job.save(update_fields=['status', 'error_message'])
+        return
+    _fail(job, stderr, bot_check=bot_check, auth_configured=auth_configured)
+
+
+def ingest_and_process(job, filepath):
+    """Ingest a finished download into the organize pipeline and process it.
+
+    Shared by the VPS success path (run_fetch_job) and the Mac local-download
+    delivery (views.deliver_local): both end with a real audio file on disk at
+    `filepath` and a job already marked 'downloaded'. scan_completed_downloads()
+    sweeps 01_downloaded/ (incl. our YouTube/ subdir) and creates a PipelineItem
+    for the untracked file; we then link it and run it through.
+
+    A pipeline hiccup must not flip the fetch to failed — the bytes are safe and
+    the operator can re-scan / process manually from the Organize tab.
+    """
+    try:
+        from organize.services.pipeline import (
+            scan_completed_downloads, process_pipeline_item,
+        )
+        from organize.models import PipelineItem
+
+        scan_completed_downloads()
+
+        # Prefer the exact current_path match — unambiguous by construction.
+        # The basename fallback only fires if the scan normalized the path
+        # somehow; it must match a single stage='downloaded' item or we risk
+        # linking (and processing) somebody else's file, so more than one
+        # candidate is treated as ambiguous and left unlinked.
+        item = PipelineItem.objects.filter(current_path=filepath).first()
+        if item is None:
+            basename = os.path.basename(filepath)
+            candidates = list(
+                PipelineItem.objects.filter(
+                    stage='downloaded', original_filename=basename,
+                )[:2]
+            )
+            if len(candidates) == 1:
+                item = candidates[0]
+            elif len(candidates) > 1:
+                logger.warning(
+                    f'ytfetch job {job.id}: multiple downloaded items match '
+                    f'basename {basename!r}, leaving job unlinked'
+                )
+        if item is not None:
+            job.pipeline_item = item
+            job.save(update_fields=['pipeline_item'])
+            process_pipeline_item(item.id)
+        else:
+            logger.warning(
+                f'ytfetch job {job.id}: could not locate PipelineItem for '
+                f'{filepath} after scan'
+            )
+    except Exception as e:
+        logger.error(f'ytfetch job {job.id}: pipeline ingest failed: {e}')
+
+
 def run_fetch_job(job_id):
     from .models import FetchJob
 
@@ -234,12 +308,7 @@ def run_fetch_job(job_id):
 
     if proc.returncode != 0:
         stderr = proc.stderr or ''
-        _fail(
-            job,
-            stderr,
-            bot_check=_is_bot_check(stderr),
-            auth_configured=bool(auth_args),
-        )
+        _route_local_or_fail(job, stderr, auth_configured=bool(auth_args))
         return
 
     # `--print after_move:filepath` emits the final path on stdout; take the
@@ -248,60 +317,11 @@ def run_fetch_job(job_id):
     filepath = lines[-1].strip() if lines else ''
     if not filepath or not os.path.exists(filepath):
         stderr = proc.stderr or 'yt-dlp produced no output file'
-        _fail(
-            job,
-            stderr,
-            bot_check=_is_bot_check(stderr),
-            auth_configured=bool(auth_args),
-        )
+        _route_local_or_fail(job, stderr, auth_configured=bool(auth_args))
         return
 
     job.downloaded_path = filepath
     job.status = 'downloaded'
     job.save(update_fields=['downloaded_path', 'status'])
 
-    # Ingest into the organize pipeline and process. scan_completed_downloads()
-    # sweeps 01_downloaded/ (incl. our YouTube/ subdir) and creates a
-    # PipelineItem for the untracked file; we then link it and run it through.
-    try:
-        from organize.services.pipeline import (
-            scan_completed_downloads, process_pipeline_item,
-        )
-        from organize.models import PipelineItem
-
-        scan_completed_downloads()
-
-        # Prefer the exact current_path match — unambiguous by construction.
-        # The basename fallback only fires if the scan normalized the path
-        # somehow; it must match a single stage='downloaded' item or we risk
-        # linking (and processing) somebody else's file, so more than one
-        # candidate is treated as ambiguous and left unlinked.
-        item = PipelineItem.objects.filter(current_path=filepath).first()
-        if item is None:
-            basename = os.path.basename(filepath)
-            candidates = list(
-                PipelineItem.objects.filter(
-                    stage='downloaded', original_filename=basename,
-                )[:2]
-            )
-            if len(candidates) == 1:
-                item = candidates[0]
-            elif len(candidates) > 1:
-                logger.warning(
-                    f'ytfetch job {job_id}: multiple downloaded items match '
-                    f'basename {basename!r}, leaving job unlinked'
-                )
-        if item is not None:
-            job.pipeline_item = item
-            job.save(update_fields=['pipeline_item'])
-            process_pipeline_item(item.id)
-        else:
-            logger.warning(
-                f'ytfetch job {job_id}: could not locate PipelineItem for '
-                f'{filepath} after scan'
-            )
-    except Exception as e:
-        # The bytes are safely downloaded and the job is marked downloaded;
-        # a pipeline hiccup shouldn't flip the fetch to failed. The operator
-        # can re-scan / process manually from the Organize tab.
-        logger.error(f'ytfetch job {job_id}: pipeline ingest failed: {e}')
+    ingest_and_process(job, filepath)
