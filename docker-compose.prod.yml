@@ -118,6 +118,7 @@ services:
       DISCOGS_USERNAME: ${DISCOGS_USERNAME:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       YOUTUBE_PROXY: ${YOUTUBE_PROXY:-}
+      YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-}
       SC_CLIENT_ID: ${SC_CLIENT_ID:-}
       SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
       # Recognize (ACRCloud)
@@ -144,6 +145,7 @@ services:
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
+      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:ro
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     healthcheck:
@@ -199,6 +201,7 @@ services:
       DISCOGS_USERNAME: ${DISCOGS_USERNAME:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       YOUTUBE_PROXY: ${YOUTUBE_PROXY:-}
+      YOUTUBE_COOKIES: ${YOUTUBE_COOKIES:-}
       SC_CLIENT_ID: ${SC_CLIENT_ID:-}
       SC_CLIENT_SECRET: ${SC_CLIENT_SECRET:-}
       ACR_ACCESS_KEY: ${ACR_ACCESS_KEY:-}
@@ -211,6 +214,7 @@ services:
       - /srv/ocdj/publish:/srv/ocdj/publish
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
+      - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:ro
       - huey_volume:/app/huey
     logging:
       driver: json-file

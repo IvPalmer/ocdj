@@ -115,6 +115,7 @@ class TaskSuccessTests(TestCase):
         download_argv = mock_run.call_args_list[1].args[0]
         for token in (
             '--js-runtimes', 'node', '--no-playlist',
+            '--remote-components', 'ejs:github',
             '-f', 'bestaudio/best',
             '--extract-audio', '--audio-format', 'wav', '--audio-quality', '0',
             '--print', 'after_move:filepath', '--no-progress', '--',
@@ -129,6 +130,54 @@ class TaskSuccessTests(TestCase):
         output_tmpl = download_argv[download_argv.index('--output') + 1]
         self.assertIn('[%(id)s]', output_tmpl)
         self.assertIn('%(artist,creator,uploader|YouTube)s', output_tmpl)
+
+    def test_cookie_file_auth_is_passed_to_metadata_and_download(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+        cookie_path = '/srv/ocdj/secrets/youtube_cookies.txt'
+
+        def config(key, *a, **k):
+            return {
+                'SOULSEEK_DOWNLOAD_ROOT': self.root,
+                'YOUTUBE_COOKIES': cookie_path,
+                'YOUTUBE_COOKIES_FROM_BROWSER': 'chrome',
+            }.get(key, '')
+
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=config), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), _proc(0, self.filepath)]) as mock_run, \
+             patch('organize.services.pipeline.scan_completed_downloads'), \
+             patch('organize.services.pipeline.process_pipeline_item'):
+            ytfetch_tasks.run_fetch_job(job.id)
+
+        for call in mock_run.call_args_list:
+            argv = call.args[0]
+            self.assertIn('--cookies', argv)
+            self.assertEqual(argv[argv.index('--cookies') + 1], cookie_path)
+            self.assertNotIn('--cookies-from-browser', argv)
+
+    def test_browser_cookie_auth_is_used_when_cookie_file_is_empty(self):
+        job = FetchJob.objects.create(url='https://youtu.be/abc123')
+
+        def config(key, *a, **k):
+            return {
+                'SOULSEEK_DOWNLOAD_ROOT': self.root,
+                'YOUTUBE_COOKIES_FROM_BROWSER': 'chrome:Profile 1',
+            }.get(key, '')
+
+        with patch.object(ytfetch_tasks, 'get_config', side_effect=config), \
+             patch.object(ytfetch_tasks.subprocess, 'run',
+                          side_effect=[_proc(1, ''), _proc(0, self.filepath)]) as mock_run, \
+             patch('organize.services.pipeline.scan_completed_downloads'), \
+             patch('organize.services.pipeline.process_pipeline_item'):
+            ytfetch_tasks.run_fetch_job(job.id)
+
+        for call in mock_run.call_args_list:
+            argv = call.args[0]
+            self.assertIn('--cookies-from-browser', argv)
+            self.assertEqual(
+                argv[argv.index('--cookies-from-browser') + 1],
+                'chrome:Profile 1',
+            )
 
     def test_links_item_created_by_scan(self):
         """The normal live path: no PipelineItem exists until the scan runs."""

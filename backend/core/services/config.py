@@ -67,6 +67,10 @@ SCHEMA: list[ConfigSpec] = [
     ConfigSpec('YOUTUBE_API_KEY', 'youtube', 'str', '', is_secret=True),
     ConfigSpec('YOUTUBE_DEFAULT_PLAYLIST', 'youtube', 'url', ''),
     ConfigSpec('YOUTUBE_DEFAULT_PLAYLIST_NAME', 'youtube', 'str', ''),
+    ConfigSpec('YOUTUBE_COOKIES', 'youtube', 'path', '',
+               description='Path inside the backend/worker container to a Netscape-format cookies.txt for yt-dlp.'),
+    ConfigSpec('YOUTUBE_COOKIES_FROM_BROWSER', 'youtube', 'str', '',
+               description='Optional yt-dlp browser cookie source, e.g. chrome, safari, firefox, or chrome:Profile 1. Used only when cookie file path is empty.'),
 
     # ── soundcloud ───────────────────────────────────────────
     ConfigSpec('SC_CLIENT_ID', 'soundcloud', 'str', '', is_secret=True),
