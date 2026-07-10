@@ -72,10 +72,27 @@ def _prepare_auth():
     return []
 
 
-def _yt_dlp_network_args():
-    """Return optional VPS egress arguments for YouTube requests."""
-    proxy = str(os.environ.get('YOUTUBE_PROXY') or '').strip()
+def _yt_dlp_network_args(proxy_override=None):
+    """Return optional VPS egress arguments for YouTube requests.
+
+    proxy_override lets the caller force a specific proxy (the Mac residential
+    tunnel used as a fallback); otherwise the static YOUTUBE_PROXY env applies.
+    """
+    proxy = (proxy_override or os.environ.get('YOUTUBE_PROXY') or '').strip()
     return ['--proxy', proxy] if proxy else []
+
+
+def _yt_dlp_pot_args():
+    """Point yt-dlp at the bgutil PO-token sidecar when configured.
+
+    YouTube demands a proof-of-origin token from datacenter IPs; the plugin
+    (bgutil-ytdlp-pot-provider, baked into the image) fetches one from this
+    HTTP provider so requests aren't bot-checked. No-op if unset.
+    """
+    base = str(os.environ.get('YOUTUBE_POT_BASE_URL') or '').strip()
+    if not base:
+        return []
+    return ['--extractor-args', f'youtubepot-bgutilhttp:base_url={base}']
 
 
 @db_task(retries=0)
@@ -139,6 +156,7 @@ def run_fetch_job(job_id):
     os.makedirs(download_dir, exist_ok=True)
 
     auth_args = _prepare_auth()
+    pot_args = _yt_dlp_pot_args()
     network_args = _yt_dlp_network_args()
     # Metadata pre-pass (best effort). Populates title/uploader/id so the job
     # row reads nicely while the download runs. If it fails we still download.
@@ -147,7 +165,7 @@ def run_fetch_job(job_id):
             [
                 'yt-dlp', '--js-runtimes', 'node',
                 '--remote-components', 'ejs:github',
-                *network_args,
+                *network_args, *pot_args,
                 *auth_args, '--no-playlist',
                 '--skip-download', '--print', '%(id)s\t%(uploader)s\t%(title)s',
                 '--', job.url,
@@ -178,21 +196,38 @@ def run_fetch_job(job_id):
     # is also lossless, so the delivered aiff preserves everything YouTube
     # gave us. `--audio-quality 0` is a no-op for wav but guards if the target
     # format is ever changed to a lossy one.
-    cmd = [
-        'yt-dlp', '--js-runtimes', 'node',
-        '--remote-components', 'ejs:github',
-        *network_args,
-        *auth_args, '--no-playlist',
-        '-f', 'bestaudio/best',
-        '--extract-audio', '--audio-format', 'wav', '--audio-quality', '0',
-        '--output', output_tmpl,
-        '--print', 'after_move:filepath',
-        '--no-progress', '--', job.url,
-    ]
-    try:
-        proc = subprocess.run(
+    def _download(net_args):
+        cmd = [
+            'yt-dlp', '--js-runtimes', 'node',
+            '--remote-components', 'ejs:github',
+            *net_args, *pot_args,
+            *auth_args, '--no-playlist',
+            '-f', 'bestaudio/best',
+            '--extract-audio', '--audio-format', 'wav', '--audio-quality', '0',
+            '--output', output_tmpl,
+            '--print', 'after_move:filepath',
+            '--no-progress', '--', job.url,
+        ]
+        return subprocess.run(
             cmd, capture_output=True, text=True, timeout=FETCH_TIMEOUT
         )
+
+    # Primary attempt: VPS egress + PO token. Falls back to the Mac residential
+    # tunnel (YOUTUBE_MAC_PROXY) only if YouTube bot-checks the datacenter IP
+    # despite the PO token — the Mac's home IP isn't flagged. If the tunnel is
+    # down (Mac off), the fallback errors and we report the original bot-check.
+    try:
+        proc = _download(network_args)
+        if proc.returncode != 0 and _is_bot_check(proc.stderr or ''):
+            mac_proxy = str(os.environ.get('YOUTUBE_MAC_PROXY') or '').strip()
+            if mac_proxy:
+                logger.info(
+                    f'ytfetch job {job_id}: VPS bot-checked, retrying via Mac '
+                    f'residential tunnel'
+                )
+                fb = _download(_yt_dlp_network_args(proxy_override=mac_proxy))
+                if fb.returncode == 0:
+                    proc = fb
     except subprocess.TimeoutExpired:
         _fail(job, f'yt-dlp timed out after {FETCH_TIMEOUT}s')
         return

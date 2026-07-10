@@ -25,6 +25,10 @@ lxml==5.3.0
 
 # Imports (Wanted List)
 yt-dlp>=2024.12.0
+# Proof-of-origin token plugin — YouTube demands a PO token from datacenter
+# IPs; this fetches them from the bgutil-pot sidecar so yt-dlp isn't
+# bot-checked. Pairs with the bgutil-pot compose service.
+bgutil-ytdlp-pot-provider>=1.1.0
 spotipy>=2.24.0
 python3-discogs-client>=2.7
 
