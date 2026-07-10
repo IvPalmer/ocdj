@@ -219,6 +219,11 @@ def embed_artwork(filepath, image_bytes):
             if audio.tags is None:
                 audio.add_tags()
 
+            # Drop any existing cover first. add() is keyed by APIC desc, so a
+            # source cover stored under a different desc would survive as a
+            # second frame and players might show the stale one — mirror FLAC's
+            # clear_pictures() so exactly one cover remains.
+            audio.tags.delall('APIC')
             audio.tags.add(APIC(
                 encoding=3,
                 mime='image/jpeg',
