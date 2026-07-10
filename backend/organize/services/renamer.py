@@ -45,8 +45,9 @@ _UNDERSCORE_TITLE_RE = re.compile(r'_+')
 # Accidental extension leftover in the title string, e.g. "Track.flac".
 _TRAILING_EXT_RE = re.compile(r'\.(?:mp3|flac|aiff|aif|wav|m4a|ogg)$', re.IGNORECASE)
 
-# Non-remix version labels — user wants parentheticals ONLY when they denote
-# a remix/distinct version, not the baseline "Original Mix" marker.
+# Kept for compatibility with callers that import this pattern. Version labels
+# are intentionally preserved: Original Mix, Remix, Edit, Dub, and similar
+# markers must remain visible so variants cannot be confused with each other.
 _NON_REMIX_LABEL_RE = re.compile(
     r'\s*\((?:original(?:\s+mix)?|main\s+mix|album\s+version)\)\s*',
     re.IGNORECASE,
@@ -88,7 +89,6 @@ def _clean_segment(s: str) -> str:
     m = _LEADING_NUM_RE.match(s)
     if m and int(m.group(1)) <= 30:
         s = s[m.end():]
-    s = _NON_REMIX_LABEL_RE.sub(' ', s)
     return re.sub(r'\s+', ' ', s).strip(' -–—.')
 
 

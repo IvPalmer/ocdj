@@ -234,6 +234,8 @@ class CleanReleaseMetadataTestCase(TestCase):
         from organize.services.renamer import clean_title
 
         self.assertEqual(clean_title('Congo River (Dub Mix)'), 'Congo River (Dub Mix)')
+        self.assertEqual(clean_title('Congo River (Original Mix)'), 'Congo River (Original Mix)')
+        self.assertEqual(clean_title('Congo River (Radio Edit)'), 'Congo River (Radio Edit)')
 
 
 class PipelineDeleteTestCase(TestCase):
