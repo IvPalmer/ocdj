@@ -36,6 +36,8 @@ const FIELD_LABELS = {
   YOUTUBE_API_KEY: 'API Key',
   YOUTUBE_DEFAULT_PLAYLIST: 'Default Playlist',
   YOUTUBE_DEFAULT_PLAYLIST_NAME: 'Default Playlist Name',
+  YOUTUBE_COOKIES: 'yt-dlp Cookie File',
+  YOUTUBE_COOKIES_FROM_BROWSER: 'yt-dlp Browser Cookies',
   SC_CLIENT_ID: 'Client ID',
   SC_CLIENT_SECRET: 'Client Secret',
   SC_DEFAULT_PLAYLIST: 'Default Playlist',
