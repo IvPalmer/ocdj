@@ -645,3 +645,33 @@ class ApplyStreamDetailsTests(TestCase):
         self.assertIsNone(job.abr)
         self.assertIsNone(job.duration)
         self.assertEqual(job.ext, '')
+
+
+class MetaLocalEndpointTests(TestCase):
+    """POST /meta/ populates display fields early without changing status."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_meta_updates_fields_and_keeps_status(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a', status='needs_local')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False):
+            resp = self.client.post(
+                f'/api/ytfetch/{job.id}/meta/',
+                {'video_id': 'a', 'uploader': 'Artist', 'title': 'Song',
+                 'abr': '160.5', 'duration': '200', 'ext': 'opus'},
+                format='multipart', HTTP_AUTHORIZATION='Bearer secret',
+            )
+        self.assertEqual(resp.status_code, 200)
+        job.refresh_from_db()
+        self.assertEqual(job.title, 'Song')
+        self.assertEqual(job.uploader, 'Artist')
+        self.assertEqual(job.abr, 160.5)
+        self.assertEqual(job.status, 'needs_local')  # unchanged
+
+    def test_meta_requires_bearer(self):
+        job = FetchJob.objects.create(url='https://youtu.be/a', status='needs_local')
+        with patch.dict(os.environ, {'KICK_TOKEN': 'secret'}, clear=False):
+            resp = self.client.post(f'/api/ytfetch/{job.id}/meta/', {'title': 'x'},
+                                    format='multipart')
+        self.assertEqual(resp.status_code, 401)
