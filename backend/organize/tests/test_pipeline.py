@@ -220,6 +220,22 @@ class CleanGenreTestCase(TestCase):
         self.assertEqual(len(cleaned), _GENRE_MAX_LEN)
 
 
+class CleanReleaseMetadataTestCase(TestCase):
+    def test_release_annotation_and_embedded_track_number_are_removed(self):
+        from organize.services.renamer import clean_album, clean_title
+
+        self.assertEqual(
+            clean_title('Natural Habitat (vinyl available) - 01 Congo River'),
+            'Congo River',
+        )
+        self.assertEqual(clean_album('Natural Habitat (vinyl available)'), 'Natural Habitat')
+
+    def test_musical_parenthetical_is_preserved(self):
+        from organize.services.renamer import clean_title
+
+        self.assertEqual(clean_title('Congo River (Dub Mix)'), 'Congo River (Dub Mix)')
+
+
 class PipelineDeleteTestCase(TestCase):
     """DELETE removes the row and any files still inside OCDJ-owned roots."""
 

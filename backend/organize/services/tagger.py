@@ -241,7 +241,7 @@ def _clean_metadata(metadata: dict) -> dict:
     repetition in title. Applied here so any code path that writes tags
     produces the same clean result.
     """
-    from .renamer import clean_artist, clean_title, _strip_artist_prefix
+    from .renamer import clean_artist, clean_title, clean_album, _strip_artist_prefix
     out = dict(metadata)
     a = clean_artist(out.get('artist') or '')
     t = clean_title(out.get('title') or '')
@@ -251,6 +251,8 @@ def _clean_metadata(metadata: dict) -> dict:
         out['artist'] = a
     if t:
         out['title'] = t
+    if out.get('album'):
+        out['album'] = clean_album(out['album'])
     return out
 
 
@@ -434,6 +436,12 @@ def tag_file(pipeline_item):
         metadata['catalog_number'] = _clean_catalog_number(metadata['catalog_number'])
     if metadata.get('genre'):
         metadata['genre'] = _clean_genre(metadata['genre'])
+
+    # Normalize the DB fields as well as embedded tags. Previously
+    # write_tags cleaned a copy but PipelineItem kept the raw title, so the
+    # renamer received strings like "Album - 01 Track" and preserved release
+    # page annotations in the filename.
+    metadata = _clean_metadata(metadata)
 
     # Write tags to file
     write_tags(filepath, metadata)
