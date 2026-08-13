@@ -1,6 +1,6 @@
 # Frontend production build (Mac, source clone)
 # Run: npm run build   (vite build)
-# Branch: task/organize-panel-truthful-state
+# Branch: task/organize-panel-truthful-state @ 023cb87
 # Captured 2026-08-13
 
 
@@ -14,5 +14,5 @@ rendering chunks...
 computing gzip size...
 dist/index.html                   0.45 kB │ gzip:   0.30 kB
 dist/assets/index-BwxP-4G0.css   97.64 kB │ gzip:  15.78 kB
-dist/assets/index-DJDHPD6K.js   348.70 kB │ gzip: 101.60 kB
-✓ built in 819ms
+dist/assets/index-BaN-Z5fa.js   348.69 kB │ gzip: 101.61 kB
+✓ built in 656ms
