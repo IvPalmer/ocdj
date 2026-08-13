@@ -653,6 +653,7 @@ function invalidatePipeline(qc) {
 // flight it goes quiet again.
 const KICK_POLL_WINDOW_MS = 30000
 const KICK_POLL_INTERVAL_MS = 3000
+const IDLE_POLL_INTERVAL_MS = 30000
 
 let pipelineKickedUntil = 0
 
@@ -673,7 +674,7 @@ export function usePipelineStats() {
       const data = query.state.data
       if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return KICK_POLL_INTERVAL_MS
       if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
-      return 30000
+      return IDLE_POLL_INTERVAL_MS
     },
   })
 }
@@ -695,7 +696,11 @@ export function usePipelineItems(params = {}) {
       const items = data?.results || []
       if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return KICK_POLL_INTERVAL_MS
       if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
-      return false
+      // Tracks also arrive without any in-app action: the Mac incoming
+      // LaunchAgent rsyncs dropped files and kicks the pipeline server-side,
+      // which sets no client flag. Idling at `false` left an open tab blind to
+      // them until a manual reload.
+      return IDLE_POLL_INTERVAL_MS
     },
   })
 }
