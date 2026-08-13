@@ -139,8 +139,17 @@ def sanitize_filename(name: str) -> str:
     return name
 
 
-def rename_file(pipeline_item):
-    """Rename a file based on the configured template and metadata."""
+def rename_file(pipeline_item, commit=True):
+    """Rename a file based on the configured template and metadata.
+
+    `work_path` is the copy the drain daemon fetches. When it points at the
+    same file we are renaming, it has to move with it — leaving it behind is
+    how a published track ended up claimed with "work_path missing at claim".
+
+    Pass commit=False to mutate the instance without saving; the caller then
+    owns the write (used by the published-artifact refresh, which needs one
+    save inside its transaction). Returns the list of fields it touched.
+    """
     from core.services.config import get_config
 
     template = get_config('ORGANIZE_RENAME_TEMPLATE') or DEFAULT_TEMPLATE
@@ -182,9 +191,16 @@ def rename_file(pipeline_item):
             new_path = os.path.join(current_dir, f'{new_name}_{counter}{ext}')
             counter += 1
 
-    if pipeline_item.current_path != new_path:
-        os.rename(pipeline_item.current_path, new_path)
+    old_path = pipeline_item.current_path
+    if old_path != new_path:
+        os.rename(old_path, new_path)
 
     pipeline_item.current_path = new_path
     pipeline_item.final_filename = os.path.basename(new_path)
-    pipeline_item.save(update_fields=['current_path', 'final_filename'])
+    fields = ['current_path', 'final_filename']
+    if pipeline_item.work_path and pipeline_item.work_path == old_path:
+        pipeline_item.work_path = new_path
+        fields.append('work_path')
+    if commit:
+        pipeline_item.save(update_fields=fields)
+    return fields

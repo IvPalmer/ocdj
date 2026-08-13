@@ -87,6 +87,12 @@ class PipelineItem(models.Model):
     archived_at = models.DateTimeField(null=True, blank=True)
     drain_attempts = models.IntegerField(default=0)
     draining_until = models.DateTimeField(null=True, blank=True)
+    # Opaque per-claim capability token. Issued when the drain daemon claims the
+    # row, echoed back on confirm/fail, rotated on every re-claim and cleared
+    # whenever the published bytes change. A lease alone can't do this job: the
+    # daemon can confirm after the lease expired, by which time the artifact it
+    # downloaded may already have been replaced by an edit.
+    claim_token = models.CharField(max_length=64, blank=True, default='')
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

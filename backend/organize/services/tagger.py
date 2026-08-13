@@ -1,5 +1,7 @@
 import os
 import logging
+import shutil
+import tempfile
 
 import mutagen
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TPUB, TDRC, TRCK, TCON, TXXX
@@ -257,8 +259,56 @@ def _clean_metadata(metadata: dict) -> dict:
     return out
 
 
+# key → (ID3 frame id, frame class). Order is cosmetic; membership is what
+# matters: a key present in the metadata dict with an empty value CLEARS the
+# frame, a key that is absent leaves whatever the file already carries.
+_ID3_FRAMES = (
+    ('artist', 'TPE1', TPE1),
+    ('title', 'TIT2', TIT2),
+    ('album', 'TALB', TALB),
+    ('genre', 'TCON', TCON),
+    ('year', 'TDRC', TDRC),
+    ('track_number', 'TRCK', TRCK),
+    ('label', 'TPUB', TPUB),
+)
+
+# key → tag name for FLAC / easy-tag containers.
+_EASY_KEYS = (
+    ('artist', 'artist'),
+    ('title', 'title'),
+    ('album', 'album'),
+    ('genre', 'genre'),
+    ('year', 'date'),
+    ('track_number', 'tracknumber'),
+    ('label', 'label'),
+    ('catalog_number', 'catalognumber'),
+)
+
+
+def _set_or_clear(container, tag_name, key, metadata):
+    """Assign the tag when the value is non-empty, delete it when it's empty.
+
+    Only touches tags whose key the caller actually supplied. Clearing a field
+    in the UI used to be a no-op on the file: write_tags skipped falsy values,
+    so the old album/genre stayed embedded and Music.app kept showing it.
+    """
+    if key not in metadata:
+        return
+    value = metadata.get(key)
+    if value:
+        container[tag_name] = value
+    elif tag_name in container:
+        del container[tag_name]
+
+
 def write_tags(filepath, metadata):
-    """Write tags to an audio file using mutagen. Format-aware."""
+    """Write tags to an audio file using mutagen. Format-aware.
+
+    A key present with an empty value clears that tag; an absent key is left
+    alone. Callers that build a partial dict (the pipeline tagger) therefore
+    keep their additive behaviour, while callers that submit the whole form
+    (manual edit, published-artifact refresh) can actually erase a field.
+    """
     metadata = _clean_metadata(metadata)
     try:
         audio = mutagen.File(filepath)
@@ -283,43 +333,26 @@ def write_tags(filepath, metadata):
                 audio.add_tags()
 
             tags = audio.tags
-            if metadata.get('artist'):
-                tags['TPE1'] = TPE1(encoding=3, text=[metadata['artist']])
-            if metadata.get('title'):
-                tags['TIT2'] = TIT2(encoding=3, text=[metadata['title']])
-            if metadata.get('album'):
-                tags['TALB'] = TALB(encoding=3, text=[metadata['album']])
-            if metadata.get('genre'):
-                tags['TCON'] = TCON(encoding=3, text=[metadata['genre']])
-            if metadata.get('year'):
-                tags['TDRC'] = TDRC(encoding=3, text=[metadata['year']])
-            if metadata.get('track_number'):
-                tags['TRCK'] = TRCK(encoding=3, text=[metadata['track_number']])
-            if metadata.get('label'):
-                tags['TPUB'] = TPUB(encoding=3, text=[metadata['label']])
-            if metadata.get('catalog_number'):
-                tags.add(TXXX(encoding=3, desc='CATALOGNUMBER', text=[metadata['catalog_number']]))
+            for key, frame_id, frame_cls in _ID3_FRAMES:
+                if key not in metadata:
+                    continue
+                value = metadata.get(key)
+                if value:
+                    tags[frame_id] = frame_cls(encoding=3, text=[value])
+                else:
+                    tags.delall(frame_id)
+            if 'catalog_number' in metadata:
+                tags.delall('TXXX:CATALOGNUMBER')
+                if metadata['catalog_number']:
+                    tags.add(TXXX(encoding=3, desc='CATALOGNUMBER',
+                                  text=[metadata['catalog_number']]))
 
             audio.save()
 
         elif ext == '.flac':
             flac = FLAC(filepath)
-            if metadata.get('artist'):
-                flac['artist'] = metadata['artist']
-            if metadata.get('title'):
-                flac['title'] = metadata['title']
-            if metadata.get('album'):
-                flac['album'] = metadata['album']
-            if metadata.get('genre'):
-                flac['genre'] = metadata['genre']
-            if metadata.get('year'):
-                flac['date'] = metadata['year']
-            if metadata.get('track_number'):
-                flac['tracknumber'] = metadata['track_number']
-            if metadata.get('label'):
-                flac['label'] = metadata['label']
-            if metadata.get('catalog_number'):
-                flac['catalognumber'] = metadata['catalog_number']
+            for key, tag_name in _EASY_KEYS:
+                _set_or_clear(flac, tag_name, key, metadata)
 
             flac.save()
 
@@ -327,19 +360,40 @@ def write_tags(filepath, metadata):
             # Use easy tags as fallback for other formats
             audio = mutagen.File(filepath, easy=True)
             if audio is not None:
-                if metadata.get('artist'):
-                    audio['artist'] = metadata['artist']
-                if metadata.get('title'):
-                    audio['title'] = metadata['title']
-                if metadata.get('album'):
-                    audio['album'] = metadata['album']
-                if metadata.get('genre'):
-                    audio['genre'] = metadata['genre']
-                if metadata.get('year'):
-                    audio['date'] = metadata['year']
+                for key, tag_name in _EASY_KEYS:
+                    if tag_name in ('label', 'catalognumber', 'tracknumber'):
+                        # EasyMP4/EasyID3 reject unknown keys with a KeyError;
+                        # only the core five are portable across containers.
+                        continue
+                    _set_or_clear(audio, tag_name, key, metadata)
                 audio.save()
     except Exception as e:
         logger.error(f"Error writing tags to {filepath}: {e}")
+        raise
+
+
+def write_tags_atomic(filepath, metadata):
+    """Tag a copy of the file, then replace the original with os.replace().
+
+    In-place tagging is fine on the workbench but not on a published artifact:
+    the drain daemon (or a browser download) can be reading the same bytes, and
+    a mutagen failure half-way through leaves the file rewritten even though
+    the caller saw an exception. Writing a sibling temp file and swapping it in
+    means readers see either the old file or the new one, never a mix.
+    """
+    directory = os.path.dirname(filepath) or '.'
+    ext = os.path.splitext(filepath)[1]
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix='.ocdj-tag-', suffix=ext)
+    os.close(fd)
+    try:
+        shutil.copy2(filepath, tmp_path)
+        write_tags(tmp_path, metadata)
+        os.replace(tmp_path, filepath)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
         raise
 
 
