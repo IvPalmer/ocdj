@@ -635,13 +635,44 @@ export function useYtDeleteJob() {
 
 // ── Organize Pipeline ────────────────────────────────────────
 
+function invalidatePipeline(qc) {
+  qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
+  qc.invalidateQueries({ queryKey: ['pipeline-items'] })
+}
+
+// Process / retry hand the work to a background thread and return 200 straight
+// away, so an invalidate that fires right now can refetch the *pre-worker*
+// state: no transient stage in the payload, refetchInterval below evaluates to
+// false, polling never starts and the table stays stale forever after a
+// perfectly successful action.
+//
+// A single delayed re-invalidate would only move the guess. Instead a kick
+// opens a window during which the pipeline queries poll unconditionally; once
+// the worker writes its first transient stage the existing stage-based rule
+// sustains the polling on its own, and when the window closes with nothing in
+// flight it goes quiet again.
+const KICK_POLL_WINDOW_MS = 30000
+const KICK_POLL_INTERVAL_MS = 3000
+
+let pipelineKickedUntil = 0
+
+function pipelineKickActive() {
+  return Date.now() < pipelineKickedUntil
+}
+
+function invalidatePipelineAfterWorkerKick(qc) {
+  pipelineKickedUntil = Date.now() + KICK_POLL_WINDOW_MS
+  invalidatePipeline(qc)
+}
+
 export function usePipelineStats() {
   return useQuery({
     queryKey: ['pipeline-stats'],
     queryFn: () => api.get('/organize/pipeline/stats/'),
     refetchInterval: (query) => {
       const data = query.state.data
-      if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return 3000
+      if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return KICK_POLL_INTERVAL_MS
+      if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
       return 30000
     },
   })
@@ -651,6 +682,9 @@ export function usePipelineItems(params = {}) {
   const searchParams = new URLSearchParams()
   if (params.stage) searchParams.set('stage', params.stage)
   if (params.page) searchParams.set('page', params.page)
+  // Archived rows are filtered server-side so `count`, the page numbering and
+  // `archived_count` all describe the whole table rather than one 50-row page.
+  if (params.includeArchived) searchParams.set('include_archived', '1')
 
   const qs = searchParams.toString()
   return useQuery({
@@ -659,7 +693,8 @@ export function usePipelineItems(params = {}) {
     refetchInterval: (query) => {
       const data = query.state.data
       const items = data?.results || []
-      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return 3000
+      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return KICK_POLL_INTERVAL_MS
+      if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
       return false
     },
   })
@@ -669,10 +704,7 @@ export function useProcessPipeline() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => api.post('/organize/pipeline/process/'),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipelineAfterWorkerKick(qc),
   })
 }
 
@@ -680,10 +712,7 @@ export function useProcessSingle() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.post(`/organize/pipeline/${id}/process/`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipelineAfterWorkerKick(qc),
   })
 }
 
@@ -691,10 +720,7 @@ export function useRetryItem() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.post(`/organize/pipeline/${id}/retry/`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipelineAfterWorkerKick(qc),
   })
 }
 
@@ -702,10 +728,7 @@ export function useRemovePipelineItem() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.delete(`/organize/pipeline/${id}/`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipeline(qc),
   })
 }
 
@@ -713,10 +736,7 @@ export function useSkipStage() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.post(`/organize/pipeline/${id}/skip/`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipeline(qc),
   })
 }
 
@@ -724,10 +744,7 @@ export function useUpdatePipelineItem() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, ...data }) => api.patch(`/organize/pipeline/${id}/`, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipeline(qc),
   })
 }
 
@@ -735,10 +752,17 @@ export function useRetagItem() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api.post(`/organize/pipeline/${id}/retag/`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipeline(qc),
+  })
+}
+
+// Manual publication — the only way to advance a 'ready' item when
+// OCDJ_AUTOPUBLISH left it stranded. The endpoint existed with no caller.
+export function useSendHome() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/organize/pipeline/${id}/send-home/`),
+    onSuccess: () => invalidatePipeline(qc),
   })
 }
 
@@ -746,10 +770,7 @@ export function useScanDownloads() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => api.post('/organize/pipeline/scan/'),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
-      qc.invalidateQueries({ queryKey: ['pipeline-items'] })
-    },
+    onSuccess: () => invalidatePipeline(qc),
   })
 }
 

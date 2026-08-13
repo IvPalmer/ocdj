@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
   useProcessSingle, useRetryItem, useSkipStage, useRemovePipelineItem, useScanDownloads,
-  useUpdatePipelineItem, useRetagItem,
+  useUpdatePipelineItem, useRetagItem, useSendHome,
   useConversionRules, useUpdateConversionRules,
 } from '../../api/hooks'
 import './OrganizePanel.css'
@@ -34,6 +34,22 @@ const EDITABLE_FIELDS = [
 const DOWNLOADABLE_STATES = new Set(['on_workbench', 'publishable', 'draining'])
 
 const AUDIO_EXTS = new Set(['mp3', 'flac', 'wav', 'aiff', 'aif', 'm4a', 'ogg'])
+
+// A failed request used to render exactly like an empty pipeline. Turn the
+// error object the api client throws into something that names the cause.
+function errorText(err) {
+  if (!err) return ''
+  const detail = err.data?.error || err.data?.detail || err.data?.message
+  if (detail) return detail
+  if (err.status === 401 || err.status === 403) return 'not authorized — your session may have expired'
+  if (err.status === 0) return 'the request timed out'
+  if (err.status) return `HTTP ${err.status}`
+  return err.message || String(err)
+}
+
+function plural(n, one, many) {
+  return n === 1 ? one : many
+}
 
 
 function UploadButton({ onDone }) {
@@ -161,6 +177,29 @@ function DownloadButton({ item }) {
       title={err || 'Stream file to this device'}
     >
       {working ? '…' : err ? 'retry' : 'Download'}
+    </button>
+  )
+}
+
+
+function SendHomeButton({ item }) {
+  const sendHome = useSendHome()
+
+  // With OCDJ_AUTOPUBLISH=1 a failed auto-publish strands the item at
+  // ready/on_workbench: the drain daemon never sees it and the UI had no
+  // control to advance it. /send-home/ existed all along with no caller.
+  if (item.stage !== 'ready' || item.archive_state !== 'on_workbench') return null
+
+  return (
+    <button
+      className="btn btn-xs"
+      onClick={() => sendHome.mutate(item.id)}
+      disabled={sendHome.isPending}
+      title={sendHome.isError
+        ? `Send home failed: ${errorText(sendHome.error)}`
+        : 'Publish this track so the Mac drain daemon fetches it'}
+    >
+      {sendHome.isPending ? '…' : sendHome.isError ? 'retry send' : 'Send home'}
     </button>
   )
 }
@@ -331,10 +370,16 @@ function ConversionRules() {
 function OrganizePanel() {
   const [stageFilter, setStageFilter] = useState(null)
   const [showArchived, setShowArchived] = useState(false)
+  const [page, setPage] = useState(1)
   const [editingItem, setEditingItem] = useState(null)
 
-  const { data: stats } = usePipelineStats()
-  const { data: itemsData } = usePipelineItems({ stage: stageFilter })
+  const {
+    data: stats, isLoading: statsLoading, isError: statsFailed, error: statsError,
+  } = usePipelineStats()
+  const {
+    data: itemsData, isLoading: itemsLoading, isError: itemsFailed, error: itemsError,
+    refetch: refetchItems,
+  } = usePipelineItems({ stage: stageFilter, page, includeArchived: showArchived })
   const processPipeline = useProcessPipeline()
   const processSingle = useProcessSingle()
   const retryItem = useRetryItem()
@@ -342,11 +387,49 @@ function OrganizePanel() {
   const removeItem = useRemovePipelineItem()
   const scanDownloads = useScanDownloads()
 
-  const allItems = itemsData?.results || []
-  // Archived = drained to the Mac and confirmed. Done work — hide it from the
-  // workbench by default so the list only shows items needing attention.
-  const archivedCount = allItems.filter(i => i.archive_state === 'archived').length
-  const items = showArchived ? allItems : allItems.filter(i => i.archive_state !== 'archived')
+  // Archived = drained to the Mac and confirmed. Done work, hidden from the
+  // workbench by default — but the server does the hiding now, so `count`,
+  // the page count and `archived_count` describe the whole table instead of
+  // whichever 50 rows happened to land on this page.
+  const items = itemsData?.results || []
+  const totalCount = itemsData?.count ?? 0
+  const pageSize = itemsData?.page_size || 50
+  const totalPages = totalCount ? Math.ceil(totalCount / pageSize) : 1
+  const archivedCount = itemsData?.archived_count ?? 0
+
+  // DRF 404s an out-of-range ?page — reachable when rows drain away while
+  // you're on the last page. Fall back rather than showing a load error.
+  useEffect(() => {
+    if (itemsFailed && itemsError?.status === 404 && page > 1) setPage(1)
+  }, [itemsFailed, itemsError, page])
+
+  const selectStage = (key) => { setStageFilter(key); setPage(1) }
+  const toggleArchived = () => { setShowArchived(v => !v); setPage(1) }
+
+  const stageLabel = STAGES.find(s => s.key === stageFilter)?.label
+  const hiddenNote = (!showArchived && archivedCount > 0)
+    ? `${archivedCount} completed ${plural(archivedCount, 'item is', 'items are')} archived on your Mac and hidden — use "Show archived" to see ${plural(archivedCount, 'it', 'them')}.`
+    : null
+  const emptyMessage = hiddenNote
+    ? `Nothing on the workbench${stageFilter ? ` in "${stageLabel}"` : ''}. ${hiddenNote}`
+    : stageFilter
+      ? `No items in "${stageLabel}" stage.`
+      : 'No items in the pipeline. Use "Scan Downloads" to import completed downloads.'
+
+  const actionErrors = [
+    ['Process All', processPipeline],
+    ['Process', processSingle],
+    ['Retry', retryItem],
+    ['Skip', skipStage],
+    ['Remove', removeItem],
+    ['Scan Downloads', scanDownloads],
+  ].filter(([, m]) => m.isError)
+
+  // The scan message already names every non-zero outcome; a run that errored
+  // must not also be dressed in the success colour.
+  const scan = scanDownloads.data
+  const scanHadErrors = !!scan?.error_count
+  const scanFirstError = scan?.errors?.[0]?.error
 
   return (
     <div className="organize-panel">
@@ -365,6 +448,11 @@ function OrganizePanel() {
             className="btn btn-sm btn-primary"
             onClick={() => processPipeline.mutate()}
             disabled={processPipeline.isPending || !stats?.downloaded}
+            title={statsFailed
+              ? `Stage counts unavailable: ${errorText(statsError)}`
+              : !stats?.downloaded
+                ? 'Nothing waiting in Downloaded'
+                : `Process ${stats.downloaded} downloaded ${plural(stats.downloaded, 'item', 'items')}`}
           >
             {processPipeline.isPending ? 'Processing...' : 'Process All'}
           </button>
@@ -376,11 +464,21 @@ function OrganizePanel() {
         <PipelineFlow
           stats={stats}
           activeStage={stageFilter}
-          onStageClick={setStageFilter}
+          onStageClick={selectStage}
         />
-        {stats?.total > 0 && (
+        {statsLoading && (
+          <div className="pipeline-summary">Loading stage counts…</div>
+        )}
+        {statsFailed && (
+          <div className="pipeline-summary pipeline-summary--error">
+            Stage counts unavailable — {errorText(statsError)}. The zeroes above are not real.
+          </div>
+        )}
+        {!statsLoading && !statsFailed && (
           <div className="pipeline-summary">
-            {stats.total} total items
+            {stats?.total
+              ? `${stats.total} total items${stats.archived ? ` · ${stats.archived} archived on your Mac` : ''}`
+              : 'Pipeline is empty.'}
           </div>
         )}
       </div>
@@ -393,24 +491,31 @@ function OrganizePanel() {
             {stageFilter ? `Items — ${STAGES.find(s => s.key === stageFilter)?.label}` : 'All Items'}
           </h3>
           {stageFilter && (
-            <button className="btn btn-sm" onClick={() => setStageFilter(null)}>
+            <button className="btn btn-sm" onClick={() => selectStage(null)}>
               Show All
             </button>
           )}
           {archivedCount > 0 && (
-            <button className="btn btn-sm" onClick={() => setShowArchived(v => !v)}>
+            <button className="btn btn-sm" onClick={toggleArchived}>
               {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
             </button>
           )}
         </div>
 
-        {items.length === 0 ? (
-          <div className="empty-state">
-            {stageFilter
-              ? `No items in "${STAGES.find(s => s.key === stageFilter)?.label}" stage`
-              : 'No items in the pipeline. Use "Scan Downloads" to import completed downloads.'}
+        {itemsLoading ? (
+          <div className="empty-state">Loading items…</div>
+        ) : itemsFailed ? (
+          <div className="empty-state empty-state--error">
+            <div>Couldn&apos;t load the pipeline — {errorText(itemsError)}.</div>
+            <div className="empty-state__hint">
+              This is a failed request, not an empty pipeline.
+            </div>
+            <button className="btn btn-sm" onClick={() => refetchItems()}>Retry</button>
           </div>
+        ) : items.length === 0 ? (
+          <div className="empty-state">{emptyMessage}</div>
         ) : (
+          <>
           <div className="pipeline-table">
             <div className="pipeline-table__header">
               <span className="col-file">Current filename</span>
@@ -489,6 +594,7 @@ function OrganizePanel() {
                       Skip
                     </button>
                   )}
+                  <SendHomeButton item={item} />
                   <DownloadButton item={item} />
                   <button
                     className="btn btn-xs btn-danger"
@@ -506,6 +612,31 @@ function OrganizePanel() {
               )
             })}
           </div>
+
+          {/* Rows past the first 50 used to be unreachable: the panel never
+              sent ?page and ignored next/previous entirely. */}
+          {totalPages > 1 && (
+            <div className="organize-pagination">
+              <button
+                className="btn btn-sm"
+                disabled={page <= 1}
+                onClick={() => setPage(p => p - 1)}
+              >
+                Previous
+              </button>
+              <span className="organize-pagination__info">
+                Page {page} of {totalPages} · {totalCount} {plural(totalCount, 'item', 'items')}
+              </span>
+              <button
+                className="btn btn-sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => p + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
 
@@ -513,12 +644,24 @@ function OrganizePanel() {
         <EditModal item={editingItem} onClose={() => setEditingItem(null)} />
       )}
 
-      {processPipeline.data?.message && (
-        <div className="organize-toast">{processPipeline.data.message}</div>
-      )}
-      {scanDownloads.data?.message && (
-        <div className="organize-toast">{scanDownloads.data.message}</div>
-      )}
+      <div className="organize-toasts">
+        {processPipeline.data?.message && (
+          <div className="organize-toast">{processPipeline.data.message}</div>
+        )}
+        {scan?.message && (
+          <div className={`organize-toast ${scanHadErrors ? 'organize-toast--error' : ''}`}>
+            {scan.message}
+            {scanFirstError && (
+              <span className="organize-toast__detail">first error: {scanFirstError}</span>
+            )}
+          </div>
+        )}
+        {actionErrors.map(([label, m]) => (
+          <div key={label} className="organize-toast organize-toast--error">
+            {label} failed — {errorText(m.error)}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

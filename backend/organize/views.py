@@ -33,11 +33,26 @@ def _download_signer() -> TimestampSigner:
 
 @api_view(['GET'])
 def pipeline_list(request):
-    """List pipeline items, optionally filtered by stage."""
+    """List pipeline items, optionally filtered by stage.
+
+    Archived items (drained to the home Mac, bytes gone from the VPS) are
+    finished work, not workbench work, so they're excluded by default. Pass
+    include_archived=1 to see them.
+
+    The archive filter is applied here rather than in the client because the
+    client only ever sees one 50-item page: filtering there made `count`,
+    the page numbering and the archived tally all page-local, so a 129-row
+    table rendered as "empty, 50 archived".
+    """
     items = PipelineItem.objects.all()
     stage = request.query_params.get('stage')
     if stage:
         items = items.filter(stage=stage)
+
+    archived_count = items.filter(archive_state='archived').count()
+    include_archived = request.query_params.get('include_archived') in ('1', 'true')
+    if not include_archived:
+        items = items.exclude(archive_state='archived')
 
     # Simple pagination matching existing patterns
     from rest_framework.pagination import PageNumberPagination
@@ -45,7 +60,10 @@ def pipeline_list(request):
     paginator.page_size = 50
     page = paginator.paginate_queryset(items, request)
     serializer = PipelineItemSerializer(page, many=True)
-    return paginator.get_paginated_response(serializer.data)
+    response = paginator.get_paginated_response(serializer.data)
+    response.data['archived_count'] = archived_count
+    response.data['page_size'] = paginator.page_size
+    return response
 
 
 def _remove_item_files(item):
@@ -126,24 +144,27 @@ def pipeline_detail(request, pk):
 
 @api_view(['GET'])
 def pipeline_stats(request):
-    """Return counts per pipeline stage."""
+    """Return counts per pipeline stage, plus the archived tally.
+
+    Every key is derived from PipelineItem.STAGE_CHOICES. The previous
+    hand-written dict omitted 'published' while `total` summed all stages, so
+    once the fleet drained, the UI showed nine zeroes next to "129 total".
+    Deriving from the model means a new stage can't silently vanish again.
+    """
     counts = dict(
         PipelineItem.objects.values_list('stage')
         .annotate(count=Count('id'))
         .values_list('stage', 'count')
     )
-    return Response({
-        'downloaded': counts.get('downloaded', 0),
-        'tagging': counts.get('tagging', 0),
-        'tagged': counts.get('tagged', 0),
-        'renaming': counts.get('renaming', 0),
-        'renamed': counts.get('renamed', 0),
-        'converting': counts.get('converting', 0),
-        'converted': counts.get('converted', 0),
-        'ready': counts.get('ready', 0),
-        'failed': counts.get('failed', 0),
-        'total': sum(counts.values()),
-    })
+    stats = {stage: counts.get(stage, 0) for stage, _label in PipelineItem.STAGE_CHOICES}
+    # choices aren't a DB constraint. A row carrying a stage outside the model
+    # vocabulary (legacy data, a half-applied migration) would land in `total`
+    # with no key of its own — the exact shape of the bug being fixed here — so
+    # report it rather than let the numbers stop reconciling again.
+    stats.update({s: c for s, c in counts.items() if s not in stats})
+    stats['total'] = sum(counts.values())
+    stats['archived'] = PipelineItem.objects.filter(archive_state='archived').count()
+    return Response(stats)
 
 
 @api_view(['POST'])
@@ -220,14 +241,42 @@ def pipeline_skip(request, pk):
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
-    from .services.pipeline import next_skippable_stage
-    next_stage = next_skippable_stage(item.stage)
-    if next_stage:
-        item.stage = next_stage
-        item.save(update_fields=['stage'])
-        return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
+    from .services.pipeline import (
+        ACTIVE_STAGE_TO_DONE, move_item_to_stage, next_skippable_stage,
+    )
 
-    return Response({'error': 'Cannot skip from this stage'}, status=http_status.HTTP_400_BAD_REQUEST)
+    # A worker owns the file while the item sits on a transient stage; skipping
+    # now that skip moves bytes would yank the file out from under an in-flight
+    # tag/rename/convert. The table already hides Skip here — the API has to
+    # mean it too, not just the button.
+    if item.stage in ACTIVE_STAGE_TO_DONE:
+        return Response(
+            {'error': f'Item is being processed (stage={item.stage}); wait for it to settle'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
+    next_stage = next_skippable_stage(item.stage)
+    if not next_stage:
+        return Response({'error': 'Cannot skip from this stage'}, status=http_status.HTTP_400_BAD_REQUEST)
+
+    # Skipping has to move the bytes too. Advancing only item.stage left the
+    # file in 01_downloaded while the DB claimed 'tagged' — the numbered
+    # folders are the operator-facing workbench, so that divergence is silent
+    # data rot. With no bytes on the workbench the move is impossible, so
+    # refuse outright rather than record a stage the disk can't back.
+    if not item.current_path or not os.path.exists(item.current_path):
+        return Response(
+            {'error': 'File is not on the workbench, so it cannot be skipped to '
+                      'the next stage folder. Use Remove to clear the row.'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
+    try:
+        move_item_to_stage(item, next_stage)
+    except OSError as e:
+        return Response({'error': f'Skip failed moving file: {e}'},
+                        status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
 
 
 @api_view(['POST'])
@@ -454,10 +503,29 @@ def pipeline_rerename_all(request):
 
 @api_view(['POST'])
 def pipeline_scan(request):
-    """Scan completed downloads and create PipelineItems for any not yet tracked."""
+    """Scan completed downloads and create PipelineItems for any not yet tracked.
+
+    Reports what the scan actually found. `created: 0` alone is ambiguous —
+    it's the same answer for a healthy idle pipeline and for a scan that hit
+    a wall of missing files — so the skipped/error tallies ride along and the
+    message says which it was.
+    """
     from .services.pipeline import scan_completed_downloads
-    created = scan_completed_downloads()
-    return Response({'message': f'Created {created} new pipeline items', 'created': created})
+    summary = scan_completed_downloads()
+
+    # Report every non-zero outcome. Picking a single headline meant a run that
+    # created 5 and errored on 3 read as an unqualified success, and one error
+    # among forty already-tracked downloads read as "everything errored".
+    parts = [
+        (summary['created'], 'created'),
+        (summary['already_tracked'], 'already tracked'),
+        (summary['missing_files'], 'missing on disk'),
+        (summary['error_count'], 'errored'),
+    ]
+    described = [f'{n} {label}' for n, label in parts if n]
+    message = f"Scan: {', '.join(described)}" if described else 'Scan: nothing new to import'
+
+    return Response({'message': message, **summary})
 
 
 @api_view(['GET', 'POST'])
@@ -727,14 +795,20 @@ def pipeline_kick(request):
         scan_completed_downloads,
         process_all_pending, try_claim_processing_all, release_processing_all,
     )
-    created = scan_completed_downloads()
+    scan = scan_completed_downloads()
+    created = scan['created']
     items = PipelineItem.objects.filter(stage='downloaded')
     count = items.count()
     if count == 0:
-        return Response({'message': 'nothing pending', 'scanned_created': created, 'count': 0})
+        return Response({
+            'message': 'nothing pending',
+            'scanned_created': created,
+            'scan': scan,
+            'count': 0,
+        })
     if not try_claim_processing_all():
         return Response(
-            {'error': 'pipeline already running', 'scanned_created': created},
+            {'error': 'pipeline already running', 'scanned_created': created, 'scan': scan},
             status=http_status.HTTP_409_CONFLICT,
         )
     import threading
@@ -748,5 +822,6 @@ def pipeline_kick(request):
     return Response({
         'message': f'kicked processing for {count} items',
         'scanned_created': created,
+        'scan': scan,
         'count': count,
     })

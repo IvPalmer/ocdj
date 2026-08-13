@@ -1,0 +1,49 @@
+# Backend test suite — AFTER (task/organize-panel-truthful-state @ 023cb87, post-review)
+# Run: docker compose run --rm --no-deps -v /home/ubuntu/ocdj/backend:/app backend python manage.py test organize --noinput
+# Ephemeral container, clone tree bind-mounted at /app. No prod container rebuilt or restarted.
+# Captured 2026-08-13
+
+ Container ocdj-backend-run-302d67338a33 Creating 
+ Container ocdj-backend-run-302d67338a33 Created 
+[cratemate] Missing env vars: CRATEMATE_DISCOGS_TOKEN, CRATEMATE_SPOTIFY_CLIENT_ID, CRATEMATE_SPOTIFY_CLIENT_SECRET. Identify endpoint will return 503 until these are set in ~/.secrets/ocdj-cratemate.env (Mac) or Dokploy env (VPS).
+Found 55 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+..............File not found for download 2: /tmp/tmpzzxsbvl9/peer-a/Releases/gone.mp3
+..Error ingesting download 3: disk on fire
+.Error ingesting download 5: boom
+Error ingesting download 4: boom
+......................................
+----------------------------------------------------------------------
+Ran 55 tests in 0.365s
+
+OK
+Destroying test database for alias 'default'...
+
+# ── Full backend suite (all apps), same branch, same method ──
+
+ Container ocdj-backend-run-4fbe651f3ba1 Creating 
+ Container ocdj-backend-run-4fbe651f3ba1 Created 
+[cratemate] Missing env vars: CRATEMATE_DISCOGS_TOKEN, CRATEMATE_SPOTIFY_CLIENT_ID, CRATEMATE_SPOTIFY_CLIENT_SECRET. Identify endpoint will return 503 until these are set in ~/.secrets/ocdj-cratemate.env (Mac) or Dokploy env (VPS).
+Found 143 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+..............File not found for download 2: /tmp/tmpdbc68lvf/peer-a/Releases/gone.mp3
+..Error ingesting download 3: disk on fire
+.Error ingesting download 5: boom
+Error ingesting download 4: boom
+...............................traxdb local: stale claim token presented for abc
+....traxdb local: folder abc failed on Mac: pixeldrain 404
+.........Download #3 refused: target is not vps
+.................................ytfetch job 27: could not locate PipelineItem for /tmp/tmpyqwsifob/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
+.ytfetch job 28: could not locate PipelineItem for /tmp/tmp9pj910m2/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
+........ytfetch job 36: could not locate PipelineItem for /tmp/tmpq_n3e8x8/01_downloaded/YouTube/U - T [abc123].wav after scan
+..ytfetch job 38: could not locate PipelineItem for /tmp/tmp365ecvdu/01_downloaded/YouTube/U - T [abc123].wav after scan
+..........................Blogger API 429 (https://www.googleapis.com/blogger/v3/blogs/byurl); retry 1/2 in 2s
+.Blogger API network error (https://www.googleapis.com/blogger/v3/blogs/byurl): ConnectionError('reset by peer'); retry 1/2 in 2s
+...........
+----------------------------------------------------------------------
+Ran 143 tests in 1.196s
+
+OK
+Destroying test database for alias 'default'...

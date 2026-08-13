@@ -114,6 +114,10 @@
   color: var(--text-muted);
 }
 
+.pipeline-summary--error {
+  color: var(--accent-red);
+}
+
 /* ── Stage Pill ── */
 .stage-pill {
   display: inline-block;
@@ -224,6 +228,35 @@
   border-radius: var(--radius);
 }
 
+/* A failed request must not render identically to an empty pipeline. */
+.empty-state--error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.empty-state__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Pagination ── */
+.organize-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.organize-pagination__info {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* ── Edit Modal ── */
 .edit-modal {
   width: 560px;
@@ -305,10 +338,24 @@
 }
 
 /* ── Toast ── */
-.organize-toast {
+/* Stacked in a container: success and error toasts can be on screen at the
+   same time, and fixed-positioned siblings used to sit on top of each other. */
+.organize-toasts {
   position: fixed;
   bottom: 20px;
   right: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.organize-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 10px 16px;
   background: var(--bg);
   border: 1px solid var(--accent-green);
@@ -316,8 +363,17 @@
   font-size: 13px;
   color: var(--accent-green);
   animation: fadeInUp 0.3s ease;
-  z-index: 100;
   box-shadow: var(--shadow-md);
+}
+
+.organize-toast--error {
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+.organize-toast__detail {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 @keyframes fadeInUp {

@@ -1,0 +1,99 @@
+# Live prod DATA, both code versions — /api/organize/pipeline/stats/ and /api/organize/pipeline/
+#
+# Read-only GETs against the real prod Postgres (djtools) on main-instance.
+# Nothing was deployed, rebuilt or restarted; the running prod containers are
+# untouched and still serve vps-deploy code.
+#
+#   BEFORE = deployed image (vps-deploy), via `docker compose exec backend`
+#   AFTER  = task branch code, via an ephemeral `docker compose run --rm --no-deps`
+#            container with the clone's backend/ bind-mounted at /app
+#
+# Captured 2026-08-13. No secret values appear in this file.
+
+═══ BEFORE — deployed code ═══
+GET /api/organize/pipeline/stats/ -> 200
+{
+  "converted": 0,
+  "converting": 0,
+  "downloaded": 0,
+  "failed": 0,
+  "ready": 0,
+  "renamed": 0,
+  "renaming": 0,
+  "tagged": 0,
+  "tagging": 0,
+  "total": 129
+}
+
+^^ 'published' key absent; nine zeroes next to total:129. This is the bug.
+
+═══ AFTER — task branch code, same live database ═══
+GET /api/organize/pipeline/stats/ -> 200
+{
+  "archived": 129,
+  "converted": 0,
+  "converting": 0,
+  "downloaded": 0,
+  "failed": 0,
+  "published": 129,
+  "ready": 0,
+  "renamed": 0,
+  "renaming": 0,
+  "tagged": 0,
+  "tagging": 0,
+  "total": 129
+}
+
+GET /api/organize/pipeline/ -> 200
+{
+  "count": 0,
+  "next": null,
+  "previous": null,
+  "archived_count": 129,
+  "page_size": 50
+}
+results on this page: 0
+
+GET /api/organize/pipeline/?include_archived=1 -> 200
+{
+  "count": 129,
+  "next": "http://backend/api/organize/pipeline/?include_archived=1&page=2",
+  "archived_count": 129,
+  "page_size": 50
+}
+results on this page: 50
+page 3 -> 200 results: 29
+
+═══ AFTER — task branch code @ 023cb87 (post-review), same live database ═══
+GET /api/organize/pipeline/stats/ -> 200
+{
+  "archived": 129,
+  "converted": 0,
+  "converting": 0,
+  "downloaded": 0,
+  "failed": 0,
+  "published": 129,
+  "ready": 0,
+  "renamed": 0,
+  "renaming": 0,
+  "tagged": 0,
+  "tagging": 0,
+  "total": 129
+}
+
+GET /api/organize/pipeline/ (default, archived hidden)
+{
+  "count": 0,
+  "next": null,
+  "archived_count": 129,
+  "page_size": 50
+}
+
+GET /api/organize/pipeline/?include_archived=1
+{
+  "count": 129,
+  "next": "http://backend/api/organize/pipeline/?include_archived=1&page=2",
+  "archived_count": 129
+}
+page 1 results: 50
+page 3 -> 200 results: 29 (rows 101-129, previously unreachable)
