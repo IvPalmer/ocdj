@@ -1,0 +1,13 @@
+
+> ocdj-frontend@0.1.0 build
+> vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 117 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.45 kB │ gzip:   0.30 kB
+dist/assets/index-CIEEBBL7.css   97.95 kB │ gzip:  15.82 kB
+dist/assets/index-6JNLO3xR.js   350.31 kB │ gzip: 102.04 kB
+✓ built in 685ms
