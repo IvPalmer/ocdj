@@ -670,6 +670,10 @@ export function usePipelineStats() {
   return useQuery({
     queryKey: ['pipeline-stats'],
     queryFn: () => api.get('/organize/pipeline/stats/'),
+    // The global 5-minute staleTime would suppress the refetch on window
+    // focus, so coming back to a backgrounded tab showed the pipeline as it
+    // looked when you left it.
+    staleTime: 0,
     refetchInterval: (query) => {
       const data = query.state.data
       if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return KICK_POLL_INTERVAL_MS
@@ -691,6 +695,7 @@ export function usePipelineItems(params = {}) {
   return useQuery({
     queryKey: ['pipeline-items', params],
     queryFn: () => api.get(`/organize/pipeline/${qs ? '?' + qs : ''}`),
+    staleTime: 0,
     refetchInterval: (query) => {
       const data = query.state.data
       const items = data?.results || []
