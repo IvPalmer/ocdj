@@ -30,6 +30,9 @@ class RunDownloadDestinationTestCase(TestCase):
         op = TraxDBOperation.objects.create(op_type='download', status='pending')
         values = {
             'TRAXDB_ROOT': self.tmpdir.name,
+            # This suite exercises the in-container downloader, which
+            # only runs when the VPS is the declared target.
+            'TRAXDB_DOWNLOAD_TARGET': 'vps',
             'PIXELDRAIN_API_KEY': 'test-key',
         }
 
@@ -55,6 +58,9 @@ class RunDownloadDestinationTestCase(TestCase):
         op = TraxDBOperation.objects.create(op_type='download', status='pending')
         values = {
             'TRAXDB_ROOT': self.tmpdir.name,
+            # This suite exercises the in-container downloader, which
+            # only runs when the VPS is the declared target.
+            'TRAXDB_DOWNLOAD_TARGET': 'vps',
             'PIXELDRAIN_API_KEY': 'test-key',
         }
 

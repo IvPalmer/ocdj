@@ -30,9 +30,18 @@ class TraxdbConfig(AppConfig):
                 status='failed',
                 error_message='Worker thread killed by container restart',
             )
-            n_folders = ScrapedFolder.objects.filter(download_status='downloading').update(
-                download_status='pending',
-            )
+            # Only reset in-container downloads. When the Mac owns the
+            # downloading, a backend redeploy says nothing about whether the
+            # daemon is still working — clobbering its lease here would hand
+            # the same list to a second worker. Those claims expire on their
+            # own lease instead.
+            from core.services.config import get_config
+            if (get_config('TRAXDB_DOWNLOAD_TARGET') or 'mac').lower() == 'vps':
+                n_folders = ScrapedFolder.objects.filter(
+                    download_status='downloading'
+                ).update(download_status='pending')
+            else:
+                n_folders = 0
             if n_ops or n_folders:
                 logger.warning(
                     f'TraxDB startup cleanup: marked {n_ops} stale op(s) failed, '

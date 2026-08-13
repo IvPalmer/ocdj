@@ -135,6 +135,12 @@ SCHEMA: list[ConfigSpec] = [
                description='Pixeldrain API key (boosts download throughput).'),
     ConfigSpec('TRAXDB_COOKIES', 'traxdb', 'str', '',
                description='Path inside the container to a Netscape-format cookies.txt for blog auth.'),
+    ConfigSpec('TRAXDB_DOWNLOAD_TARGET', 'traxdb', 'str', 'mac',
+               choices=['mac', 'vps'],
+               description="Where TraxDB files land. 'mac' (default): the VPS only scrapes and "
+                           "tracks status while the Mac daemon pulls straight from Pixeldrain, so "
+                           "no audio is ever stored on the VPS. 'vps': legacy in-container "
+                           "download into TRAXDB_ROOT."),
     ConfigSpec('TRAXDB_FETCH_MODE', 'traxdb', 'str', 'api',
                choices=['api', 'cookies'],
                description="How to fetch blog links: 'api' (headless Blogger API v3 via OAuth "

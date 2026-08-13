@@ -1,7 +1,13 @@
 from django.urls import path
-from . import views
+from . import views, views_local
 
 urlpatterns = [
+    # Mac local-download daemon (bearer-token authed, see views_local)
+    path('local/inventory/', views_local.local_inventory),
+    path('local/claim/', views_local.local_claim),
+    path('local/<int:pk>/complete/', views_local.local_complete),
+    path('local/<int:pk>/fail/', views_local.local_fail),
+
     path('inventory/', views.inventory),
     path('operations/', views.operations),
     path('operations/<int:pk>/', views.operation_detail),

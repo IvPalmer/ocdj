@@ -193,6 +193,16 @@ def trigger_sync(request):
 @api_view(['POST'])
 def trigger_download(request):
     """Trigger a download operation."""
+    # Downloads belong on the Mac: the VPS is not a music host, and its disk is
+    # far smaller than the archive. Refuse rather than quietly filling it again.
+    if (get_config('TRAXDB_DOWNLOAD_TARGET') or 'mac').lower() != 'vps':
+        return Response(
+            {'error': 'TRAXDB_DOWNLOAD_TARGET=mac — the Mac daemon pulls pending lists '
+                      'straight from Pixeldrain. Set it to "vps" only if you deliberately '
+                      'want audio stored on the server.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
     ser = TriggerDownloadSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
