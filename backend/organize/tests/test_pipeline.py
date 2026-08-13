@@ -248,6 +248,22 @@ class PipelineStatsTestCase(TestCase):
         stage_sum = sum(data[stage] for stage, _ in PipelineItem.STAGE_CHOICES)
         self.assertEqual(stage_sum, data['total'])
 
+    def test_stage_outside_the_model_vocabulary_still_reconciles(self):
+        # choices are not a DB constraint, so a legacy/garbled stage can exist.
+        # It must not inflate `total` while hiding from every key.
+        item = PipelineItem.objects.create(
+            original_filename='legacy.mp3',
+            current_path='/tmp/legacy.mp3',
+            stage='downloaded',
+        )
+        PipelineItem.objects.filter(pk=item.pk).update(stage='from_2019')
+
+        data = self.client.get('/api/organize/pipeline/stats/').json()
+
+        self.assertEqual(data['total'], 1)
+        self.assertEqual(data['from_2019'], 1)
+        self.assertEqual(sum(v for k, v in data.items() if k not in ('total', 'archived')), data['total'])
+
 
 class PipelineListArchiveTestCase(TestCase):
     """Archived filtering + the archived tally belong to the server.
@@ -338,7 +354,7 @@ class PipelineScanSummaryTestCase(TestCase):
         self.assertEqual(data['already_tracked'], 0)
         self.assertEqual(data['missing_files'], 0)
         self.assertEqual(data['error_count'], 0)
-        self.assertIn('Nothing new', data['message'])
+        self.assertIn('nothing new', data['message'])
 
     def test_already_tracked_downloads_are_distinguished(self):
         download = Download.objects.create(
@@ -392,6 +408,36 @@ class PipelineScanSummaryTestCase(TestCase):
         self.assertIn('disk on fire', data['errors'][0]['error'])
         self.assertIn('errored', data['message'])
 
+    def test_mixed_outcome_names_every_category_not_just_a_headline(self):
+        # A run that both created and failed must not read as an unqualified
+        # success, and one error among many tracked rows is not "all errored".
+        for name in ('boom.mp3', 'ok.mp3'):
+            Download.objects.create(
+                username='peer-a', filename=f'Releases\\{name}',
+                status='completed', progress=100,
+            )
+        tracked = Download.objects.create(
+            username='peer-b', filename='Releases\\known.mp3',
+            status='completed', progress=100,
+        )
+        PipelineItem.objects.create(
+            download=tracked, original_filename='known.mp3',
+            current_path='/nowhere/known.mp3', stage='downloaded',
+        )
+        os.makedirs(os.path.join(self.tmpdir.name, '01_downloaded'), exist_ok=True)
+        with open(os.path.join(self.tmpdir.name, '01_downloaded', 'orphan.mp3'), 'wb') as fh:
+            fh.write(b'audio')
+
+        with patch('organize.services.pipeline.discover_and_ingest',
+                   side_effect=RuntimeError('boom')):
+            data = self.client.post('/api/organize/pipeline/scan/').json()
+
+        self.assertEqual(data['created'], 1)          # the filesystem orphan
+        self.assertEqual(data['already_tracked'], 1)
+        self.assertEqual(data['error_count'], 2)
+        for fragment in ('1 created', '1 already tracked', '2 errored'):
+            self.assertIn(fragment, data['message'])
+
 
 class PipelineSkipTestCase(TestCase):
     """Skip advanced item.stage without moving the file — DB and disk desynced."""
@@ -425,19 +471,38 @@ class PipelineSkipTestCase(TestCase):
         self.assertFalse(os.path.exists(path))
         self.assertNotIn('warning', resp.json())
 
-    def test_skip_without_bytes_on_the_workbench_labels_the_divergence(self):
+    def test_skip_without_bytes_on_the_workbench_is_refused(self):
+        # Advancing the row here would recreate the very DB/disk divergence
+        # this endpoint was fixed to stop producing, so it must refuse.
+        path = os.path.join(self.tmpdir.name, '01_downloaded', 'gone.mp3')
         item = PipelineItem.objects.create(
-            original_filename='gone.mp3',
-            current_path=os.path.join(self.tmpdir.name, '01_downloaded', 'gone.mp3'),
-            stage='downloaded',
+            original_filename='gone.mp3', current_path=path, stage='downloaded',
         )
 
         resp = self.client.post(f'/api/organize/pipeline/{item.id}/skip/')
         item.refresh_from_db()
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(item.stage, 'tagged')
-        self.assertIn('warning', resp.json())
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(item.stage, 'downloaded')
+        self.assertEqual(item.current_path, path)
+
+    def test_skip_is_refused_while_a_worker_owns_the_file(self):
+        # Skip moves bytes now, so honouring it mid-tag would yank the file out
+        # from under the running worker.
+        ensure_pipeline_folders()
+        path = os.path.join(stage_folder_path('downloaded'), 'busy.mp3')
+        with open(path, 'wb') as fh:
+            fh.write(b'audio')
+        item = PipelineItem.objects.create(
+            original_filename='busy.mp3', current_path=path, stage='tagging',
+        )
+
+        resp = self.client.post(f'/api/organize/pipeline/{item.id}/skip/')
+        item.refresh_from_db()
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(item.stage, 'tagging')
+        self.assertTrue(os.path.exists(path))
 
     def test_skip_from_a_terminal_stage_still_rejected(self):
         item = PipelineItem.objects.create(

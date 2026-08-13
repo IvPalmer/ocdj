@@ -157,6 +157,11 @@ def pipeline_stats(request):
         .values_list('stage', 'count')
     )
     stats = {stage: counts.get(stage, 0) for stage, _label in PipelineItem.STAGE_CHOICES}
+    # choices aren't a DB constraint. A row carrying a stage outside the model
+    # vocabulary (legacy data, a half-applied migration) would land in `total`
+    # with no key of its own — the exact shape of the bug being fixed here — so
+    # report it rather than let the numbers stop reconciling again.
+    stats.update({s: c for s, c in counts.items() if s not in stats})
     stats['total'] = sum(counts.values())
     stats['archived'] = PipelineItem.objects.filter(archive_state='archived').count()
     return Response(stats)
@@ -236,31 +241,42 @@ def pipeline_skip(request, pk):
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
-    from .services.pipeline import move_item_to_stage, next_skippable_stage
+    from .services.pipeline import (
+        ACTIVE_STAGE_TO_DONE, move_item_to_stage, next_skippable_stage,
+    )
+
+    # A worker owns the file while the item sits on a transient stage; skipping
+    # now that skip moves bytes would yank the file out from under an in-flight
+    # tag/rename/convert. The table already hides Skip here — the API has to
+    # mean it too, not just the button.
+    if item.stage in ACTIVE_STAGE_TO_DONE:
+        return Response(
+            {'error': f'Item is being processed (stage={item.stage}); wait for it to settle'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
     next_stage = next_skippable_stage(item.stage)
     if not next_stage:
         return Response({'error': 'Cannot skip from this stage'}, status=http_status.HTTP_400_BAD_REQUEST)
 
-    # Skipping still has to move the bytes. Advancing only item.stage left the
+    # Skipping has to move the bytes too. Advancing only item.stage left the
     # file in 01_downloaded while the DB claimed 'tagged' — the numbered
     # folders are the operator-facing workbench, so that divergence is silent
-    # data rot. When the file isn't on the workbench at all (already drained,
-    # moved by hand) we advance the row but say so instead of pretending.
-    if item.current_path and os.path.exists(item.current_path):
-        try:
-            move_item_to_stage(item, next_stage)
-        except OSError as e:
-            return Response({'error': f'Skip failed moving file: {e}'},
-                            status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
+    # data rot. With no bytes on the workbench the move is impossible, so
+    # refuse outright rather than record a stage the disk can't back.
+    if not item.current_path or not os.path.exists(item.current_path):
+        return Response(
+            {'error': 'File is not on the workbench, so it cannot be skipped to '
+                      'the next stage folder. Use Remove to clear the row.'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
 
-    item.stage = next_stage
-    item.save(update_fields=['stage'])
-    return Response({
-        'message': f'Skipped to {item.stage}',
-        'stage': item.stage,
-        'warning': 'file is not on the workbench; stage advanced without moving bytes',
-    })
+    try:
+        move_item_to_stage(item, next_stage)
+    except OSError as e:
+        return Response({'error': f'Skip failed moving file: {e}'},
+                        status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
 
 
 @api_view(['POST'])
@@ -497,17 +513,17 @@ def pipeline_scan(request):
     from .services.pipeline import scan_completed_downloads
     summary = scan_completed_downloads()
 
-    created = summary['created']
-    if created:
-        message = f'Created {created} new pipeline item{"s" if created != 1 else ""}'
-    elif summary['error_count']:
-        message = 'Nothing imported — every candidate errored'
-    elif summary['missing_files']:
-        message = f"Nothing imported — {summary['missing_files']} download(s) missing on disk"
-    elif summary['already_tracked']:
-        message = f"Nothing new — all {summary['already_tracked']} completed download(s) already tracked"
-    else:
-        message = 'Nothing new to import'
+    # Report every non-zero outcome. Picking a single headline meant a run that
+    # created 5 and errored on 3 read as an unqualified success, and one error
+    # among forty already-tracked downloads read as "everything errored".
+    parts = [
+        (summary['created'], 'created'),
+        (summary['already_tracked'], 'already tracked'),
+        (summary['missing_files'], 'missing on disk'),
+        (summary['error_count'], 'errored'),
+    ]
+    described = [f'{n} {label}' for n, label in parts if n]
+    message = f"Scan: {', '.join(described)}" if described else 'Scan: nothing new to import'
 
     return Response({'message': message, **summary})
 

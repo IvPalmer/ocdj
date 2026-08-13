@@ -425,12 +425,11 @@ function OrganizePanel() {
     ['Scan Downloads', scanDownloads],
   ].filter(([, m]) => m.isError)
 
+  // The scan message already names every non-zero outcome; a run that errored
+  // must not also be dressed in the success colour.
   const scan = scanDownloads.data
-  const scanDetail = scan && [
-    scan.already_tracked ? `${scan.already_tracked} already tracked` : null,
-    scan.missing_files ? `${scan.missing_files} missing on disk` : null,
-    scan.error_count ? `${scan.error_count} errored` : null,
-  ].filter(Boolean).join(' · ')
+  const scanHadErrors = !!scan?.error_count
+  const scanFirstError = scan?.errors?.[0]?.error
 
   return (
     <div className="organize-panel">
@@ -650,11 +649,11 @@ function OrganizePanel() {
           <div className="organize-toast">{processPipeline.data.message}</div>
         )}
         {scan?.message && (
-          <div className="organize-toast">
+          <div className={`organize-toast ${scanHadErrors ? 'organize-toast--error' : ''}`}>
             {scan.message}
-            {/* A bare "Created 0" reads as a broken scan. Say what was skipped
-                and why so a healthy no-op is legible as one. */}
-            {scanDetail && <span className="organize-toast__detail">{scanDetail}</span>}
+            {scanFirstError && (
+              <span className="organize-toast__detail">first error: {scanFirstError}</span>
+            )}
           </div>
         )}
         {actionErrors.map(([label, m]) => (

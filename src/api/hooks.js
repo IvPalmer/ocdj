@@ -642,15 +642,27 @@ function invalidatePipeline(qc) {
 
 // Process / retry hand the work to a background thread and return 200 straight
 // away, so an invalidate that fires right now can refetch the *pre-worker*
-// state: no transient stage in the payload, the list hook's refetchInterval
-// evaluates to false, polling never starts and the table stays stale forever
-// after a perfectly successful action. Re-invalidate shortly after so the
-// worker's first stage write is what starts the poll.
-const WORKER_SETTLE_MS = 1500
+// state: no transient stage in the payload, refetchInterval below evaluates to
+// false, polling never starts and the table stays stale forever after a
+// perfectly successful action.
+//
+// A single delayed re-invalidate would only move the guess. Instead a kick
+// opens a window during which the pipeline queries poll unconditionally; once
+// the worker writes its first transient stage the existing stage-based rule
+// sustains the polling on its own, and when the window closes with nothing in
+// flight it goes quiet again.
+const KICK_POLL_WINDOW_MS = 30000
+const KICK_POLL_INTERVAL_MS = 3000
+
+let pipelineKickedUntil = 0
+
+function pipelineKickActive() {
+  return Date.now() < pipelineKickedUntil
+}
 
 function invalidatePipelineAfterWorkerKick(qc) {
+  pipelineKickedUntil = Date.now() + KICK_POLL_WINDOW_MS
   invalidatePipeline(qc)
-  setTimeout(() => invalidatePipeline(qc), WORKER_SETTLE_MS)
 }
 
 export function usePipelineStats() {
@@ -659,7 +671,8 @@ export function usePipelineStats() {
     queryFn: () => api.get('/organize/pipeline/stats/'),
     refetchInterval: (query) => {
       const data = query.state.data
-      if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return 3000
+      if (data?.tagging > 0 || data?.renaming > 0 || data?.converting > 0) return KICK_POLL_INTERVAL_MS
+      if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
       return 30000
     },
   })
@@ -680,7 +693,8 @@ export function usePipelineItems(params = {}) {
     refetchInterval: (query) => {
       const data = query.state.data
       const items = data?.results || []
-      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return 3000
+      if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return KICK_POLL_INTERVAL_MS
+      if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
       return false
     },
   })
