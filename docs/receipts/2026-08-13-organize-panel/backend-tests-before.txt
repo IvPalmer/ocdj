@@ -1,0 +1,17 @@
+# Backend test suite — BEFORE (origin/vps-deploy @ 79314dd)
+# Run: docker compose run --rm --no-deps -v /home/ubuntu/ocdj/backend:/app backend python manage.py test organize --noinput
+# Ephemeral container, clone tree bind-mounted at /app. No prod container rebuilt or restarted.
+# Captured 2026-08-13
+
+ Container ocdj-backend-run-822e1531e164 Creating 
+ Container ocdj-backend-run-822e1531e164 Created 
+[cratemate] Missing env vars: CRATEMATE_DISCOGS_TOKEN, CRATEMATE_SPOTIFY_CLIENT_ID, CRATEMATE_SPOTIFY_CLIENT_SECRET. Identify endpoint will return 503 until these are set in ~/.secrets/ocdj-cratemate.env (Mac) or Dokploy env (VPS).
+Found 39 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+.......................................
+----------------------------------------------------------------------
+Ran 39 tests in 0.149s
+
+OK
+Destroying test database for alias 'default'...

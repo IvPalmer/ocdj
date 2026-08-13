@@ -1,0 +1,45 @@
+# Backend test suite — AFTER (task/organize-panel-truthful-state @ 096ae39)
+# Run: docker compose run --rm --no-deps -v /home/ubuntu/ocdj/backend:/app backend python manage.py test organize --noinput
+# Ephemeral container, clone tree bind-mounted at /app. No prod container rebuilt or restarted.
+# Captured 2026-08-13
+
+ Container ocdj-backend-run-bc258abbc260 Creating 
+ Container ocdj-backend-run-bc258abbc260 Created 
+[cratemate] Missing env vars: CRATEMATE_DISCOGS_TOKEN, CRATEMATE_SPOTIFY_CLIENT_ID, CRATEMATE_SPOTIFY_CLIENT_SECRET. Identify endpoint will return 503 until these are set in ~/.secrets/ocdj-cratemate.env (Mac) or Dokploy env (VPS).
+Found 52 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+..............File not found for download 2: /tmp/tmpd8c3ky2d/peer-a/Releases/gone.mp3
+..Error ingesting download 3: disk on fire
+....................................
+----------------------------------------------------------------------
+Ran 52 tests in 0.360s
+
+OK
+Destroying test database for alias 'default'...
+
+# ── Full backend suite (all apps), same branch, same method ──
+
+ Container ocdj-backend-run-c7848f6ae3cd Creating 
+ Container ocdj-backend-run-c7848f6ae3cd Created 
+[cratemate] Missing env vars: CRATEMATE_DISCOGS_TOKEN, CRATEMATE_SPOTIFY_CLIENT_ID, CRATEMATE_SPOTIFY_CLIENT_SECRET. Identify endpoint will return 503 until these are set in ~/.secrets/ocdj-cratemate.env (Mac) or Dokploy env (VPS).
+Found 140 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+..............File not found for download 2: /tmp/tmpl1mh_z1a/peer-a/Releases/gone.mp3
+..Error ingesting download 3: disk on fire
+.............................traxdb local: stale claim token presented for abc
+....traxdb local: folder abc failed on Mac: pixeldrain 404
+.........Download #3 refused: target is not vps
+.................................ytfetch job 27: could not locate PipelineItem for /tmp/tmp1748bba6/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
+.ytfetch job 28: could not locate PipelineItem for /tmp/tmp0crcbet1/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
+........ytfetch job 36: could not locate PipelineItem for /tmp/tmpvgk3_bjr/01_downloaded/YouTube/U - T [abc123].wav after scan
+..ytfetch job 38: could not locate PipelineItem for /tmp/tmpz8e7e545/01_downloaded/YouTube/U - T [abc123].wav after scan
+..........................Blogger API 429 (https://www.googleapis.com/blogger/v3/blogs/byurl); retry 1/2 in 2s
+.Blogger API network error (https://www.googleapis.com/blogger/v3/blogs/byurl): ConnectionError('reset by peer'); retry 1/2 in 2s
+...........
+----------------------------------------------------------------------
+Ran 140 tests in 1.144s
+
+OK
+Destroying test database for alias 'default'...
