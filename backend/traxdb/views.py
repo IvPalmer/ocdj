@@ -349,10 +349,21 @@ def cancel_download(request, pk):
 def folders_list(request):
     """List scraped folders with filtering."""
     from django.db.models import Count, Q as DBQ
+    # `.annotate()` turns this into a GROUP BY query, and since Django 3.1 that
+    # silently drops `Meta.ordering` (['-scraped_at']). With no explicit
+    # order_by the row order is undefined, and in practice Postgres returned
+    # them oldest-first — so with the frontend's limit=100 over 160 folders,
+    # freshly scraped lists fell off the end and the panel looked like sync had
+    # never found them.
+    #
+    # Order by blog date rather than `-scraped_at` alone: one sync inserts a
+    # batch newest-post-first, so scrape order runs *backwards* against the
+    # dates the panel actually displays. `inferred_date` is an ISO string, so
+    # lexical sort is chronological and blank dates land last.
     qs = ScrapedFolder.objects.annotate(
         tracks_count_annotated=Count('tracks'),
         tracks_downloaded_annotated=Count('tracks', filter=DBQ(tracks__downloaded=True)),
-    )
+    ).order_by('-inferred_date', '-scraped_at', '-id')
 
     # Filter by download status
     dl_status = request.query_params.get('download_status')
