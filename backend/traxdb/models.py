@@ -119,6 +119,10 @@ class MacInventory(models.Model):
     """
 
     date_dirs = models.JSONField(default=list, help_text='YYYY-MM-DD folders present on the Mac')
+    # Reported alongside the folder list purely so the UI can still show the
+    # size of the archive — the VPS can no longer stat it.
+    file_count = models.IntegerField(default=0)
+    total_bytes = models.BigIntegerField(default=0)
     reported_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -128,7 +132,7 @@ class MacInventory(models.Model):
         return f"{len(self.date_dirs or [])} date dirs @ {self.reported_at:%Y-%m-%d %H:%M}"
 
     @classmethod
-    def report(cls, date_dirs, *, merge=False):
+    def report(cls, date_dirs, *, merge=False, file_count=None, total_bytes=None):
         """Store the Mac's listing.
 
         `merge=True` adds to what's already recorded instead of replacing it —
@@ -140,12 +144,24 @@ class MacInventory(models.Model):
         with transaction.atomic():
             row = cls.objects.select_for_update().filter(pk=1).first()
             if row is None:
-                row = cls.objects.create(pk=1, date_dirs=sorted(incoming))
+                row = cls.objects.create(
+                    pk=1, date_dirs=sorted(incoming),
+                    file_count=file_count or 0, total_bytes=total_bytes or 0,
+                )
                 return row
             if merge:
                 incoming |= set(row.date_dirs or [])
             row.date_dirs = sorted(incoming)
-            row.save(update_fields=['date_dirs', 'reported_at'])
+            fields = ['date_dirs', 'reported_at']
+            # A single-folder merge carries no archive-wide totals; keep the
+            # last full report's numbers rather than zeroing them.
+            if file_count is not None:
+                row.file_count = file_count
+                fields.append('file_count')
+            if total_bytes is not None:
+                row.total_bytes = total_bytes
+                fields.append('total_bytes')
+            row.save(update_fields=fields)
         return row
 
     @classmethod

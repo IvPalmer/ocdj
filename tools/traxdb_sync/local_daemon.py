@@ -84,6 +84,28 @@ def local_date_dirs(root: str) -> List[str]:
     return sorted(out)
 
 
+def archive_totals(root: str, date_dirs: List[str]) -> tuple:
+    """(file_count, total_bytes) across the date folders.
+
+    Only so the web panel can still show the archive's size — the VPS holds
+    nothing to measure now.
+    """
+    files = 0
+    size = 0
+    for d in date_dirs:
+        try:
+            for entry in os.scandir(os.path.join(root, d)):
+                if entry.is_file() and not entry.name.startswith('.'):
+                    files += 1
+                    try:
+                        size += entry.stat().st_size
+                    except OSError:
+                        pass
+        except OSError:
+            continue
+    return files, size
+
+
 def safe_name(filename: str) -> str:
     """Reduce a Pixeldrain-supplied filename to a bare, safe basename.
 
@@ -103,8 +125,11 @@ class API:
         self.s = requests.Session()
         self.s.headers.update({"Authorization": f"Bearer {token}"})
 
-    def report_inventory(self, date_dirs: List[str]) -> int:
-        r = self.s.post(f"{self.base}/local/inventory/", json={"date_dirs": date_dirs},
+    def report_inventory(self, date_dirs: List[str], file_count: int = 0,
+                         total_bytes: int = 0) -> int:
+        r = self.s.post(f"{self.base}/local/inventory/",
+                        json={"date_dirs": date_dirs, "file_count": file_count,
+                              "total_bytes": total_bytes},
                         timeout=self.timeout)
         r.raise_for_status()
         return r.json().get("count", 0)
@@ -259,8 +284,10 @@ def run_cycle(cfg: Dict[str, str], limit: int) -> int:
     flush_receipts(api, root)
 
     dirs = local_date_dirs(root)
-    api.report_inventory(dirs)
-    log(f"reported {len(dirs)} local date folders (newest {dirs[-1] if dirs else 'none'})")
+    files, size = archive_totals(root, dirs)
+    api.report_inventory(dirs, files, size)
+    log(f"reported {len(dirs)} local date folders, {files} files, "
+        f"{size / 1e9:.1f} GB (newest {dirs[-1] if dirs else 'none'})")
 
     items = api.claim(limit)
     if not items:
@@ -308,8 +335,10 @@ def main() -> int:
 
     if args.inventory_only:
         api = API(cfg["TRAXDB_API_URL"], cfg["TRAXDB_TOKEN"])
-        dirs = local_date_dirs(cfg["TRAXDB_LOCAL_ROOT"])
-        log(f"reported {api.report_inventory(dirs)} date folders")
+        root = cfg["TRAXDB_LOCAL_ROOT"]
+        dirs = local_date_dirs(root)
+        files, size = archive_totals(root, dirs)
+        log(f"reported {api.report_inventory(dirs, files, size)} date folders")
         return 0
 
     try:

@@ -89,7 +89,16 @@ def local_inventory(request):
             status=http_status.HTTP_400_BAD_REQUEST,
         )
 
-    row = MacInventory.report(date_dirs)
+    def _int(key):
+        try:
+            v = request.data.get(key)
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    row = MacInventory.report(
+        date_dirs, file_count=_int('file_count'), total_bytes=_int('total_bytes'),
+    )
     logger.info('traxdb local: Mac reported %d date dirs', len(row.date_dirs))
     return Response({'count': len(row.date_dirs), 'reported_at': row.reported_at})
 

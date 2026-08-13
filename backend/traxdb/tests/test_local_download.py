@@ -204,6 +204,30 @@ class LocalDownloadAPITestCase(TestCase):
         MacInventory.report(['2026-07-15'], merge=True)
         self.assertEqual(MacInventory.current(), ['2026-07-13', '2026-07-15'])
 
+    def test_merge_keeps_last_full_report_totals(self):
+        """A single-folder fold carries no archive-wide numbers; it must not
+        zero the size the panel shows."""
+        MacInventory.report(['2026-07-13'], file_count=900, total_bytes=101_000_000_000)
+        MacInventory.report(['2026-07-15'], merge=True)
+        row = MacInventory.objects.get(pk=1)
+        self.assertEqual(row.file_count, 900)
+        self.assertEqual(row.total_bytes, 101_000_000_000)
+
+    def test_inventory_endpoint_reports_the_mac_not_the_empty_vps(self):
+        """The VPS holds no audio now — scanning it would show the operator's
+        101 GB archive as empty."""
+        self._post('/api/traxdb/local/inventory/', {
+            'date_dirs': ['2026-05-28', '2026-07-15'],
+            'file_count': 900, 'total_bytes': 101_000_000_000,
+        })
+        data = self.client.get('/api/traxdb/inventory/').json()
+        self.assertEqual(data['archive_location'], 'mac')
+        self.assertEqual(data['date_dirs_count'], 2)
+        self.assertEqual(data['latest_date'], '2026-07-15')
+        self.assertEqual(data['oldest_date'], '2026-05-28')
+        self.assertEqual(data['file_count'], 900)
+        self.assertEqual(data['total_bytes'], 101_000_000_000)
+
 
 @override_settings(ALLOWED_HOSTS=['*'])
 class VpsDownloadDisabledTestCase(TestCase):
