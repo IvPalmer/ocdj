@@ -674,10 +674,12 @@ function OrganizePanel() {
                         removeItem.mutate(item.id)
                       }
                     }}
-                    disabled={removeItem.isPending || item.archive_state === 'draining'}
+                    disabled={removeItem.isPending || LOCKED_STATES.has(item.archive_state)}
                     title={item.archive_state === 'draining'
                       ? 'Being drained to your Mac — removing it now would delete the file mid-transfer'
-                      : 'Remove this row (and any file still on the workbench)'}
+                      : item.archive_state === 'archived'
+                        ? 'Archived: this row is the record that the track reached your Mac library'
+                        : 'Remove this row (and any file still on the workbench)'}
                   >
                     Remove
                   </button>
