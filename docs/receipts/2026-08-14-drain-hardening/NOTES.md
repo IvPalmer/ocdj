@@ -19,8 +19,8 @@ ssh main-instance 'cd /home/ubuntu/ocdj && git fetch origin -q \
 | Run | Tests | Result | File |
 |---|---|---|---|
 | baseline `origin/vps-deploy` | 143 | OK | `backend-tests-before.txt` |
-| branch | 183 | OK | `backend-tests-after.txt` |
-| frontend `npm run build` (Mac) | — | built in 685ms | `frontend-build.txt` |
+| branch (after codex review round) | 186 | OK | `backend-tests-after.txt` |
+| frontend `npm run build` (Mac) | — | built in 710ms | `frontend-build.txt` |
 
 `migration-check.txt` — `makemigrations --check --dry-run` on both baseline and
 branch. Both report the same two index removals (`idx_pipeline_archstate`,
@@ -100,9 +100,52 @@ field is fully covered by `0004_pipelineitem_claim_token`.
     `test_absent_key_leaves_the_tag_alone` (the pipeline tagger's additive
     behaviour is preserved), `test_refresh_clears_a_field_the_operator_emptied`.
 
+## Codex review round (findings folded in)
+
+A review pass over the finished branch found that the guards themselves were
+check-then-act. Applied on top:
+
+- `drain confirm` / `drain fail`, `PATCH` / `DELETE` on `pipeline_detail`,
+  `retag` and `retry-drain` now read the row with `select_for_update()` inside
+  the transaction that writes it. Without the lock a re-claim could rotate the
+  token between the token check and the `rmtree`.
+- `publish_pipeline_item` runs under the same lock and persists stage /
+  archive_state / sha256 / work_path / current_path in **one** save; the
+  two-step version had a window where the row read `publishable` while
+  `current_path` still pointed at the pre-move file.
+- Claim now rejects a `work_path` that is not a regular file inside
+  `<publish>/<id>/` and marks the row failed. Otherwise such a row is claimed
+  forever: confirm refuses to delete it, and `draining` refuses edits, so
+  nothing could repair it (`test_claim_marks_a_noncanonical_row_failed_instead_of_wedging_it`).
+- Archived rows refuse DELETE (`test_delete_refused_on_an_archived_row`), and
+  the Remove button is disabled for them.
+- Refresh normalises the submitted metadata once and stores what it writes, so
+  the row, the embedded tags and the filename can't disagree
+  (`test_refresh_stores_the_same_text_it_writes_to_the_tags`).
+
+Reviewed and **not** applied:
+
+- *"Refresh isn't filesystem-transactional"* — true: if the atomic tag swap
+  succeeds and the subsequent `os.rename` fails, the DB rolls back while the
+  bytes have changed, leaving a stale sha256. Both reorderings trade that for a
+  worse failure (a renamed file with no DB path pointing at it, which
+  `resolve_artifact_path` cannot recover). The stale-hash case is visible and
+  recoverable through the new UI: Retry drain reports the mismatch and Save &
+  Apply Tags re-hashes. Left as a documented residual.
+- *Daemon-side reconciliation* (a delivery that lands in `_Review` and dies
+  before confirm can never be confirmed later) — real, pre-existing, and in the
+  daemon, not this repo.
+- *`_write_grouping_tag` corrupts WAV/FLAC* — pre-existing publisher bug,
+  outside these ten items: it uses bare `ID3(path).save(path)` for everything
+  except AIFF, which prepends an ID3 blob instead of writing a RIFF chunk or a
+  Vorbis comment. Published files are normally AIFF/MP3 (conversion rules), so
+  it is latent. Flagged separately, not fixed here.
+
 ## Deploy prerequisite — the Mac daemon must change first-or-together
 
-`~/bin/ocdj-drain.sh` (not in this repo) does not send `claim_token`. Once this
+The daemon is tracked in the **elder-brain** repo at
+`scripts/ocdj-drain/ocdj-drain.sh` (byte-identical to the deployed
+`~/bin/ocdj-drain.sh`). It does not send `claim_token`. Once this
 backend is deployed, every confirm/fail from the current daemon returns 409 and
 nothing archives. The daemon needs, in `main()`'s per-track parsing, the
 `claim_token` field from `/publishable/`, threaded into `drain_one` and both

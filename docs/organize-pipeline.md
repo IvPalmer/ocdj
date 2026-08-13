@@ -97,6 +97,8 @@ artifact may already have been replaced.
 Confirm also refuses to `rmtree` anything that is not exactly
 `<publish>/<id>/`.
 
-**Daemon contract:** `~/bin/ocdj-drain.sh` on the Mac must send the token back
-on confirm/fail. Deploying this backend without that change makes every drain
-confirmation 409.
+**Daemon contract:** the Mac daemon (`elder-brain` repo,
+`scripts/ocdj-drain/ocdj-drain.sh`, installed as `~/bin/ocdj-drain.sh`) must
+send the token back on confirm/fail. Deploying this backend without that change
+makes every drain confirmation 409. The daemon can be updated first: the
+current backend ignores unknown body keys.

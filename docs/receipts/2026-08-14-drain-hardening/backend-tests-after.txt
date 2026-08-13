@@ -1,7 +1,7 @@
- Container ocdj-backend-run-895393bb9d43 Creating 
- Container ocdj-backend-run-895393bb9d43 Created 
+ Container ocdj-backend-run-04b0495b376c Creating 
+ Container ocdj-backend-run-04b0495b376c Created 
 [cratemate] Missing env vars: CRATEMATE_DISCOGS_TOKEN, CRATEMATE_SPOTIFY_CLIENT_ID, CRATEMATE_SPOTIFY_CLIENT_SECRET. Identify endpoint will return 503 until these are set in ~/.secrets/ocdj-cratemate.env (Mac) or Dokploy env (VPS).
-Found 183 test(s).
+Found 186 test(s).
 Creating test database for alias 'default' ('test_djtools')...
 Operations to perform:
   Synchronize unmigrated apps: corsheaders, dig, django_filters, djhuey, messages, rest_framework, staticfiles
@@ -67,16 +67,18 @@ ok
 test_confirm_with_the_live_token_archives_and_deletes (drain.tests.test_claim_tokens.ConfirmRequiresLiveClaimTests.test_confirm_with_the_live_token_archives_and_deletes) ... ok
 test_confirm_without_a_token_is_refused (drain.tests.test_claim_tokens.ConfirmRequiresLiveClaimTests.test_confirm_without_a_token_is_refused) ... drain: stale or missing claim token for item 7 — refusing
 ok
-test_claim_marks_a_row_failed_when_the_work_path_is_gone (drain.tests.test_claim_tokens.PublishDirValidationTests.test_claim_marks_a_row_failed_when_the_work_path_is_gone) ... drain: claim found item 8 but work_path missing; marked failed
+test_claim_marks_a_noncanonical_row_failed_instead_of_wedging_it (drain.tests.test_claim_tokens.PublishDirValidationTests.test_claim_marks_a_noncanonical_row_failed_instead_of_wedging_it) ... drain: item 8 unclaimable — work_path outside the publish directory: /tmp/tmpnhk0xa6l/not-ours/track.wav; marked failed
 ok
-test_confirm_refuses_a_work_path_outside_the_publish_dir (drain.tests.test_claim_tokens.PublishDirValidationTests.test_confirm_refuses_a_work_path_outside_the_publish_dir) ... drain: refusing to delete non-canonical dir for item 9: /tmp/tmphzmgih4n/not-ours
+test_claim_marks_a_row_failed_when_the_work_path_is_gone (drain.tests.test_claim_tokens.PublishDirValidationTests.test_claim_marks_a_row_failed_when_the_work_path_is_gone) ... drain: item 9 unclaimable — work_path missing at claim: /tmp/tmp6gm4dme_/06_publish/9/Urban Myths - Basement.wav; marked failed
 ok
-test_a_reclaim_after_lease_expiry_invalidates_the_old_token (drain.tests.test_claim_tokens.StaleClaimTests.test_a_reclaim_after_lease_expiry_invalidates_the_old_token) ... drain: stale or missing claim token for item 10 — refusing
+test_confirm_refuses_a_work_path_outside_the_publish_dir (drain.tests.test_claim_tokens.PublishDirValidationTests.test_confirm_refuses_a_work_path_outside_the_publish_dir) ... drain: refusing to delete non-canonical dir for item 10: /tmp/tmpornu3_n_/not-ours
+ok
+test_a_reclaim_after_lease_expiry_invalidates_the_old_token (drain.tests.test_claim_tokens.StaleClaimTests.test_a_reclaim_after_lease_expiry_invalidates_the_old_token) ... drain: stale or missing claim token for item 11 — refusing
 ok
 test_an_edit_after_a_released_claim_invalidates_the_confirmation (drain.tests.test_claim_tokens.StaleClaimTests.test_an_edit_after_a_released_claim_invalidates_the_confirmation)
 The data-loss sequence, replayed end to end. ... ok
 test_an_edit_is_refused_outright_while_the_claim_is_live (drain.tests.test_claim_tokens.StaleClaimTests.test_an_edit_is_refused_outright_while_the_claim_is_live) ... ok
-test_fail_also_requires_the_live_token (drain.tests.test_claim_tokens.StaleClaimTests.test_fail_also_requires_the_live_token) ... drain: stale or missing claim token for item 13 — refusing
+test_fail_also_requires_the_live_token (drain.tests.test_claim_tokens.StaleClaimTests.test_fail_also_requires_the_live_token) ... drain: stale or missing claim token for item 14 — refusing
 ok
 test_fail_with_the_live_token_releases_the_claim (drain.tests.test_claim_tokens.StaleClaimTests.test_fail_with_the_live_token_releases_the_claim) ... ok
 test_empty_genre (organize.tests.test_pipeline.CleanGenreTestCase.test_empty_genre) ... ok
@@ -93,7 +95,7 @@ test_archived_count_respects_the_stage_filter (organize.tests.test_pipeline.Pipe
 test_archived_excluded_by_default_with_global_count (organize.tests.test_pipeline.PipelineListArchiveTestCase.test_archived_excluded_by_default_with_global_count) ... ok
 test_include_archived_returns_them (organize.tests.test_pipeline.PipelineListArchiveTestCase.test_include_archived_returns_them) ... ok
 test_already_tracked_downloads_are_distinguished (organize.tests.test_pipeline.PipelineScanSummaryTestCase.test_already_tracked_downloads_are_distinguished) ... ok
-test_download_whose_file_vanished_is_reported_as_missing (organize.tests.test_pipeline.PipelineScanSummaryTestCase.test_download_whose_file_vanished_is_reported_as_missing) ... File not found for download 2: /tmp/tmpxlj_j696/peer-a/Releases/gone.mp3
+test_download_whose_file_vanished_is_reported_as_missing (organize.tests.test_pipeline.PipelineScanSummaryTestCase.test_download_whose_file_vanished_is_reported_as_missing) ... File not found for download 2: /tmp/tmpfge19w0c/peer-a/Releases/gone.mp3
 ok
 test_idle_pipeline_reports_nothing_new_not_a_failure (organize.tests.test_pipeline.PipelineScanSummaryTestCase.test_idle_pipeline_reports_nothing_new_not_a_failure) ... ok
 test_ingest_crash_is_surfaced_not_swallowed (organize.tests.test_pipeline.PipelineScanSummaryTestCase.test_ingest_crash_is_surfaced_not_swallowed) ... Error ingesting download 3: disk on fire
@@ -127,12 +129,14 @@ test_refresh_moves_work_path_and_recomputes_hash (organize.tests.test_published_
 test_refresh_refuses_a_workbench_item (organize.tests.test_published_refresh.RefreshServiceTests.test_refresh_refuses_a_workbench_item) ... ok
 test_refresh_refuses_while_draining (organize.tests.test_published_refresh.RefreshServiceTests.test_refresh_refuses_while_draining) ... ok
 test_refresh_relocates_a_file_left_outside_the_publish_dir (organize.tests.test_published_refresh.RefreshServiceTests.test_refresh_relocates_a_file_left_outside_the_publish_dir) ... ok
+test_refresh_stores_the_same_text_it_writes_to_the_tags (organize.tests.test_published_refresh.RefreshServiceTests.test_refresh_stores_the_same_text_it_writes_to_the_tags) ... ok
 test_rename_leaves_an_unrelated_work_path_alone (organize.tests.test_published_refresh.RenameInvariantTests.test_rename_leaves_an_unrelated_work_path_alone) ... ok
 test_rename_moves_work_path_when_it_tracks_the_same_file (organize.tests.test_published_refresh.RenameInvariantTests.test_rename_moves_work_path_when_it_tracks_the_same_file) ... ok
 test_retry_refuses_when_the_bytes_no_longer_match (organize.tests.test_published_refresh.RetryDrainTests.test_retry_refuses_when_the_bytes_no_longer_match) ... ok
 test_retry_refuses_when_the_file_is_gone (organize.tests.test_published_refresh.RetryDrainTests.test_retry_refuses_when_the_file_is_gone) ... ok
 test_retry_repairs_a_stale_work_path (organize.tests.test_published_refresh.RetryDrainTests.test_retry_repairs_a_stale_work_path) ... ok
 test_retry_requeues_a_sound_artifact (organize.tests.test_published_refresh.RetryDrainTests.test_retry_requeues_a_sound_artifact) ... ok
+test_delete_refused_on_an_archived_row (organize.tests.test_published_refresh.StateGuardTests.test_delete_refused_on_an_archived_row) ... ok
 test_delete_refused_while_draining_and_file_survives (organize.tests.test_published_refresh.StateGuardTests.test_delete_refused_while_draining_and_file_survives) ... ok
 test_patch_refused_on_a_published_row_and_points_at_refresh (organize.tests.test_published_refresh.StateGuardTests.test_patch_refused_on_a_published_row_and_points_at_refresh) ... ok
 test_patch_refused_while_draining (organize.tests.test_published_refresh.StateGuardTests.test_patch_refused_while_draining) ... ok
@@ -219,9 +223,9 @@ test_retry_only_from_failed (ytfetch.tests.test_ytfetch.RetryTests.test_retry_on
 test_retry_requeues_failed_job (ytfetch.tests.test_ytfetch.RetryTests.test_retry_requeues_failed_job) ... ok
 test_failure_stores_stderr_tail_and_bot_hint (ytfetch.tests.test_ytfetch.TaskFailureTests.test_failure_stores_stderr_tail_and_bot_hint) ... ok
 test_failure_when_no_output_file (ytfetch.tests.test_ytfetch.TaskFailureTests.test_failure_when_no_output_file) ... ok
-test_browser_cookie_auth_is_used_when_cookie_file_is_empty (ytfetch.tests.test_ytfetch.TaskSuccessTests.test_browser_cookie_auth_is_used_when_cookie_file_is_empty) ... ytfetch job 27: could not locate PipelineItem for /tmp/tmpko2gc8zp/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
+test_browser_cookie_auth_is_used_when_cookie_file_is_empty (ytfetch.tests.test_ytfetch.TaskSuccessTests.test_browser_cookie_auth_is_used_when_cookie_file_is_empty) ... ytfetch job 27: could not locate PipelineItem for /tmp/tmp7qhjbpm3/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
 ok
-test_cookie_file_seeds_persistent_self_refreshing_copy (ytfetch.tests.test_ytfetch.TaskSuccessTests.test_cookie_file_seeds_persistent_self_refreshing_copy) ... ytfetch job 28: could not locate PipelineItem for /tmp/tmp7fu9w8fn/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
+test_cookie_file_seeds_persistent_self_refreshing_copy (ytfetch.tests.test_ytfetch.TaskSuccessTests.test_cookie_file_seeds_persistent_self_refreshing_copy) ... ytfetch job 28: could not locate PipelineItem for /tmp/tmp428iudf1/01_downloaded/YouTube/Uploader - Title [abc123].wav after scan
 ok
 test_download_uses_highest_quality_flags (ytfetch.tests.test_ytfetch.TaskSuccessTests.test_download_uses_highest_quality_flags) ... ok
 test_duplicate_enqueue_is_noop_when_already_downloaded (ytfetch.tests.test_ytfetch.TaskSuccessTests.test_duplicate_enqueue_is_noop_when_already_downloaded) ... ok
@@ -231,10 +235,10 @@ test_success_links_item_and_processes (ytfetch.tests.test_ytfetch.TaskSuccessTes
 test_accepts_youtu_be_and_shorts (ytfetch.tests.test_ytfetch.UrlValidationTests.test_accepts_youtu_be_and_shorts) ... ok
 test_accepts_youtube_url_and_enqueues (ytfetch.tests.test_ytfetch.UrlValidationTests.test_accepts_youtube_url_and_enqueues) ... ok
 test_rejects_non_youtube_url (ytfetch.tests.test_ytfetch.UrlValidationTests.test_rejects_non_youtube_url) ... ok
-test_bot_check_retries_through_mac_proxy (ytfetch.tests.test_ytfetch.YtdlpPotAndFallbackTestCase.test_bot_check_retries_through_mac_proxy) ... ytfetch job 36: could not locate PipelineItem for /tmp/tmp0khirqf9/01_downloaded/YouTube/U - T [abc123].wav after scan
+test_bot_check_retries_through_mac_proxy (ytfetch.tests.test_ytfetch.YtdlpPotAndFallbackTestCase.test_bot_check_retries_through_mac_proxy) ... ytfetch job 36: could not locate PipelineItem for /tmp/tmp0_oll6om/01_downloaded/YouTube/U - T [abc123].wav after scan
 ok
 test_no_fallback_when_mac_proxy_unset (ytfetch.tests.test_ytfetch.YtdlpPotAndFallbackTestCase.test_no_fallback_when_mac_proxy_unset) ... ok
-test_pot_extractor_arg_present_when_provider_configured (ytfetch.tests.test_ytfetch.YtdlpPotAndFallbackTestCase.test_pot_extractor_arg_present_when_provider_configured) ... ytfetch job 38: could not locate PipelineItem for /tmp/tmpmph1tglo/01_downloaded/YouTube/U - T [abc123].wav after scan
+test_pot_extractor_arg_present_when_provider_configured (ytfetch.tests.test_ytfetch.YtdlpPotAndFallbackTestCase.test_pot_extractor_arg_present_when_provider_configured) ... ytfetch job 38: could not locate PipelineItem for /tmp/tmpb0s7u5ib/01_downloaded/YouTube/U - T [abc123].wav after scan
 ok
 test_exact_match (organize.tests.test_artwork.ArtistOkTests.test_exact_match) ... ok
 test_matches_single_artist_against_multi_credit (organize.tests.test_artwork.ArtistOkTests.test_matches_single_artist_against_multi_credit) ... ok
@@ -277,7 +281,7 @@ test_mirror1_link_uses_fallback_date (traxdb.tests.test_scraper_parser.ParseTrax
 test_no_link_body_returns_empty (traxdb.tests.test_scraper_parser.ParseTraxDBLinksTestCase.test_no_link_body_returns_empty) ... ok
 
 ----------------------------------------------------------------------
-Ran 183 tests in 1.874s
+Ran 186 tests in 1.919s
 
 OK
 Destroying test database for alias 'default' ('test_djtools')...
