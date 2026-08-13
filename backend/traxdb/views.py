@@ -29,14 +29,50 @@ logger = logging.getLogger(__name__)
 
 # ── Local inventory ──────────────────────────────────────────
 
+def _seen_list_ids(traxdb_root):
+    """Pixeldrain list IDs already accounted for. Bookkeeping, not media — it
+    stays on the VPS next to the DB it complements even in Mac mode."""
+    try:
+        with open(os.path.join(traxdb_root, '.pixeldrain_lists_seen.json'),
+                  'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 @api_view(['GET'])
 def inventory(request):
-    """Return local TraxDB inventory stats (date dirs, file counts, known lists)."""
+    """Return TraxDB inventory stats (date dirs, file counts, known lists).
+
+    In Mac mode the archive lives on the operator's machine and the VPS holds
+    none of it, so the numbers come from what the daemon last reported. Scanning
+    TRAXDB_ROOT here would truthfully report an empty directory and make the
+    panel look like the whole archive had vanished.
+    """
     traxdb_root = get_config('TRAXDB_ROOT')
 
     date_dirs = []
     file_count = 0
     total_bytes = 0
+
+    if (get_config('TRAXDB_DOWNLOAD_TARGET') or 'mac').lower() != 'vps':
+        from .models import MacInventory
+        row = MacInventory.objects.filter(pk=1).first()
+        date_dirs = sorted(row.date_dirs or []) if row else []
+        return Response({
+            'date_dirs_count': len(date_dirs),
+            'latest_date': date_dirs[-1] if date_dirs else None,
+            'oldest_date': date_dirs[0] if date_dirs else None,
+            'known_lists_count': len(_seen_list_ids(traxdb_root)),
+            'file_count': row.file_count if row else 0,
+            'total_bytes': row.total_bytes if row else 0,
+            'db_folders_total': ScrapedFolder.objects.count(),
+            'db_folders_downloaded': ScrapedFolder.objects.filter(
+                download_status='downloaded').count(),
+            'archive_location': 'mac',
+            'reported_at': row.reported_at if row else None,
+        })
 
     try:
         for entry in os.scandir(traxdb_root):
@@ -55,16 +91,7 @@ def inventory(request):
     except OSError:
         pass
 
-    # Read the seen-list IDs file
-    seen_path = os.path.join(traxdb_root, '.pixeldrain_lists_seen.json')
-    seen_ids = []
-    try:
-        with open(seen_path, 'r', encoding='utf-8') as f:
-            seen_ids = json.load(f)
-            if not isinstance(seen_ids, list):
-                seen_ids = []
-    except Exception:
-        pass
+    seen_ids = _seen_list_ids(traxdb_root)
 
     date_dirs.sort()
 
