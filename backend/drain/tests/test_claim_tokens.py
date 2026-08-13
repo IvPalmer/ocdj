@@ -235,6 +235,25 @@ class PublishDirValidationTests(DrainClaimTestCase):
         item.refresh_from_db()
         self.assertNotEqual(item.archive_state, 'archived')
 
+    def test_claim_marks_a_noncanonical_row_failed_instead_of_wedging_it(self):
+        # Confirm refuses to delete outside <publish>/<id>/, so handing such a
+        # row to the daemon would loop forever: claimed, undeletable, and
+        # unrepairable because 'draining' rejects edits.
+        item = self.make_published()
+        stray = os.path.join(self.tmpdir.name, 'not-ours', 'track.wav')
+        os.makedirs(os.path.dirname(stray), exist_ok=True)
+        with open(stray, 'wb') as fh:
+            fh.write(b'RIFF')
+        PipelineItem.objects.filter(pk=item.pk).update(work_path=stray)
+
+        claimed = self.claim()
+
+        self.assertEqual(claimed, [])
+        item.refresh_from_db()
+        self.assertEqual(item.archive_state, 'failed')
+        self.assertEqual(item.claim_token, '')
+        self.assertTrue(os.path.exists(stray))
+
     def test_claim_marks_a_row_failed_when_the_work_path_is_gone(self):
         item = self.make_published()
         os.remove(item.work_path)

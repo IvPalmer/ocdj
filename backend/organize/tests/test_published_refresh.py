@@ -16,6 +16,7 @@ import wave
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 from mutagen.wave import WAVE
 
 from core.models import Config
@@ -141,6 +142,18 @@ class RefreshServiceTests(PublishedArtifactTestCase):
         )
         self.assertTrue(os.path.exists(item.work_path))
 
+    def test_refresh_stores_the_same_text_it_writes_to_the_tags(self):
+        item = self.make_published()
+
+        refresh_published_artifact(item.id, metadata={'title': 'Basement [NS001]'})
+        item.refresh_from_db()
+
+        # The tag writer and the renamer both clean their input; the row has to
+        # agree with them or the table describes a file that doesn't exist.
+        self.assertEqual(item.title, 'Basement')
+        self.assertEqual(read_tag(item.work_path, 'TIT2'), 'Basement')
+        self.assertEqual(item.final_filename, 'Urban Myths - Basement.wav')
+
     def test_refresh_refuses_while_draining(self):
         item = self.make_published(archive_state='draining')
 
@@ -242,6 +255,18 @@ class StateGuardTests(PublishedArtifactTestCase):
         self.assertEqual(resp.status_code, 409)
         self.assertTrue(PipelineItem.objects.filter(pk=item.pk).exists())
         self.assertTrue(os.path.exists(item.work_path))
+
+    def test_delete_refused_on_an_archived_row(self):
+        item = self.make_published()
+        PipelineItem.objects.filter(pk=item.pk).update(
+            archive_state='archived', work_path='',
+            music_persistent_id='ABCDEF0123456789', archived_at=timezone.now(),
+        )
+
+        resp = self.client.delete(f'/api/organize/pipeline/{item.id}/')
+
+        self.assertEqual(resp.status_code, 409)
+        self.assertTrue(PipelineItem.objects.filter(pk=item.pk).exists())
 
     def test_retag_refused_on_a_published_row(self):
         item = self.make_published()

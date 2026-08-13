@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 
+from django.db import transaction
 from django.utils import timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -78,17 +79,25 @@ def drain_publishable(request):
     items = claim_publishable(limit=limit, lease_minutes=DEFAULT_LEASE_MINUTES)
     payload = []
     for item in items:
-        if not item.work_path or not os.path.exists(item.work_path):
-            # Work-path gone before claim landed — mark failed so human can investigate.
+        # Both checks happen here, not at confirm time: a row the daemon can't
+        # legally finish (no file, or a file outside its own publish dir, which
+        # confirm will refuse to delete) would otherwise be re-claimed forever
+        # and could never be repaired, because 'draining' rejects edits.
+        problem = ''
+        if not item.work_path or not os.path.isfile(item.work_path):
+            problem = f'work_path missing at claim: {item.work_path}'
+        elif not is_canonical_publish_dir(item.id, os.path.dirname(item.work_path)):
+            problem = f'work_path outside the publish directory: {item.work_path}'
+        if problem:
             item.archive_state = 'failed'
             item.drain_attempts += 1
-            item.error_message = f'work_path missing at claim: {item.work_path}'
+            item.error_message = problem
             item.claim_token = ''
             item.save(update_fields=[
                 'archive_state', 'drain_attempts', 'error_message',
                 'claim_token', 'updated',
             ])
-            logger.error(f'drain: claim found item {item.id} but work_path missing; marked failed')
+            logger.error(f'drain: item {item.id} unclaimable — {problem}; marked failed')
             continue
         try:
             size = os.path.getsize(item.work_path)
@@ -117,17 +126,25 @@ def drain_confirm(request, pk):
     Transitions draining → archived. Deletes 06_publish/<id>/ tree. Idempotent:
     if already archived, returns the existing row unchanged.
     """
-    try:
-        item = PipelineItem.objects.get(pk=pk)
-    except PipelineItem.DoesNotExist:
-        return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
-
     persistent_id = (request.data.get('music_persistent_id') or '').strip()
     if not persistent_id:
         return Response(
             {'error': 'music_persistent_id required'},
             status=http_status.HTTP_400_BAD_REQUEST,
         )
+
+    # Row lock for the whole check-then-delete: validating the token and then
+    # deleting a directory in two steps leaves a window where a re-claim (or a
+    # refresh) rotates the artifact between the check and the rmtree.
+    with transaction.atomic():
+        return _confirm_locked(request, pk, persistent_id)
+
+
+def _confirm_locked(request, pk, persistent_id):
+    try:
+        item = PipelineItem.objects.select_for_update().get(pk=pk)
+    except PipelineItem.DoesNotExist:
+        return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
     if item.archive_state == 'archived':
         return Response({
@@ -205,12 +222,17 @@ def drain_fail(request, pk):
     Body: {"reason": "....", "claim_token": "<from claim>"}. Lease released so
     another cycle can retry.
     """
+    reason = (request.data.get('reason') or '').strip()[:500]
+
+    with transaction.atomic():
+        return _fail_locked(request, pk, reason)
+
+
+def _fail_locked(request, pk, reason):
     try:
-        item = PipelineItem.objects.get(pk=pk)
+        item = PipelineItem.objects.select_for_update().get(pk=pk)
     except PipelineItem.DoesNotExist:
         return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
-
-    reason = (request.data.get('reason') or '').strip()[:500]
 
     if item.archive_state not in ('draining', 'publishable'):
         return Response(

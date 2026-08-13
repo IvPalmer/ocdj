@@ -77,7 +77,7 @@ def refresh_published_artifact(item_id, metadata=None):
     """
     from .publisher import compute_sha256
     from .renamer import rename_file
-    from .tagger import _clean_genre, write_tags_atomic
+    from .tagger import _clean_genre, _clean_metadata, write_tags_atomic
 
     with transaction.atomic():
         try:
@@ -95,12 +95,19 @@ def refresh_published_artifact(item_id, metadata=None):
                 f'cannot refresh while archive_state={item.archive_state}'
             )
 
+        # Normalise once, then use the same values for the row, the embedded
+        # tags and the filename. write_tags and rename_file each clean their
+        # own input, so assigning the raw form values to the row would leave
+        # the table describing a track differently from its tags and its name.
+        incoming = {field: getattr(item, field) for field in EDITABLE_FIELDS}
         for field in EDITABLE_FIELDS:
             if metadata and field in metadata:
                 value = metadata[field] or ''
                 if field == 'genre':
                     value = _clean_genre(value)
-                setattr(item, field, value)
+                incoming[field] = value
+        for field, value in _clean_metadata(incoming).items():
+            setattr(item, field, value)
 
         path = resolve_artifact_path(item)
         if path is None:

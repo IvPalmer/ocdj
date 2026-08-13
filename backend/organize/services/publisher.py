@@ -118,7 +118,22 @@ def publish_pipeline_item(item):
 
     Idempotent: if archive_state is already publishable/draining/archived,
     returns without changes.
+
+    Runs under a row lock so a manual metadata edit can't slip in between the
+    hash and the save — the edit guards elsewhere check archive_state, and this
+    is the transition that changes it.
     """
+    from django.db import transaction
+
+    with transaction.atomic():
+        return _publish_locked(item.id)
+
+
+def _publish_locked(item_id):
+    from organize.models import PipelineItem
+
+    item = PipelineItem.objects.select_for_update().get(pk=item_id)
+
     if item.archive_state in ('publishable', 'draining', 'archived'):
         logger.info(f'publisher: item {item.id} already in archive flow ({item.archive_state}); skip')
         return item
@@ -148,12 +163,14 @@ def publish_pipeline_item(item):
     item.archive_state = 'publishable'
     item.sha256 = sha
     item.work_path = dest
-    item.published_at = now
-    item.save(update_fields=[
-        'stage', 'archive_state', 'sha256', 'work_path', 'published_at', 'updated',
-    ])
     item.current_path = dest
-    item.save(update_fields=['current_path'])
+    item.published_at = now
+    # One save: the two-step version left a moment where the row said
+    # 'publishable' while current_path still pointed at the pre-move file.
+    item.save(update_fields=[
+        'stage', 'archive_state', 'sha256', 'work_path', 'current_path',
+        'published_at', 'updated',
+    ])
     logger.info(f'publisher: item {item.id} published (sha256={sha[:12]}, dest={dest})')
     return item
 
