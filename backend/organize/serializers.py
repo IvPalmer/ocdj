@@ -19,14 +19,7 @@ class PipelineItemSerializer(serializers.ModelSerializer):
         read_only_fields = ['created', 'updated']
 
 
-class PipelineStatsSerializer(serializers.Serializer):
-    downloaded = serializers.IntegerField()
-    tagging = serializers.IntegerField()
-    tagged = serializers.IntegerField()
-    renaming = serializers.IntegerField()
-    renamed = serializers.IntegerField()
-    converting = serializers.IntegerField()
-    converted = serializers.IntegerField()
-    ready = serializers.IntegerField()
-    failed = serializers.IntegerField()
-    total = serializers.IntegerField()
+# PipelineStatsSerializer used to live here. It was never referenced and it
+# re-declared the stage list a third time (model, view, serializer) — the same
+# drift that dropped 'published' from the stats response. pipeline_stats now
+# derives its keys from PipelineItem.STAGE_CHOICES directly.

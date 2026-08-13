@@ -291,6 +291,11 @@ def scan_completed_downloads():
 
     Pass 2 is what handles files that skipped Soulseek entirely — e.g.
     Telegram rips, friend shares, files rescued by audit_music_root.
+
+    Returns a summary dict, not a bare count. "Nothing was eligible",
+    "everything was already tracked", "the file is gone from disk" and
+    "ingest raised" all used to collapse into `created: 0`, which reads as a
+    failed scan even when the scan worked perfectly.
     """
     from organize.models import PipelineItem
     from soulseek.models import Download
@@ -303,20 +308,39 @@ def scan_completed_downloads():
         PipelineItem.objects.values_list('download_id', flat=True)
     )
     created_from_downloads = 0
+    already_tracked = 0
+    missing_files = 0
+    errors = []
     for dl in completed:
         if dl.id in already_tracked_dl:
+            already_tracked += 1
             continue
         try:
             item = discover_and_ingest(dl.id)
             if item:
                 created_from_downloads += 1
+            else:
+                # discover_and_ingest returns None for "already ingested" or
+                # "file not on disk"; the tracked case is filtered above, so
+                # what's left here is a download whose bytes went missing.
+                missing_files += 1
         except Exception as e:
             logger.error(f"Error ingesting download {dl.id}: {e}")
+            errors.append({'download_id': dl.id, 'error': str(e)})
 
     # Pass 2 — orphan audio files in 01_downloaded/
-    created_from_filesystem = _scan_filesystem_orphans()
+    created_from_filesystem, fs_errors = _scan_filesystem_orphans()
+    errors.extend(fs_errors)
 
-    return created_from_downloads + created_from_filesystem
+    return {
+        'created': created_from_downloads + created_from_filesystem,
+        'created_from_downloads': created_from_downloads,
+        'created_from_filesystem': created_from_filesystem,
+        'already_tracked': already_tracked,
+        'missing_files': missing_files,
+        'errors': errors[:30],
+        'error_count': len(errors),
+    }
 
 
 def _scan_filesystem_orphans():
@@ -326,12 +350,15 @@ def _scan_filesystem_orphans():
     slskd-style release subfolders). Each untracked audio file becomes a
     PipelineItem with download=None. The pipeline's tag/rename/convert
     stages don't depend on the Download FK, so they'll run normally.
+
+    Returns (created, errors) so the caller can report failures instead of
+    burying them in the log.
     """
     from organize.models import PipelineItem
 
     stage_root = os.path.join(get_pipeline_root(), STAGE_FOLDERS['downloaded'])
     if not os.path.isdir(stage_root):
-        return 0
+        return 0, []
 
     tracked_paths = set(
         PipelineItem.objects.values_list('current_path', flat=True)
@@ -339,12 +366,14 @@ def _scan_filesystem_orphans():
 
     created = 0
     seen = 0
+    errors = []
     for dirpath, _dirs, filenames in os.walk(stage_root):
         for fn in filenames:
             seen += 1
             if seen > _MAX_WALK_ENTRIES:
                 logger.warning('_scan_filesystem_orphans: walk cap hit, stopping')
-                return created
+                errors.append({'path': stage_root, 'error': 'walk cap hit; scan incomplete'})
+                return created, errors
             ext = os.path.splitext(fn)[1].lower()
             if ext not in AUDIO_EXTS:
                 continue
@@ -362,10 +391,11 @@ def _scan_filesystem_orphans():
                 created += 1
             except Exception as e:
                 logger.error(f'Failed to create PipelineItem for {full}: {e}')
+                errors.append({'path': full, 'error': str(e)})
 
     if created:
         logger.info(f'Ingested {created} orphan audio file(s) from {stage_root}')
-    return created
+    return created, errors
 
 
 def process_pipeline_item(item_id):
