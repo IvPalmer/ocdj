@@ -66,6 +66,20 @@ def run_download(operation_id: int, sync_report_path: Optional[str] = None, link
 
     try:
         op = TraxDBOperation.objects.get(id=operation_id)
+
+        # Fail closed. The HTTP trigger already refuses in Mac mode, but a task
+        # queued before the switch — or any direct call — would otherwise still
+        # write audio onto the VPS. Only an explicit 'vps' enables that.
+        if (get_config('TRAXDB_DOWNLOAD_TARGET') or 'mac').lower() != 'vps':
+            op.status = 'failed'
+            op.error_message = (
+                'TRAXDB_DOWNLOAD_TARGET is not "vps" — downloads belong on the Mac. '
+                'Refusing to store audio on the server.'
+            )
+            op.save()
+            logger.warning('Download #%s refused: target is not vps', operation_id)
+            return
+
         op.status = 'running'
         op.save()
 

@@ -341,9 +341,22 @@ DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _scan_local_inventory(traxdb_root: str):
-    """Return (date_dirs, max_date, seen_list_ids, flac_basenames)."""
+    """Return (date_dirs, max_date, seen_list_ids, flac_basenames).
+
+    With TRAXDB_DOWNLOAD_TARGET='mac' the audio lives on the operator's Mac and
+    the VPS holds none of it, so there is nothing here to scan — the date
+    folders come from what the Mac daemon last reported. `.pixeldrain_lists_seen`
+    is still read from TRAXDB_ROOT: it is bookkeeping, not media, and stays on
+    the VPS next to the DB it complements.
+    """
     date_dirs = []
     flac_basenames: Set[str] = set()
+
+    if (get_config('TRAXDB_DOWNLOAD_TARGET') or 'mac').lower() != 'vps':
+        from ..models import MacInventory
+        date_dirs = sorted(d for d in MacInventory.current() if DATE_DIR_RE.match(str(d)))
+        max_date = date_dirs[-1] if date_dirs else None
+        return date_dirs, max_date, _read_seen_ids(traxdb_root), flac_basenames
 
     if os.path.isdir(traxdb_root):
         for entry in os.scandir(traxdb_root):
@@ -357,17 +370,19 @@ def _scan_local_inventory(traxdb_root: str):
     date_dirs.sort()
     max_date = latest_media_date(traxdb_root, date_dirs)
 
-    seen_ids: Set[str] = set()
+    return date_dirs, max_date, _read_seen_ids(traxdb_root), flac_basenames
+
+
+def _read_seen_ids(traxdb_root: str) -> Set[str]:
     seen_path = os.path.join(traxdb_root, ".pixeldrain_lists_seen.json")
     try:
         with open(seen_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
-                seen_ids = {str(x) for x in data}
+                return {str(x) for x in data}
     except Exception:
         pass
-
-    return date_dirs, max_date, seen_ids, flac_basenames
+    return set()
 
 
 def _mark_list_ids_seen(traxdb_root: str, list_ids: List[str]) -> None:
@@ -464,14 +479,25 @@ def run_sync(operation_id: int, max_pages: int = 50):
         # files the operator removed.
         skipped_by_existing_directory = []
         kept = []
+        # When the Mac owns the files, its reported folders are the only
+        # truthful answer to "do we already have this date?" — the VPS
+        # filesystem holds nothing to stat.
+        mac_target = (get_config('TRAXDB_DOWNLOAD_TARGET') or 'mac').lower() != 'vps'
+        mac_dirs = set(date_dirs) if mac_target else set()
         for link in new_links:
             dest_dir = _pick_dest_dir(traxdb_root, link.inferred_date, link.list_id)
-            # An empty date directory can be left behind by an interrupted or
-            # cleaned-up download. It is not a completed library boundary and
-            # must remain eligible for the next run.
-            if os.path.isdir(dest_dir) and (
-                not link.inferred_date or directory_has_media_files(dest_dir)
-            ):
+            if mac_target:
+                # The Mac only reports non-empty folders, so presence already
+                # means "this date is a completed collection — leave it alone".
+                already_have = bool(link.inferred_date) and link.inferred_date in mac_dirs
+            else:
+                # An empty date directory can be left behind by an interrupted or
+                # cleaned-up download. It is not a completed library boundary and
+                # must remain eligible for the next run.
+                already_have = os.path.isdir(dest_dir) and (
+                    not link.inferred_date or directory_has_media_files(dest_dir)
+                )
+            if already_have:
                 skipped_by_existing_directory.append(link)
             else:
                 kept.append(link)
