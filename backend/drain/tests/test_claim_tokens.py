@@ -137,11 +137,18 @@ class ConfirmRequiresLiveClaimTests(DrainClaimTestCase):
 
 
 class StaleClaimTests(DrainClaimTestCase):
-    def test_an_edit_during_the_claim_invalidates_the_confirmation(self):
-        """The incident, replayed: edit lands while the Mac holds artifact A."""
+    def test_an_edit_after_a_released_claim_invalidates_the_confirmation(self):
+        """The data-loss sequence, replayed end to end.
+
+        The Mac claims artifact A and starts downloading. Its cycle reports a
+        failure (or times out), which releases the claim and puts the row back
+        in the pool. The operator then edits the track, so the published bytes
+        become B. A late confirmation for A must not delete B.
+        """
         item = self.make_published()
         claimed = self.claim()
         stale_token = claimed[0]['claim_token']
+        self.assertEqual(self.fail(item.id, claim_token=stale_token).status_code, 200)
 
         refresh_published_artifact(item.id, metadata={'title': 'Attic'})
         item.refresh_from_db()
@@ -154,6 +161,21 @@ class StaleClaimTests(DrainClaimTestCase):
         self.assertEqual(item.archive_state, 'publishable')
         self.assertTrue(os.path.exists(item.work_path))
         self.assertEqual(compute_sha256(item.work_path), new_bytes)
+
+    def test_an_edit_is_refused_outright_while_the_claim_is_live(self):
+        item = self.make_published()
+        self.claim()
+
+        resp = self.client.post(
+            f'/api/organize/pipeline/{item.id}/refresh/',
+            data={'title': 'Attic'},
+            content_type='application/json',
+        )
+
+        self.assertEqual(resp.status_code, 409)
+        item.refresh_from_db()
+        self.assertEqual(item.title, 'Basement')
+        self.assertEqual(item.archive_state, 'draining')
 
     def test_a_reclaim_after_lease_expiry_invalidates_the_old_token(self):
         item = self.make_published()
