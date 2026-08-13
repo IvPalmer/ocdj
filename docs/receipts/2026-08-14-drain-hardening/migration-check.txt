@@ -1,0 +1,18 @@
+# makemigrations --check --dry-run (VPS container, branch code via bind mount)
+
+## baseline origin/vps-deploy
+ Container ocdj-backend-run-4945e7b4587b Creating 
+ Container ocdj-backend-run-4945e7b4587b Created 
+Migrations for 'organize':
+  organize/migrations/0004_remove_pipelineitem_idx_pipeline_archstate_and_more.py
+    - Remove index idx_pipeline_archstate from pipelineitem
+    - Remove index idx_pipeline_lease from pipelineitem
+
+## branch task/drain-lifecycle-hardening (0004_pipelineitem_claim_token applied to model state)
+ Container ocdj-backend-run-c25ef658e854 Creating 
+ Container ocdj-backend-run-c25ef658e854 Created 
+Migrations for 'organize':
+  organize/migrations/0005_remove_pipelineitem_idx_pipeline_archstate_and_more.py
+    - Remove index idx_pipeline_archstate from pipelineitem
+    - Remove index idx_pipeline_lease from pipelineitem
+

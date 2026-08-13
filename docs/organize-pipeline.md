@@ -65,3 +65,40 @@ Wanted status changes are intentionally narrow:
 Failures set `PipelineItem.stage='failed'` and store a stage-specific error
 message. Retry currently resets the item to `downloaded` and runs the sequence
 again.
+
+## Published Artifacts
+
+Once `publish_pipeline_item` runs, the file lives at `<publish>/<id>/` and the
+row carries a `sha256` the Mac drain daemon verifies. From that point the
+workbench edit path is closed:
+
+- `PATCH /api/organize/pipeline/<id>/` and `POST .../retag/` are workbench-only
+  (`archive_state='on_workbench'`). `retag-clean/` and `rerename/` skip
+  published rows and report them as `skipped_published`.
+- `POST /api/organize/pipeline/<id>/refresh/` is the only way to change a
+  published track. Under a row lock it writes the tags to a temp copy and swaps
+  it in, renames, recomputes `sha256`, moves `work_path` with the file, clears
+  the failure bookkeeping and puts the row back to `publishable`.
+- `POST /api/organize/pipeline/<id>/retry-drain/` re-queues a failed drain only
+  after verifying the file exists and still hashes to the recorded `sha256`.
+- `draining` and `archived` rows reject metadata edits outright, and `draining`
+  also rejects DELETE — the Mac owns those bytes.
+
+### Drain claim tokens
+
+`GET /api/drain/publishable/` returns a per-row `claim_token` alongside
+`work_path`/`sha256`. `POST /api/drain/<id>/confirm/` and `.../fail/` must echo
+it as `claim_token` in the JSON body; a token that has been rotated (re-claim)
+or cleared (refresh, confirm, fail) is refused with 409. The lease
+(`draining_until`) only decides who may claim next — it is not what authorises
+a confirmation, because a late confirmation is exactly the case where the
+artifact may already have been replaced.
+
+Confirm also refuses to `rmtree` anything that is not exactly
+`<publish>/<id>/`.
+
+**Daemon contract:** the Mac daemon (`elder-brain` repo,
+`scripts/ocdj-drain/ocdj-drain.sh`, installed as `~/bin/ocdj-drain.sh`) must
+send the token back on confirm/fail. Deploying this backend without that change
+makes every drain confirmation 409. The daemon can be updated first: the
+current backend ignores unknown body keys.

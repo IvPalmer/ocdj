@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework import status as http_status
 from django.conf import settings
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.db import transaction
 from django.db.models import Count
 from django.http import FileResponse
 from django.urls import reverse
@@ -106,12 +107,39 @@ def _remove_item_files(item):
 @api_view(['GET', 'PATCH', 'DELETE'])
 def pipeline_detail(request, pk):
     """Get, update, or remove a single pipeline item."""
+    if request.method in ('PATCH', 'DELETE'):
+        # Read the archive state and act on it under a row lock. Checking first
+        # and writing afterwards leaves room for a drain claim (or an
+        # auto-publish) to land in between and invalidate the check.
+        with transaction.atomic():
+            return _pipeline_detail_write(request, pk)
+
     try:
         item = PipelineItem.objects.get(pk=pk)
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+    return Response(PipelineItemSerializer(item).data)
+
+
+def _pipeline_detail_write(request, pk):
+    try:
+        item = PipelineItem.objects.select_for_update().get(pk=pk)
+    except PipelineItem.DoesNotExist:
+        return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
     if request.method == 'DELETE':
+        # The Mac is downloading these bytes right now; deleting them mid-claim
+        # is how a drain ends in "work_path missing at claim". An archived row
+        # is the record that a track reached the Mac library — read-only.
+        if item.archive_state in ('draining', 'archived'):
+            return Response(
+                {'error': (
+                    'item is being drained to your Mac; wait for the drain to finish'
+                    if item.archive_state == 'draining'
+                    else 'archived items are read-only'
+                )},
+                status=http_status.HTTP_409_CONFLICT,
+            )
         try:
             removed = _remove_item_files(item)
         except OSError as e:
@@ -121,8 +149,26 @@ def pipeline_detail(request, pk):
         item.delete()
         return Response({'message': f'Removed item {item_id}', 'files_removed': removed})
 
-    if request.method == 'PATCH':
+    else:
         from .services.tagger import _clean_genre
+        # A plain metadata PATCH only moves the DB row. On a published artifact
+        # that silently desynchronises the row from the embedded tags, the
+        # filename and the recorded sha256 — the refresh endpoint is the only
+        # correct way to change one. 'draining' and 'archived' can't be changed
+        # at all: the Mac owns those bytes.
+        if item.archive_state != 'on_workbench':
+            return Response(
+                {
+                    'error': f'cannot edit metadata while archive_state={item.archive_state}',
+                    'hint': (
+                        'use POST /pipeline/<id>/refresh/ to re-tag, rename and '
+                        're-hash a published track'
+                        if item.archive_state in ('publishable', 'failed')
+                        else 'this track is on your Mac; edit it there'
+                    ),
+                },
+                status=http_status.HTTP_409_CONFLICT,
+            )
         editable = ['artist', 'title', 'album', 'label', 'catalog_number', 'genre', 'year', 'track_number']
         updated = []
         for field in editable:
@@ -138,8 +184,6 @@ def pipeline_detail(request, pk):
             updated.append('metadata_source')
             item.save(update_fields=updated)
         return Response(PipelineItemSerializer(item).data)
-
-    return Response(PipelineItemSerializer(item).data)
 
 
 @api_view(['GET'])
@@ -281,26 +325,138 @@ def pipeline_skip(request, pk):
 
 @api_view(['POST'])
 def pipeline_retag(request, pk):
-    """Re-write audio tags from current metadata (after manual edit)."""
+    """Re-write audio tags from current metadata (after manual edit).
+
+    Workbench only. On a published artifact this is precisely the call that
+    broke two tracks: it renames without moving work_path and rewrites the
+    bytes without recomputing sha256. Published rows go through /refresh/.
+    """
+    with transaction.atomic():
+        try:
+            item = PipelineItem.objects.select_for_update().get(pk=pk)
+        except PipelineItem.DoesNotExist:
+            return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+        if item.archive_state != 'on_workbench':
+            return Response(
+                {
+                    'error': f'cannot retag while archive_state={item.archive_state}',
+                    'hint': 'published tracks use POST /pipeline/<id>/refresh/',
+                },
+                status=http_status.HTTP_409_CONFLICT,
+            )
+
+        from .services.tagger import write_tags_atomic
+        from .services.renamer import rename_file
+
+        metadata = {
+            'artist': item.artist, 'title': item.title, 'album': item.album,
+            'label': item.label, 'catalog_number': item.catalog_number,
+            'genre': item.genre, 'year': item.year, 'track_number': item.track_number,
+        }
+        try:
+            write_tags_atomic(item.current_path, metadata)
+            rename_file(item)
+            return Response(PipelineItemSerializer(item).data)
+        except Exception as e:
+            return Response({'error': str(e)}, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def pipeline_refresh(request, pk):
+    """Edit + re-publish a published artifact as one operation.
+
+    Body: any of the editable metadata fields (same shape as PATCH). Writes the
+    tags, renames the file, recomputes sha256 and puts the row back in the
+    drain pool — all under a row lock, invalidating any outstanding claim.
+    """
+    from .services.refresh import RefreshError, refresh_published_artifact
+
+    metadata = {k: v for k, v in request.data.items()} if request.data else None
     try:
-        item = PipelineItem.objects.get(pk=pk)
+        item = refresh_published_artifact(pk, metadata=metadata)
+    except RefreshError as exc:
+        message = str(exc)
+        status_code = (
+            http_status.HTTP_404_NOT_FOUND if message == 'not found'
+            else http_status.HTTP_409_CONFLICT
+        )
+        return Response({'error': message}, status=status_code)
+    except Exception as exc:
+        return Response(
+            {'error': f'refresh failed: {exc}'},
+            status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return Response(PipelineItemSerializer(item).data)
+
+
+@api_view(['POST'])
+def pipeline_retry_drain(request, pk):
+    """Put a failed drain back in the pool — but only if the artifact is sound.
+
+    Flipping archive_state back to 'publishable' on its own just replays the
+    same failure five minutes later, because the reason the drain failed is on
+    disk: the file is gone, or its bytes no longer match the recorded sha256.
+    Both are verified here; a mismatch is a repair job for /refresh/.
+    """
+    with transaction.atomic():
+        return _retry_drain_locked(pk)
+
+
+def _retry_drain_locked(pk):
+    from .services.publisher import compute_sha256
+    from .services.refresh import resolve_artifact_path
+
+    try:
+        item = PipelineItem.objects.select_for_update().get(pk=pk)
     except PipelineItem.DoesNotExist:
-        return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
-    from .services.tagger import write_tags
-    from .services.renamer import rename_file
+    if item.archive_state not in ('failed', 'publishable'):
+        return Response(
+            {'error': f'cannot retry drain from archive_state={item.archive_state}'},
+            status=http_status.HTTP_409_CONFLICT,
+        )
 
-    metadata = {
-        'artist': item.artist, 'title': item.title, 'album': item.album,
-        'label': item.label, 'catalog_number': item.catalog_number,
-        'genre': item.genre, 'year': item.year, 'track_number': item.track_number,
-    }
-    try:
-        write_tags(item.current_path, metadata)
-        rename_file(item)
-        return Response(PipelineItemSerializer(item).data)
-    except Exception as e:
-        return Response({'error': str(e)}, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+    path = resolve_artifact_path(item)
+    if path is None:
+        return Response(
+            {
+                'error': 'no file on disk for this item; nothing to drain',
+                'work_path': item.work_path,
+                'current_path': item.current_path,
+            },
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
+    actual = compute_sha256(path)
+    if actual != item.sha256:
+        return Response(
+            {
+                'error': 'file no longer matches the recorded sha256; '
+                         'use Save & Apply Tags to re-publish it',
+                'expected_sha256': item.sha256,
+                'actual_sha256': actual,
+            },
+            status=http_status.HTTP_409_CONFLICT,
+        )
+
+    item.work_path = path
+    item.current_path = path
+    item.archive_state = 'publishable'
+    item.drain_attempts = 0
+    item.error_message = ''
+    item.draining_until = None
+    item.claim_token = ''
+    item.save(update_fields=[
+        'work_path', 'current_path', 'archive_state', 'drain_attempts',
+        'error_message', 'draining_until', 'claim_token', 'updated',
+    ])
+    return Response({
+        'id': item.id,
+        'archive_state': item.archive_state,
+        'work_path': item.work_path,
+    })
 
 
 @api_view(['POST'])
@@ -413,7 +569,13 @@ def pipeline_retag_clean(request):
     from core.services.config import get_config
 
     stage = request.data.get('stage', 'ready')
-    items = PipelineItem.objects.filter(stage=stage)
+    all_in_stage = PipelineItem.objects.filter(stage=stage)
+    # This is a workbench normalisation pass: it rewrites bytes and never
+    # touches sha256 or work_path, so on a published artifact it produces
+    # exactly the two failures the drain daemon reported. Published rows are
+    # refreshed one at a time through /refresh/ instead.
+    items = all_in_stage.filter(archive_state='on_workbench')
+    skipped_published = all_in_stage.count() - items.count()
     cleaned = 0
     relocated = 0
     errors = []
@@ -468,6 +630,7 @@ def pipeline_retag_clean(request):
         'total': items.count(),
         'cleaned': cleaned,
         'relocated': relocated,
+        'skipped_published': skipped_published,
         'errors': errors[:30],
     })
 
@@ -482,7 +645,11 @@ def pipeline_rerename_all(request):
     from .services.renamer import rename_file
 
     stage = request.data.get('stage', 'ready')
-    items = PipelineItem.objects.filter(stage=stage)
+    all_in_stage = PipelineItem.objects.filter(stage=stage)
+    # Same reason as retag-clean: renaming a published artifact moves the bytes
+    # the drain daemon is about to fetch. Workbench rows only.
+    items = all_in_stage.filter(archive_state='on_workbench')
+    skipped_published = all_in_stage.count() - items.count()
     renamed = 0
     errors = []
     for item in items:
@@ -497,6 +664,7 @@ def pipeline_rerename_all(request):
         'stage': stage,
         'total': items.count(),
         'renamed': renamed,
+        'skipped_published': skipped_published,
         'errors': errors,
     })
 
@@ -583,8 +751,12 @@ def pipeline_download_url(request, pk):
             status=http_status.HTTP_410_GONE,
         )
 
-    path = item.work_path or item.current_path
-    if not path or not os.path.exists(path):
+    # `work_path or current_path` never fell back when work_path was set but
+    # stale — exactly the state a broken publish leaves behind — so the one
+    # button that could rescue the file 404'd.
+    from .services.refresh import resolve_artifact_path
+    path = resolve_artifact_path(item)
+    if path is None:
         return Response(
             {'error': 'file missing on server'},
             status=http_status.HTTP_404_NOT_FOUND,
@@ -641,8 +813,9 @@ def pipeline_download_signed(request, token):
             status=http_status.HTTP_410_GONE,
         )
 
-    path = item.work_path or item.current_path
-    if not path or not os.path.exists(path):
+    from .services.refresh import resolve_artifact_path
+    path = resolve_artifact_path(item)
+    if path is None:
         return Response(
             {'error': 'file missing on server'},
             status=http_status.HTTP_404_NOT_FOUND,

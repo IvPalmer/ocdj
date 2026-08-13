@@ -766,6 +766,28 @@ export function useRetagItem() {
   })
 }
 
+// The one mutating operation for a track that's already published: it tags,
+// renames, re-hashes and re-queues it for drain in a single server call. The
+// old two-step (PATCH then retag) left the DB, the embedded tags and the
+// recorded sha256 disagreeing with each other.
+export function useRefreshPublished() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...data }) => api.post(`/organize/pipeline/${id}/refresh/`, data),
+    onSuccess: () => invalidatePipeline(qc),
+  })
+}
+
+// Re-queue a failed drain. The server verifies the file is there and still
+// hashes to the recorded sha256 before putting it back in the pool.
+export function useRetryDrain() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/organize/pipeline/${id}/retry-drain/`),
+    onSuccess: () => invalidatePipeline(qc),
+  })
+}
+
 // Manual publication — the only way to advance a 'ready' item when
 // OCDJ_AUTOPUBLISH left it stranded. The endpoint existed with no caller.
 export function useSendHome() {

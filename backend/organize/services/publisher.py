@@ -9,6 +9,7 @@ so deletion-on-archive is a clean rmdir of one directory.
 import hashlib
 import logging
 import os
+import secrets
 import shutil
 from datetime import timedelta
 
@@ -72,12 +73,37 @@ def _write_grouping_tag(filepath, pipeline_item_id):
         )
 
 
-def _compute_sha256(filepath):
+def compute_sha256(filepath):
     h = hashlib.sha256()
     with open(filepath, 'rb') as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b''):
             h.update(chunk)
     return h.hexdigest()
+
+
+# Kept for callers that imported the private name.
+_compute_sha256 = compute_sha256
+
+
+def canonical_publish_dir(item_id):
+    """The one directory a published item is allowed to own: <publish>/<id>/."""
+    return os.path.realpath(os.path.join(get_publish_root(), str(item_id)))
+
+
+def is_canonical_publish_dir(item_id, path):
+    """True only when `path` resolves to exactly that item's publish directory.
+
+    drain confirm deletes a whole directory tree derived from work_path. If a
+    bug or a manual DB edit ever pointed work_path somewhere else, an unguarded
+    rmtree would take that other directory with it.
+    """
+    if not path:
+        return False
+    return os.path.realpath(path) == canonical_publish_dir(item_id)
+
+
+def new_claim_token():
+    return secrets.token_hex(16)
 
 
 def publish_pipeline_item(item):
@@ -92,7 +118,22 @@ def publish_pipeline_item(item):
 
     Idempotent: if archive_state is already publishable/draining/archived,
     returns without changes.
+
+    Runs under a row lock so a manual metadata edit can't slip in between the
+    hash and the save — the edit guards elsewhere check archive_state, and this
+    is the transition that changes it.
     """
+    from django.db import transaction
+
+    with transaction.atomic():
+        return _publish_locked(item.id)
+
+
+def _publish_locked(item_id):
+    from organize.models import PipelineItem
+
+    item = PipelineItem.objects.select_for_update().get(pk=item_id)
+
     if item.archive_state in ('publishable', 'draining', 'archived'):
         logger.info(f'publisher: item {item.id} already in archive flow ({item.archive_state}); skip')
         return item
@@ -106,7 +147,7 @@ def publish_pipeline_item(item):
 
     _write_grouping_tag(src, item.id)
 
-    sha = _compute_sha256(src)
+    sha = compute_sha256(src)
 
     ensure_pipeline_folders()
     publish_root = get_publish_root()
@@ -122,12 +163,14 @@ def publish_pipeline_item(item):
     item.archive_state = 'publishable'
     item.sha256 = sha
     item.work_path = dest
-    item.published_at = now
-    item.save(update_fields=[
-        'stage', 'archive_state', 'sha256', 'work_path', 'published_at', 'updated',
-    ])
     item.current_path = dest
-    item.save(update_fields=['current_path'])
+    item.published_at = now
+    # One save: the two-step version left a moment where the row said
+    # 'publishable' while current_path still pointed at the pre-move file.
+    item.save(update_fields=[
+        'stage', 'archive_state', 'sha256', 'work_path', 'current_path',
+        'published_at', 'updated',
+    ])
     logger.info(f'publisher: item {item.id} published (sha256={sha[:12]}, dest={dest})')
     return item
 
@@ -138,6 +181,11 @@ def claim_publishable(limit=10, lease_minutes=10):
     Uses SELECT FOR UPDATE SKIP LOCKED in Postgres to prevent two drain
     daemon invocations (or two threads) from claiming the same rows. Also
     reclaims expired `draining` leases.
+
+    Every claim mints a fresh `claim_token`. The daemon must echo it back on
+    confirm/fail, so a re-claim (or an edit that clears the token) makes the
+    previous claim's confirmation unusable — that confirmation refers to bytes
+    that no longer exist.
     """
     from django.db import transaction
     from organize.models import PipelineItem
@@ -159,10 +207,13 @@ def claim_publishable(limit=10, lease_minutes=10):
         claimed_ids = list(qs.values_list('id', flat=True))
         if not claimed_ids:
             return []
-        PipelineItem.objects.filter(id__in=claimed_ids).update(
-            archive_state='draining',
-            draining_until=lease_until,
-        )
+        # Per-row token, so one daemon's claim can't be confirmed with another's.
+        for claimed_id in claimed_ids:
+            PipelineItem.objects.filter(id=claimed_id).update(
+                archive_state='draining',
+                draining_until=lease_until,
+                claim_token=new_claim_token(),
+            )
     return list(PipelineItem.objects.filter(id__in=claimed_ids))
 
 

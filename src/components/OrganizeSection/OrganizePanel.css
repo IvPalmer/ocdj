@@ -279,6 +279,23 @@
   white-space: nowrap;
 }
 
+.edit-modal__note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border-left: 2px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.edit-modal__note--error {
+  color: var(--accent-red);
+  border-left-color: var(--accent-red);
+  margin: 12px 0 0;
+}
+
 .edit-modal__fields {
   display: grid;
   grid-template-columns: 1fr 1fr;

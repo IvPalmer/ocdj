@@ -3,6 +3,7 @@ import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
   useProcessSingle, useRetryItem, useSkipStage, useRemovePipelineItem, useScanDownloads,
   useUpdatePipelineItem, useRetagItem, useSendHome,
+  useRefreshPublished, useRetryDrain,
   useConversionRules, useUpdateConversionRules,
 } from '../../api/hooks'
 import './OrganizePanel.css'
@@ -31,7 +32,16 @@ const EDITABLE_FIELDS = [
   { key: 'track_number', label: 'Track #' },
 ]
 
-const DOWNLOADABLE_STATES = new Set(['on_workbench', 'publishable', 'draining'])
+// 'failed' belongs here: a drain that failed still has its bytes on the VPS,
+// and pulling them to this device is the obvious rescue. The backend only ever
+// refused 'archived'; the UI was stricter than the server for no reason.
+const DOWNLOADABLE_STATES = new Set(['on_workbench', 'publishable', 'draining', 'failed'])
+
+// Already published to the drain pool: metadata changes must go through the
+// refresh endpoint so tags, filename and sha256 move together.
+const PUBLISHED_STATES = new Set(['publishable', 'failed'])
+// The Mac owns these bytes (mid-drain) or holds the only copy (archived).
+const LOCKED_STATES = new Set(['draining', 'archived'])
 
 const AUDIO_EXTS = new Set(['mp3', 'flac', 'wav', 'aiff', 'aif', 'm4a', 'ogg'])
 
@@ -205,6 +215,28 @@ function SendHomeButton({ item }) {
 }
 
 
+function RetryDrainButton({ item }) {
+  const retryDrain = useRetryDrain()
+
+  // A drain that gave up five times leaves the bytes on the VPS and the row
+  // stuck at archive_state=failed with no control at all.
+  if (item.archive_state !== 'failed') return null
+
+  return (
+    <button
+      className="btn btn-xs"
+      onClick={() => retryDrain.mutate(item.id)}
+      disabled={retryDrain.isPending}
+      title={retryDrain.isError
+        ? `Retry drain refused: ${errorText(retryDrain.error)}`
+        : item.error_message || 'Verify the file and re-queue it for the Mac drain'}
+    >
+      {retryDrain.isPending ? '…' : retryDrain.isError ? 'retry drain?' : 'Retry drain'}
+    </button>
+  )
+}
+
+
 function StageCard({ stage, count, isActive, onClick }) {
   const isProcessing = stage.key === 'tagging' || stage.key === 'renaming' || stage.key === 'converting'
   return (
@@ -254,6 +286,10 @@ function EditModal({ item, onClose }) {
   })
   const updateItem = useUpdatePipelineItem()
   const retagItem = useRetagItem()
+  const refreshPublished = useRefreshPublished()
+
+  const locked = LOCKED_STATES.has(item.archive_state)
+  const published = PUBLISHED_STATES.has(item.archive_state)
 
   const handleSave = () => {
     updateItem.mutate({ id: item.id, ...form }, {
@@ -261,7 +297,14 @@ function EditModal({ item, onClose }) {
     })
   }
 
+  // Workbench: PATCH then retag, as before. Published: one server call — a
+  // claim could otherwise land between the two, and a retag that failed after
+  // the PATCH left the DB describing a file that was never rewritten.
   const handleSaveAndRetag = () => {
+    if (published) {
+      refreshPublished.mutate({ id: item.id, ...form }, { onSuccess: () => onClose() })
+      return
+    }
     updateItem.mutate({ id: item.id, ...form }, {
       onSuccess: () => {
         retagItem.mutate(item.id, {
@@ -270,6 +313,10 @@ function EditModal({ item, onClose }) {
       },
     })
   }
+
+  const applyPending = retagItem.isPending || refreshPublished.isPending
+  const applyError = errorText(refreshPublished.error) || errorText(retagItem.error)
+    || errorText(updateItem.error)
 
   const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }))
 
@@ -282,6 +329,19 @@ function EditModal({ item, onClose }) {
         </div>
         <div className="edit-modal__body">
           <div className="edit-modal__filename">{item.original_filename}</div>
+          {locked && (
+            <div className="edit-modal__note">
+              {item.archive_state === 'draining'
+                ? 'This track is being drained to your Mac right now — it can\'t be edited until that finishes.'
+                : 'This track lives in your Mac library now; edit it there.'}
+            </div>
+          )}
+          {published && !locked && (
+            <div className="edit-modal__note">
+              Already published. Saving re-writes the tags, renames the file and
+              re-hashes it, then puts it back in the drain queue.
+            </div>
+          )}
           <div className="edit-modal__fields">
             {EDITABLE_FIELDS.map(f => (
               <div key={f.key} className="form-group">
@@ -290,27 +350,37 @@ function EditModal({ item, onClose }) {
                   value={form[f.key]}
                   onChange={e => set(f.key, e.target.value)}
                   placeholder={f.label}
+                  disabled={locked}
                 />
               </div>
             ))}
           </div>
+          {applyError && (
+            <div className="edit-modal__note edit-modal__note--error">{applyError}</div>
+          )}
         </div>
         <div className="edit-modal__footer">
           <button className="btn btn-sm" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-sm"
-            onClick={handleSave}
-            disabled={updateItem.isPending}
-          >
-            Save
-          </button>
-          <button
-            className="btn btn-sm btn-accent"
-            onClick={handleSaveAndRetag}
-            disabled={updateItem.isPending || retagItem.isPending}
-          >
-            {retagItem.isPending ? 'Applying...' : 'Save & Apply Tags'}
-          </button>
+          {/* No metadata-only Save on a published track: it would change the
+              row without touching the file's tags or its recorded sha256. */}
+          {!published && !locked && (
+            <button
+              className="btn btn-sm"
+              onClick={handleSave}
+              disabled={updateItem.isPending}
+            >
+              Save
+            </button>
+          )}
+          {!locked && (
+            <button
+              className="btn btn-sm btn-accent"
+              onClick={handleSaveAndRetag}
+              disabled={updateItem.isPending || applyPending}
+            >
+              {applyPending ? 'Applying...' : 'Save & Apply Tags'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -595,6 +665,7 @@ function OrganizePanel() {
                     </button>
                   )}
                   <SendHomeButton item={item} />
+                  <RetryDrainButton item={item} />
                   <DownloadButton item={item} />
                   <button
                     className="btn btn-xs btn-danger"
@@ -603,7 +674,12 @@ function OrganizePanel() {
                         removeItem.mutate(item.id)
                       }
                     }}
-                    disabled={removeItem.isPending}
+                    disabled={removeItem.isPending || LOCKED_STATES.has(item.archive_state)}
+                    title={item.archive_state === 'draining'
+                      ? 'Being drained to your Mac — removing it now would delete the file mid-transfer'
+                      : item.archive_state === 'archived'
+                        ? 'Archived: this row is the record that the track reached your Mac library'
+                        : 'Remove this row (and any file still on the workbench)'}
                   >
                     Remove
                   </button>
