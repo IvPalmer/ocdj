@@ -73,15 +73,26 @@ def local_date_dirs(root: str) -> List[str]:
     from that date. Reporting only non-empty folders would let the daemon
     restore it. Partial downloads live in `<date>.part`, which doesn't match
     the date pattern, so an interrupted run never looks like a real folder.
+
+    Raises rather than returning a short list. The server *replaces* its stored
+    inventory with whatever we report, so a partial listing would drop dates the
+    operator holds, make them claimable again and reset the sync cutoff. A
+    failed scan must abort the cycle, not shrink the inventory.
     """
-    out = []
-    try:
-        for entry in os.scandir(root):
-            if entry.is_dir() and DATE_DIR_RE.match(entry.name):
-                out.append(entry.name)
-    except FileNotFoundError:
-        pass
-    return sorted(out)
+    # scandir can take EINTR on macOS when a signal lands mid-call; it is
+    # transient and says nothing about the directory.
+    last = None
+    for attempt in range(3):
+        out = []
+        try:
+            for entry in os.scandir(root):
+                if entry.is_dir() and DATE_DIR_RE.match(entry.name):
+                    out.append(entry.name)
+            return sorted(out)
+        except InterruptedError as e:
+            last = e
+            time.sleep(0.5 * (attempt + 1))
+    raise last
 
 
 def archive_totals(root: str, date_dirs: List[str]) -> tuple:
@@ -283,7 +294,14 @@ def run_cycle(cfg: Dict[str, str], limit: int) -> int:
     # Settle unfinished business before taking on more.
     flush_receipts(api, root)
 
-    dirs = local_date_dirs(root)
+    try:
+        dirs = local_date_dirs(root)
+    except OSError as e:
+        # Abort rather than report what we couldn't read. Reporting a short
+        # list would un-hold dates the operator keeps and reset the cutoff.
+        log(f"could not list {root} ({e!r}); skipping this cycle")
+        return 0
+
     files, size = archive_totals(root, dirs)
     api.report_inventory(dirs, files, size)
     log(f"reported {len(dirs)} local date folders, {files} files, "
@@ -345,6 +363,9 @@ def main() -> int:
         run_cycle(cfg, args.limit)
     except requests.RequestException as e:
         log(f"API unreachable: {e!r}")
+        return 1
+    except OSError as e:
+        log(f"filesystem error: {e!r}")
         return 1
     return 0
 
