@@ -615,3 +615,34 @@ class PipelineDeleteTestCase(TestCase):
         finally:
             if os.path.exists(outside):
                 os.unlink(outside)
+
+
+class SampleRateClampTestCase(TestCase):
+    """The pipeline must never emit a file the operator's CDJ-900 can't load.
+
+    ffmpeg passes the source rate through, so a 96 kHz source produced a 96 kHz
+    AIFF that converts and imports cleanly and only fails on the deck.
+    """
+
+    def _args(self, rate, target_format='aiff'):
+        from organize.services import converter
+        with patch.object(converter, '_get_sample_rate', return_value=rate):
+            return converter._sample_rate_args('/x/track.flac', target_format)
+
+    def test_96k_is_clamped_to_48k(self):
+        self.assertEqual(self._args(96000), ['-ar', '48000'])
+
+    def test_88200_is_clamped(self):
+        self.assertEqual(self._args(88200), ['-ar', '48000'])
+
+    def test_44100_and_48000_pass_through_untouched(self):
+        """Anything already playable must stay bit-exact — no needless resample."""
+        self.assertEqual(self._args(44100), [])
+        self.assertEqual(self._args(48000), [])
+
+    def test_unreadable_rate_does_not_resample(self):
+        self.assertEqual(self._args(0), [])
+
+    def test_mp3_target_is_not_clamped(self):
+        """Lossy targets keep their own rate handling."""
+        self.assertEqual(self._args(96000, 'mp3'), [])

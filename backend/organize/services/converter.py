@@ -32,6 +32,13 @@ for fmt, exts in FORMAT_EXTENSIONS.items():
     for ext in exts:
         EXT_TO_FORMAT[ext] = fmt
 
+# Pioneer CDJ-900 (the deck this library is played on) tops out at 48 kHz for
+# WAV/AIFF. 96 kHz files load nowhere before the CDJ-3000, so the pipeline must
+# never emit one. 48 rather than 44.1 keeps 48 kHz sources untouched, and 96 ->
+# 48 is a clean 2:1 decimation. See docs/playback-targets.md.
+MAX_SAMPLE_RATE = 48000
+LOSSLESS_FORMATS = {'aiff', 'wav', 'flac'}
+
 # FFmpeg codec args per output format
 FFMPEG_CODEC_ARGS = {
     # 24-bit AIFF/WAV is the DJ standard. pcm_s24be pads 16-bit sources
@@ -62,6 +69,40 @@ def _get_bitrate(filepath):
     except Exception:
         pass
     return 0
+
+
+def _get_sample_rate(filepath):
+    """Source sample rate in Hz, or 0 when it can't be read."""
+    try:
+        audio = mutagen.File(filepath)
+        if audio and hasattr(audio.info, 'sample_rate'):
+            return int(audio.info.sample_rate or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _sample_rate_args(source_path, target_format):
+    """Clamp the output sample rate to something the decks can actually play.
+
+    ffmpeg passes the source rate through untouched, so a 96 kHz source used to
+    produce a 96 kHz AIFF -- which the operator's CDJ-900 refuses to load. It is
+    a silent failure: the file converts fine, imports fine, and only fails when
+    it is loaded on the deck.
+
+    Only rates ABOVE the ceiling are touched, so 44.1 and 48 kHz sources are
+    passed through bit-exact and nothing that already worked gets resampled.
+    """
+    if target_format not in LOSSLESS_FORMATS:
+        return []
+    rate = _get_sample_rate(source_path)
+    if rate and rate > MAX_SAMPLE_RATE:
+        logger.info(
+            'Clamping %s from %d Hz to %d Hz (CDJ compatibility)',
+            os.path.basename(source_path), rate, MAX_SAMPLE_RATE,
+        )
+        return ['-ar', str(MAX_SAMPLE_RATE)]
+    return []
 
 
 def parse_rules(rules_text):
@@ -209,6 +250,7 @@ def convert_file(source_path, target_format):
         'ffmpeg',
         '-i', source_path,
         *codec_args,
+        *_sample_rate_args(source_path, target_format),
         '-y',
         target_path,
     ]
