@@ -10,6 +10,9 @@ tools/**/youtube_cookies.txt
 backend/.secret_key
 backend/.spotify_cache
 backend/.cache
+# Spotipy also writes one at the repo root when run from here. It holds a
+# bearer token — ignored so `git add -A` can never sweep it into a commit.
+/.cache
 backend/huey/
 /tmp/ocdj-sidecar*
 
