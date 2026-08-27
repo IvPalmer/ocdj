@@ -137,10 +137,16 @@ class API:
         self.s.headers.update({"Authorization": f"Bearer {token}"})
 
     def report_inventory(self, date_dirs: List[str], file_count: int = 0,
-                         total_bytes: int = 0) -> int:
+                         total_bytes: int = 0, poll_interval_seconds: int = 0,
+                         batch_limit: int = 0) -> int:
+        # The cadence travels with the inventory: launchd owns the interval and
+        # --limit owns the batch size, so the server can only ever quote them
+        # honestly if we tell it. Otherwise the panel guesses.
         r = self.s.post(f"{self.base}/local/inventory/",
                         json={"date_dirs": date_dirs, "file_count": file_count,
-                              "total_bytes": total_bytes},
+                              "total_bytes": total_bytes,
+                              "poll_interval_seconds": poll_interval_seconds,
+                              "batch_limit": batch_limit},
                         timeout=self.timeout)
         r.raise_for_status()
         return r.json().get("count", 0)
@@ -283,6 +289,26 @@ def download_one(client: PixeldrainClient, item: dict, root: str) -> List[dict]:
     return records
 
 
+def poll_interval_seconds() -> int:
+    """How often launchd re-runs us, so the server can state a real cadence.
+
+    Read from the plist rather than hardcoded here: the interval is launchd's
+    to own, and a second copy of the number is a second thing to get wrong.
+    Returns 0 when it cannot be read — the panel then says nothing about
+    timing instead of inventing it.
+    """
+    plist = os.path.expanduser(
+        "~/Library/LaunchAgents/dev.grooveops.ocdj-traxdb-local.plist")
+    try:
+        with open(plist, "r", encoding="utf-8") as f:
+            body = f.read()
+        marker = "<key>StartInterval</key>"
+        after = body.split(marker, 1)[1]
+        return int(after.split("<integer>", 1)[1].split("</integer>", 1)[0].strip())
+    except Exception:
+        return 0
+
+
 def run_cycle(cfg: Dict[str, str], limit: int) -> int:
     root = cfg["TRAXDB_LOCAL_ROOT"]
     if not os.path.isdir(root):
@@ -303,7 +329,9 @@ def run_cycle(cfg: Dict[str, str], limit: int) -> int:
         return 0
 
     files, size = archive_totals(root, dirs)
-    api.report_inventory(dirs, files, size)
+    api.report_inventory(dirs, files, size,
+                         poll_interval_seconds=poll_interval_seconds(),
+                         batch_limit=limit)
     log(f"reported {len(dirs)} local date folders, {files} files, "
         f"{size / 1e9:.1f} GB (newest {dirs[-1] if dirs else 'none'})")
 

@@ -18,6 +18,7 @@ urlpatterns = [
     path('audit/', views.trigger_audit),
     # Scraped folders/tracks browsing
     path('folders/', views.folders_list),
+    path('folders/retry-failed/', views.retry_failed_folders),
     path('folders/<int:pk>/', views.folder_detail),
     path('folders/<int:pk>/tracks/', views.folder_tracks),
 ]

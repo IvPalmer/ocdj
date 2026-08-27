@@ -96,8 +96,13 @@ def local_inventory(request):
         except (TypeError, ValueError):
             return None
 
+    # Optional, and only the daemon can know them: its poll interval lives in a
+    # launchd plist and its batch size in a Mac env var. Reported so the panel
+    # can quote a real cadence instead of a server-side guess.
     row = MacInventory.report(
         date_dirs, file_count=_int('file_count'), total_bytes=_int('total_bytes'),
+        poll_interval_seconds=_int('poll_interval_seconds'),
+        batch_limit=_int('batch_limit'),
     )
     logger.info('traxdb local: Mac reported %d date dirs', len(row.date_dirs))
     return Response({'count': len(row.date_dirs), 'reported_at': row.reported_at})
@@ -235,7 +240,11 @@ def local_complete(request, pk):
         folder.download_status = 'downloaded'
         folder.claimed_at = None
         folder.claim_token = ''
-        folder.save(update_fields=['download_status', 'claimed_at', 'claim_token'])
+        folder.last_error = ''
+        folder.last_error_at = None
+        folder.save(update_fields=[
+            'download_status', 'claimed_at', 'claim_token', 'last_error', 'last_error_at',
+        ])
 
         # The folder exists on the Mac now — record it immediately rather than
         # waiting for the next poll, so a sync in between can't re-queue it.
@@ -285,6 +294,13 @@ def local_fail(request, pk):
     folder.download_status = 'failed'
     folder.claimed_at = None
     folder.claim_token = ''
-    folder.save(update_fields=['download_status', 'claimed_at', 'claim_token'])
+    # Keep the reason. It used to live only in this log line, so the panel could
+    # say "1 list failed" but never "…because the Pixeldrain key is expired" —
+    # the one sentence that turns a mystery into a fix.
+    folder.last_error = reason
+    folder.last_error_at = timezone.now()
+    folder.save(update_fields=[
+        'download_status', 'claimed_at', 'claim_token', 'last_error', 'last_error_at',
+    ])
     logger.error('traxdb local: folder %s failed on Mac: %s', folder.folder_id, reason)
     return Response({'folder_id': folder.folder_id, 'download_status': 'failed'})

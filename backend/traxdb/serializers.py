@@ -48,13 +48,19 @@ class ScrapedFolderSerializer(serializers.ModelSerializer):
     # to a live count if the annotation is missing (single-folder details).
     tracks_count = serializers.SerializerMethodField()
     tracks_downloaded = serializers.SerializerMethodField()
+    # `download_status` alone can't answer "is this actually moving?". A list
+    # sits in 'downloading' from the moment the Mac leases it — the daemon
+    # leases a batch and works it one at a time — and stays there if the daemon
+    # dies mid-list. `queue_state` is the distinction the panel needs.
+    queue_state = serializers.SerializerMethodField()
 
     class Meta:
         model = ScrapedFolder
         fields = [
             'id', 'folder_id', 'title', 'url', 'pixeldrain_url',
-            'inferred_date', 'scraped_at', 'download_status',
-            'tracks_count', 'tracks_downloaded',
+            'inferred_date', 'scraped_at', 'download_status', 'queue_state',
+            'tracks_count', 'tracks_downloaded', 'claimed_at',
+            'last_error', 'last_error_at',
         ]
 
     def get_tracks_count(self, obj):
@@ -68,6 +74,31 @@ class ScrapedFolderSerializer(serializers.ModelSerializer):
         if annotated is not None:
             return annotated
         return obj.tracks.filter(downloaded=True).count()
+
+    def get_queue_state(self, obj):
+        """What the panel should say this list is doing.
+
+        Adds two distinctions the stored status can't make:
+          * `stalled` — leased, but the lease has outlived LEASE_MINUTES, so
+            nobody is working on it and it will be re-offered.
+          * `blocked` — pending, but its date already exists on the Mac, so
+            `local_claim` will never hand it out (a date folder is atomic).
+            Counting these as "waiting" makes a queue that never drains.
+        The view supplies `held_dates` and `lease_cutoff` via context; without
+        them this degrades to the stored status rather than guessing.
+        """
+        status = obj.download_status
+        if status == 'downloading':
+            cutoff = self.context.get('lease_cutoff')
+            if cutoff is not None and (obj.claimed_at is None or obj.claimed_at < cutoff):
+                return 'stalled'
+            return 'claimed'
+        if status == 'pending':
+            held = self.context.get('held_dates')
+            if held is not None and obj.inferred_date and obj.inferred_date in held:
+                return 'blocked'
+            return 'waiting'
+        return status
 
 
 class ScrapedFolderDetailSerializer(ScrapedFolderSerializer):

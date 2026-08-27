@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   useTraxDBInventory,
@@ -7,6 +7,7 @@ import {
   useTriggerSync,
   useTriggerDownload,
   useTriggerAudit,
+  useRetryFailedFolders,
   useTraxDBDownloadProgress,
   useCancelTraxDBDownload,
   useTraxDBFolders,
@@ -32,24 +33,37 @@ function timeAgo(isoStr) {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
-function countField(summary, arrayKey, countKey) {
-  const arr = summary?.[arrayKey]
-  if (Array.isArray(arr)) return arr.length
-  return summary?.[countKey] ?? 0
+function formatDuration(minutes) {
+  if (minutes < 60) return `${minutes} min`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m ? `${h}h ${m}m` : `${h}h`
 }
 
-/* ── compact library overview ── */
+/* ── library tiles + blog-vs-library freshness ── */
 
-function LibraryOverview({ inventory, latestSync, latestDownload }) {
+function LibraryOverview({ inventory, latestSync }) {
   if (!inventory) return null
+
+  // The question this page exists to answer is "does the blog have something I
+  // don't?". Both halves are known here, so state it outright instead of
+  // making the operator compare a tile against a list of pending rows.
+  // `latest_known_list_date` is the newest list past checks have *seen* on the
+  // blog, not a live read of it — so state both dates and let them speak,
+  // rather than asserting the archive is complete.
+  const libraryLatest = inventory.latest_date
+  const knownLatest = inventory.latest_known_list_date
+  let freshness = null
+  if (knownLatest && libraryLatest) {
+    freshness = knownLatest > libraryLatest
+      ? { tone: 'behind', text: `Newest list seen on the blog: ${knownLatest}. Newest date folder on the Mac: ${libraryLatest}.` }
+      : { tone: 'level', text: `Newest list seen on the blog is ${knownLatest}, and the Mac has that date. Nothing newer has turned up.` }
+  }
+
   return (
     <div className="traxdb-section traxdb-section--inventory">
       <div className="traxdb-section-body">
         <div className="traxdb-summary">
-          <div className="traxdb-stat">
-            <div className="traxdb-stat-value">{inventory.known_lists_count}</div>
-            <div className="traxdb-stat-label">Lists</div>
-          </div>
           <div className="traxdb-stat">
             <div className="traxdb-stat-value">{inventory.file_count?.toLocaleString()}</div>
             <div className="traxdb-stat-label">Files</div>
@@ -59,48 +73,283 @@ function LibraryOverview({ inventory, latestSync, latestDownload }) {
             <div className="traxdb-stat-label">Size</div>
           </div>
           <div className="traxdb-stat">
-            <div className="traxdb-stat-value">{inventory.latest_date || '—'}</div>
+            <div className="traxdb-stat-value">{inventory.date_dirs_count ?? '—'}</div>
+            <div className="traxdb-stat-label">Date folders</div>
+          </div>
+          <div className="traxdb-stat">
+            <div className="traxdb-stat-value">{libraryLatest || '—'}</div>
             <div className="traxdb-stat-label">Newest in library</div>
           </div>
         </div>
+        {freshness && (
+          <div className={`traxdb-freshness traxdb-freshness--${freshness.tone}`}>
+            {freshness.text}
+          </div>
+        )}
         <div className="traxdb-inventory-meta">
-          <span>Last check: {latestSync?.updated ? timeAgo(latestSync.updated) : 'never'}</span>
-          <span> · </span>
-          <span>Last download: {latestDownload?.updated ? timeAgo(latestDownload.updated) : 'never'}</span>
+          <span>Blog checked {latestSync?.updated ? timeAgo(latestSync.updated) : 'never'}</span>
+          {inventory.archive_location === 'mac' && (
+            <>
+              <span> · </span>
+              <span>Mac reported {inventory.reported_at ? timeAgo(inventory.reported_at) : 'never'}</span>
+            </>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
-/* ── main flow: check → download ── */
+/* ── the one manual action: ask the blog what's new ── */
 
-function CheckAndDownload({
-  latestSync, syncRunning, onCheck, syncPending,
-  latestDownload, downloadRunning, onDownload, onCancel, downloadPending,
-  inventory,
-}) {
-  // What "new" means here is: scraped lists in the DB that aren't downloaded
-  // yet. The sync's `links_new` only counts deltas since the last sync run —
-  // re-running sync on already-discovered lists would (correctly) report 0
-  // new even when 17 are still pending download. Pull pending list metadata
-  // straight from the folders endpoint so the UI matches reality.
-  //
-  // Poll it: the Mac daemon drains pending lists on its own 15-min cycle
-  // without creating a download operation, so there is no event this panel
-  // could hang an invalidation off. Left un-polled the panel keeps claiming
-  // "up to date" while lists sit pending.
-  const { data: pendingData } = useTraxDBFolders(
-    { download_status: 'pending', limit: 100 },
-    { refetchInterval: 30000 },
+function CheckBar({ latestSync, syncRunning, onCheck, syncPending }) {
+  const summary = latestSync?.summary || {}
+  return (
+    <div className="traxdb-checkbar">
+      <button
+        className="btn btn-accent btn-lg"
+        onClick={onCheck}
+        disabled={syncRunning || syncPending}
+      >
+        {syncRunning ? 'Checking blog…' : 'Check blog for new lists'}
+      </button>
+      {syncRunning && <span className="traxdb-spinner" />}
+      {!syncRunning && latestSync?.status === 'completed' && (
+        <span className="traxdb-checkbar-note">
+          Last check found {summary.links_new_count ?? 0} new
+          {' '}of {summary.links_found_count ?? 0} list
+          {(summary.links_found_count ?? 0) === 1 ? '' : 's'} on the blog.
+        </span>
+      )}
+      {!syncRunning && latestSync?.status === 'failed' && (
+        <span className="traxdb-error">{latestSync.error_message || 'Check failed'}</span>
+      )}
+    </div>
   )
-  const pendingFolders = pendingData?.results || []
-  const newCount = pendingData?.total ?? pendingFolders.length
+}
 
-  // Live download progress. The endpoint returns { status, progress: {...} }
-  // so the actual counters live one level down.
-  const progressId = downloadRunning ? latestDownload?.id : null
-  const { data: progressResp } = useTraxDBDownloadProgress(progressId)
+/* ── the queue: what is downloading, what is waiting, what broke ── */
+
+// The Mac leases a batch and downloads it one list at a time, and a list's
+// tracks only flip to downloaded when the whole folder lands — so there is no
+// honest per-list progress to draw, and "claimed" is the strongest thing that
+// can be said about a leased list. A percentage bar here would be decoration
+// pretending to be telemetry.
+const STATE_LABEL = {
+  claimed: 'on the mac',
+  stalled: 'stalled',
+  waiting: 'waiting',
+  blocked: 'blocked',
+  failed: 'failed',
+}
+
+const STATE_NOTE = {
+  claimed: 'the daemon has this one',
+  stalled: 'claimed but abandoned — will be re-offered',
+  blocked: 'that date already exists on the Mac',
+}
+
+function QueueRow({ folder }) {
+  const state = folder.queue_state || folder.download_status
+  const total = folder.tracks_count || 0
+  const note = folder.last_error || STATE_NOTE[state] || ''
+
+  return (
+    <li className={`traxdb-queue-row traxdb-queue-row--${state}`}>
+      <span className={`traxdb-dot traxdb-dot--${state}`} />
+      <span className="traxdb-queue-date">{folder.inferred_date || 'no date'}</span>
+      <span className="mono traxdb-queue-id">{folder.folder_id}</span>
+      <span className="traxdb-queue-state">{STATE_LABEL[state] || state}</span>
+      <span className="traxdb-queue-note" title={note}>{note}</span>
+      <span className="mono traxdb-queue-count">{total} track{total === 1 ? '' : 's'}</span>
+    </li>
+  )
+}
+
+function Queue({
+  inventory, latestDownload, downloadRunning,
+  onDownload, downloadPending, onCancel,
+  onRetryFailed, retryPending,
+}) {
+  const [showAll, setShowAll] = useState(false)
+
+  // One request for the whole in-flight queue, and the chips are counted off
+  // these same rows. Reading the counts from the inventory endpoint instead
+  // would let a chip and the row it counts come from snapshots taken seconds
+  // apart, which is how you get "0 waiting" above a list of waiting rows.
+  const { data, isLoading, isError } = useTraxDBFolders(
+    { download_status: 'downloading,pending,failed', limit: 200 },
+    { refetchInterval: 15000 },
+  )
+  const rows = data?.results || []
+  const truncated = (data?.total ?? rows.length) > rows.length
+
+  const location = inventory?.archive_location
+  const daemon = inventory?.daemon || {}
+
+  const stateOf = (f) => f.queue_state || f.download_status
+
+  const counts = useMemo(() => {
+    const c = { claimed: 0, stalled: 0, waiting: 0, blocked: 0, failed: 0 }
+    for (const f of rows) {
+      const s = stateOf(f)
+      if (s in c) c[s] += 1
+    }
+    return c
+  }, [rows])
+
+  // Active work first, then what needs a decision, then the backlog — reading
+  // order matches "what is happening / what needs me / what is coming".
+  const ordered = useMemo(() => {
+    const rank = { claimed: 0, stalled: 1, failed: 2, blocked: 3, waiting: 4 }
+    return [...rows].sort((a, b) =>
+      (rank[stateOf(a)] ?? 9) - (rank[stateOf(b)] ?? 9) ||
+      (b.inferred_date || '').localeCompare(a.inferred_date || ''))
+  }, [rows])
+  const visible = showAll ? ordered : ordered.slice(0, 6)
+
+  // Only quote an ETA when the daemon has told us its own cadence. The interval
+  // lives in a launchd plist and the batch size in a Mac env var; a number
+  // invented here would be the one figure the operator plans around, and wrong
+  // the moment either changes. Blocked lists are excluded — they are never
+  // handed out, so counting them makes a queue that never appears to clear.
+  const claimable = counts.claimed + counts.stalled + counts.waiting
+  const intervalMin = daemon.interval_seconds ? Math.round(daemon.interval_seconds / 60) : null
+  const batch = daemon.batch_limit || null
+  const etaMin = (claimable > 0 && intervalMin && batch)
+    ? Math.ceil(claimable / batch) * intervalMin
+    : null
+
+  const chip = (key, label) => counts[key] > 0 && (
+    <span className={`traxdb-chip traxdb-chip--${key}`}>
+      <span className={`traxdb-dot traxdb-dot--${key}`} />
+      {counts[key]} {label}
+    </span>
+  )
+
+  return (
+    <div className="traxdb-section">
+      <div className="traxdb-section-header">
+        <h3>Queue</h3>
+        <div className="traxdb-chips">
+          {chip('claimed', 'on the Mac')}
+          {chip('waiting', 'waiting')}
+          {chip('stalled', 'stalled')}
+          {chip('blocked', 'blocked')}
+          {chip('failed', 'failed')}
+          {!isLoading && !isError && ordered.length === 0 && (
+            <span className="traxdb-chip">nothing queued</span>
+          )}
+        </div>
+      </div>
+
+      <div className="traxdb-section-body">
+        {/* A daemon that stopped checking in is the difference between "these
+            are being fetched" and "these will sit here forever" — the exact
+            ambiguity this panel used to hide. */}
+        {location === 'mac' && daemon.overdue && (
+          <div className="traxdb-banner traxdb-banner--warn">
+            {/* One element, not loose text nodes — the banner is a flex row and
+                bare text between the <span className="mono"> bits would each
+                become its own flex item, scattering the sentence. */}
+            <span>
+              <strong>The Mac daemon is overdue{daemon.last_seen ? ` — last report ${timeAgo(daemon.last_seen)}` : ''}.</strong>{' '}
+              Nothing here downloads until it checks in again. Check{' '}
+              <span className="mono">launchctl list | grep ocdj-traxdb</span> and{' '}
+              <span className="mono">~/Library/Logs/ocdj-traxdb-local.out.log</span>.
+            </span>
+          </div>
+        )}
+
+        {counts.failed > 0 && (
+          <div className="traxdb-banner traxdb-banner--error">
+            <span>
+              <strong>{counts.failed} list{counts.failed === 1 ? '' : 's'} failed.</strong>{' '}
+              The reason each gave is on its row. Fix the cause first — re-queuing a
+              list whose Pixeldrain link is simply dead will only fail again.
+            </span>
+            <button className="btn btn-sm" onClick={onRetryFailed} disabled={retryPending}>
+              {retryPending ? 'Re-queuing…' : 'Retry failed'}
+            </button>
+          </div>
+        )}
+
+        {counts.blocked > 0 && (
+          <div className="traxdb-banner traxdb-banner--warn">
+            <span>
+              <strong>{counts.blocked} list{counts.blocked === 1 ? '' : 's'} can't be handed out.</strong>{' '}
+              Their date folders already exist on the Mac, and a date folder is never
+              written into twice. They stay here until you remove the folder or the row.
+            </span>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="traxdb-result traxdb-result--neutral">Loading queue…</div>
+        ) : isError ? (
+          <div className="traxdb-error">Couldn't load the queue.</div>
+        ) : ordered.length === 0 ? (
+          <div className="traxdb-result traxdb-result--neutral">
+            No lists are waiting, claimed, or failed.
+          </div>
+        ) : (
+          <>
+            <ul className="traxdb-queue">
+              {visible.map(f => <QueueRow key={f.id} folder={f} />)}
+            </ul>
+            {ordered.length > 6 && (
+              <button className="btn btn-sm" onClick={() => setShowAll(s => !s)}>
+                {showAll ? 'Show less' : `Show all ${ordered.length}`}
+              </button>
+            )}
+            {truncated && (
+              <p className="muted small">
+                Showing the first {rows.length} of {data.total}.
+              </p>
+            )}
+          </>
+        )}
+
+        {/* Who does the work. In Mac mode nobody presses anything — saying so
+            is the whole point, since the old panel showed a Download button
+            the server refuses with a 409 in this mode. */}
+        {location === 'mac' ? (
+          <div className="traxdb-worker">
+            <span className="traxdb-worker-label">Mac daemon</span>
+            <span>
+              fetches these from Pixeldrain on its own schedule
+              {intervalMin && batch ? ` — up to ${batch} list${batch === 1 ? '' : 's'} every ${intervalMin} min` : ''}.
+              {' '}Last report {daemon.last_seen ? timeAgo(daemon.last_seen) : 'never'}.
+              {etaMin ? ` At that rate the queue clears in about ${formatDuration(etaMin)}.` : ''}
+            </span>
+          </div>
+        ) : location === 'vps' ? (
+          <div className="traxdb-flow-step">
+            {downloadRunning ? (
+              <DownloadProgress latestDownload={latestDownload} onCancel={onCancel} downloadPending={downloadPending} />
+            ) : (
+              <button
+                className="btn btn-accent btn-lg"
+                onClick={onDownload}
+                disabled={downloadPending || claimable === 0}
+              >
+                Download {claimable} to this server
+              </button>
+            )}
+            {latestDownload?.status === 'failed' && (
+              <div className="traxdb-error">{latestDownload.error_message || 'Download failed'}</div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/* ── server-side download progress (VPS mode only) ── */
+
+function DownloadProgress({ latestDownload, onCancel, downloadPending }) {
+  const { data: progressResp } = useTraxDBDownloadProgress(latestDownload?.id)
   const progress = progressResp?.progress || progressResp || {}
   const listsTotal = progress.lists_total || 0
   const listsCompleted = progress.lists_completed || 0
@@ -108,140 +357,45 @@ function CheckAndDownload({
   const filesCompleted = progress.files_completed || 0
   const bytesTotal = progress.bytes_total || 0
   const bytesDownloaded = progress.bytes_downloaded || 0
-  // Prefer file-level progress when we know it — gives smoother bar movement
-  // since one list can take minutes and visual progress would otherwise stall.
   const pct = filesTotal > 0
     ? Math.round((filesCompleted / filesTotal) * 100)
     : (listsTotal > 0 ? Math.round((listsCompleted / listsTotal) * 100) : 0)
 
-  const dlSummary = latestDownload?.summary || {}
-  const dlCompleted = !downloadRunning && latestDownload?.status === 'completed'
-
-  // Has the latest download already consumed the latest sync? Avoid showing
-  // stale "X new" after a successful download.
-  const downloadIsAfterSync = latestDownload?.created && latestSync?.created
-    && new Date(latestDownload.created) >= new Date(latestSync.created)
-
   return (
-    <div className="traxdb-section">
-      <div className="traxdb-section-body traxdb-flow">
-        {/* Stage 1: Check */}
-        {!syncRunning && !downloadRunning && (
-          <div className="traxdb-flow-step">
-            <button
-              className="btn btn-accent btn-lg"
-              onClick={onCheck}
-              disabled={syncPending}
-            >
-              {latestSync ? 'Check Again for New Lists' : 'Check for New Lists'}
-            </button>
-            {latestSync?.status === 'failed' && (
-              <div className="traxdb-error">{latestSync.error_message || 'Check failed'}</div>
+    <>
+      <div className="traxdb-status traxdb-status--running">
+        <span className="traxdb-spinner" /> Downloading…
+      </div>
+      <div className="traxdb-progress">
+        <div className="traxdb-progress-bar">
+          <div className="traxdb-progress-fill" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="traxdb-progress-meta">
+          <span>
+            {listsCompleted} / {listsTotal || '?'} lists
+            {filesTotal > 0 && ` · ${filesCompleted} / ${filesTotal} files`}
+          </span>
+          <span>{pct}%</span>
+        </div>
+        {(bytesDownloaded > 0 || progress.current_list) && (
+          <div className="traxdb-progress-detail">
+            {bytesTotal > 0 && (
+              <span>{formatBytes(bytesDownloaded)} / {formatBytes(bytesTotal)}</span>
+            )}
+            {progress.current_list && (
+              <span> · current: <span className="mono">{progress.current_list}</span></span>
             )}
           </div>
         )}
-
-        {syncRunning && (
-          <div className="traxdb-flow-step">
-            <span className="traxdb-status traxdb-status--running">
-              <span className="traxdb-spinner" /> Scanning blog…
-            </span>
-          </div>
-        )}
-
-        {/* Stage 2: Pending lists ready to download */}
-        {!syncRunning && !downloadRunning && newCount > 0 && (
-          <div className="traxdb-flow-step">
-            <div className="traxdb-result traxdb-result--good">
-              <strong>{newCount}</strong> list{newCount === 1 ? '' : 's'} ready to download.
-            </div>
-            <ul className="traxdb-newlist">
-              {pendingFolders.slice(0, 8).map(f => (
-                <li key={f.id}>
-                  <span className="mono">{f.folder_id}</span>
-                  <span className="traxdb-newlist-date">{f.inferred_date || ''}</span>
-                </li>
-              ))}
-              {pendingFolders.length > 8 && <li className="muted">…and {pendingFolders.length - 8} more</li>}
-            </ul>
-            <button
-              className="btn btn-accent btn-lg"
-              onClick={onDownload}
-              disabled={downloadPending}
-            >
-              Download {newCount} New
-            </button>
-          </div>
-        )}
-
-        {/* Stage 2 (alt): Up to date */}
-        {!syncRunning && !downloadRunning && newCount === 0 && latestSync?.status === 'completed' && (
-          <div className="traxdb-flow-step">
-            <div className="traxdb-result traxdb-result--neutral">
-              You're up to date. No new lists pending download.
-            </div>
-          </div>
-        )}
-
-        {/* Stage 3: Downloading */}
-        {downloadRunning && (
-          <div className="traxdb-flow-step">
-            <div className="traxdb-status traxdb-status--running">
-              <span className="traxdb-spinner" /> Downloading…
-            </div>
-            <div className="traxdb-progress">
-              <div className="traxdb-progress-bar">
-                <div className="traxdb-progress-fill" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="traxdb-progress-meta">
-                <span>
-                  {listsCompleted} / {listsTotal || '?'} lists
-                  {filesTotal > 0 && ` · ${filesCompleted} / ${filesTotal} files`}
-                </span>
-                <span>{pct}%</span>
-              </div>
-              {(bytesDownloaded > 0 || progress.current_list) && (
-                <div className="traxdb-progress-detail">
-                  {bytesTotal > 0 && (
-                    <span>{formatBytes(bytesDownloaded)} / {formatBytes(bytesTotal)}</span>
-                  )}
-                  {progress.current_list && (
-                    <span> · current: <span className="mono">{progress.current_list}</span></span>
-                  )}
-                </div>
-              )}
-            </div>
-            <button
-              className="btn btn-danger btn-sm"
-              onClick={() => onCancel(latestDownload.id)}
-              disabled={downloadPending}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {/* Stage 4: Just-finished download summary (only fresh ones) */}
-        {!downloadRunning && dlCompleted && downloadIsAfterSync && newCount === 0 && (
-          <div className="traxdb-flow-step">
-            <div className="traxdb-result traxdb-result--good">
-              Downloaded <strong>{dlSummary.lists_completed ?? 0}</strong> list
-              {(dlSummary.lists_completed ?? 0) === 1 ? '' : 's'},{' '}
-              <strong>{dlSummary.files_completed ?? 0}</strong> file
-              {(dlSummary.files_completed ?? 0) === 1 ? '' : 's'}{' '}
-              ({formatBytes(dlSummary.bytes_downloaded)})
-              {(dlSummary.dead_links_count ?? 0) > 0 && (
-                <span className="muted"> · {dlSummary.dead_links_count} dead link{dlSummary.dead_links_count === 1 ? '' : 's'} skipped</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {!downloadRunning && latestDownload?.status === 'failed' && (
-          <div className="traxdb-error">{latestDownload.error_message || 'Download failed'}</div>
-        )}
       </div>
-    </div>
+      <button
+        className="btn btn-danger btn-sm"
+        onClick={() => onCancel(latestDownload.id)}
+        disabled={downloadPending}
+      >
+        Cancel
+      </button>
+    </>
   )
 }
 
@@ -250,7 +404,10 @@ function CheckAndDownload({
 function Advanced({ latestAudit, auditRunning, onAudit, auditPending, opsCount }) {
   const [open, setOpen] = useState(false)
   const [showFolders, setShowFolders] = useState(false)
-  const { data: foldersData } = useTraxDBFolders({ limit: 100 })
+  // Collapsed by default and behind a second click — no reason to pull 100
+  // folder rows before either has happened.
+  const { data: foldersData } = useTraxDBFolders(
+    { limit: 100 }, { enabled: open && showFolders })
   const folders = foldersData?.results || []
   const total = foldersData?.total || 0
   const summary = latestAudit?.summary || {}
@@ -357,6 +514,7 @@ function TraxDBPanel() {
   const triggerSync = useTriggerSync()
   const triggerDownload = useTriggerDownload()
   const triggerAudit = useTriggerAudit()
+  const retryFailed = useRetryFailedFolders()
   const cancelDownload = useCancelTraxDBDownload()
 
   const ops = opsData?.results || []
@@ -385,34 +543,40 @@ function TraxDBPanel() {
   // mount-time snapshot: "no new lists pending" next to a DB full of them.
   const qc = useQueryClient()
   const opWatermark = `${latestSync?.id}:${latestSync?.status}|${latestDownload?.id}:${latestDownload?.status}`
+  const prevWatermark = useRef(null)
   useEffect(() => {
-    qc.invalidateQueries({ queryKey: ['traxdb-folders'] })
-    qc.invalidateQueries({ queryKey: ['traxdb-inventory'] })
+    // Only on a real transition. Firing on mount too would just duplicate the
+    // fetch those queries are already making.
+    if (prevWatermark.current !== null && prevWatermark.current !== opWatermark) {
+      qc.invalidateQueries({ queryKey: ['traxdb-folders'] })
+      qc.invalidateQueries({ queryKey: ['traxdb-inventory'] })
+    }
+    prevWatermark.current = opWatermark
   }, [opWatermark, qc])
 
   return (
     <div className="traxdb-panel">
       <div className="traxdb-header">
         <h1 className="page-title">TraxDB</h1>
+        <CheckBar
+          latestSync={latestSync}
+          syncRunning={syncRunning}
+          onCheck={() => triggerSync.mutate({})}
+          syncPending={triggerSync.isPending}
+        />
       </div>
 
-      <LibraryOverview
-        inventory={inventory}
-        latestSync={latestSync}
-        latestDownload={latestDownload}
-      />
+      <LibraryOverview inventory={inventory} latestSync={latestSync} />
 
-      <CheckAndDownload
-        latestSync={latestSync}
-        syncRunning={syncRunning}
-        onCheck={() => triggerSync.mutate({})}
-        syncPending={triggerSync.isPending}
+      <Queue
+        inventory={inventory}
         latestDownload={latestDownload}
         downloadRunning={downloadRunning}
         onDownload={() => triggerDownload.mutate({})}
-        onCancel={(id) => cancelDownload.mutate(id)}
         downloadPending={triggerDownload.isPending}
-        inventory={inventory}
+        onCancel={(id) => cancelDownload.mutate(id)}
+        onRetryFailed={() => retryFailed.mutate()}
+        retryPending={retryFailed.isPending}
       />
 
       <Advanced

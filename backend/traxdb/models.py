@@ -69,6 +69,13 @@ class ScrapedFolder(models.Model):
     # clobber the result of whoever picked the list up afterwards.
     claim_token = models.CharField(max_length=64, blank=True)
 
+    # Why the last attempt failed, as reported by the Mac. Kept because the
+    # panel can otherwise only say "1 list failed" and guess at the cause —
+    # which is how an expired Pixeldrain key 401'd every download for two weeks
+    # behind a UI that showed nothing wrong.
+    last_error = models.TextField(blank=True)
+    last_error_at = models.DateTimeField(null=True, blank=True)
+
     # Track which sync operation discovered this folder
     sync_operation = models.ForeignKey(
         TraxDBOperation, on_delete=models.SET_NULL, null=True, blank=True, related_name='scraped_folders'
@@ -125,6 +132,13 @@ class MacInventory(models.Model):
     total_bytes = models.BigIntegerField(default=0)
     reported_at = models.DateTimeField(auto_now=True)
 
+    # The daemon's own cadence, reported by the daemon. The interval lives in a
+    # launchd plist and the batch size in a Mac env var, so the server cannot
+    # know either — and a panel that states them from a hardcoded guess is
+    # inventing the one number the operator would plan around. 0 = not reported.
+    poll_interval_seconds = models.IntegerField(default=0)
+    batch_limit = models.IntegerField(default=0)
+
     class Meta:
         verbose_name_plural = 'Mac inventory'
 
@@ -132,7 +146,8 @@ class MacInventory(models.Model):
         return f"{len(self.date_dirs or [])} date dirs @ {self.reported_at:%Y-%m-%d %H:%M}"
 
     @classmethod
-    def report(cls, date_dirs, *, merge=False, file_count=None, total_bytes=None):
+    def report(cls, date_dirs, *, merge=False, file_count=None, total_bytes=None,
+               poll_interval_seconds=None, batch_limit=None):
         """Store the Mac's listing.
 
         `merge=True` adds to what's already recorded instead of replacing it —
@@ -147,6 +162,8 @@ class MacInventory(models.Model):
                 row = cls.objects.create(
                     pk=1, date_dirs=sorted(incoming),
                     file_count=file_count or 0, total_bytes=total_bytes or 0,
+                    poll_interval_seconds=poll_interval_seconds or 0,
+                    batch_limit=batch_limit or 0,
                 )
                 return row
             if merge:
@@ -161,6 +178,12 @@ class MacInventory(models.Model):
             if total_bytes is not None:
                 row.total_bytes = total_bytes
                 fields.append('total_bytes')
+            if poll_interval_seconds is not None:
+                row.poll_interval_seconds = poll_interval_seconds
+                fields.append('poll_interval_seconds')
+            if batch_limit is not None:
+                row.batch_limit = batch_limit
+                fields.append('batch_limit')
             row.save(update_fields=fields)
         return row
 

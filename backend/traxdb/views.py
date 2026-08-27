@@ -4,7 +4,10 @@ import os
 import re
 import threading
 
-from django.db.models import Q
+from datetime import timedelta
+
+from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -41,6 +44,87 @@ def _seen_list_ids(traxdb_root):
         return []
 
 
+def _queue_context():
+    """Held dates + lease cutoff, the two facts `queue_state` needs.
+
+    Shared by the inventory counts and the folder list so a row and the chip
+    counting it can never disagree about what state it is in.
+    """
+    from .models import MacInventory
+    from .views_local import LEASE_MINUTES
+
+    return {
+        'held_dates': set(MacInventory.current()),
+        'lease_cutoff': timezone.now() - timedelta(minutes=LEASE_MINUTES),
+    }
+
+
+def _queue_state():
+    """Queue-facing counts + who is working on it.
+
+    The panel's central question is "is this list downloading or waiting?".
+    The stored `download_status` can't answer it on its own: a leased list sits
+    in 'downloading' whether the Mac is fetching it right now or merely holds
+    it in a batch, and a pending list whose date already exists on the Mac will
+    never be claimed at all. Both distinctions are computed here so the counts
+    match `queue_state` on the rows exactly.
+
+    None of this is derivable from an operation record — the daemon downloads
+    on its own schedule without creating one.
+    """
+    from .models import MacInventory
+
+    ctx = _queue_context()
+    held, cutoff = ctx['held_dates'], ctx['lease_cutoff']
+
+    counts = {'claimed': 0, 'stalled': 0, 'waiting': 0, 'blocked': 0,
+              'failed': 0, 'downloaded': 0, 'skipped': 0}
+    for f in ScrapedFolder.objects.only(
+            'download_status', 'claimed_at', 'inferred_date').iterator():
+        if f.download_status == 'downloading':
+            key = 'claimed' if (f.claimed_at and f.claimed_at >= cutoff) else 'stalled'
+        elif f.download_status == 'pending':
+            key = 'blocked' if (f.inferred_date and f.inferred_date in held) else 'waiting'
+        else:
+            key = f.download_status
+        if key in counts:
+            counts[key] += 1
+
+    row = MacInventory.objects.filter(pk=1).first()
+    last_seen = row.reported_at if row else None
+    interval = (row.poll_interval_seconds or 0) if row else 0
+    batch = (row.batch_limit or 0) if row else 0
+
+    # "Overdue", not "dead": the daemon reports at the top of each cycle, so
+    # two missed intervals means we should have heard from it and didn't. That
+    # signal was entirely absent when its Pixeldrain key expired and every
+    # download 401'd behind a panel insisting all was well. Without a reported
+    # interval there is no cadence to be overdue against, so don't claim one.
+    overdue = False
+    if last_seen and interval:
+        overdue = (timezone.now() - last_seen).total_seconds() > interval * 2
+
+    return {
+        'queue': counts,
+        # Newest list we know the blog has offered, from folders discovered by
+        # past checks — not a live read of the blog, hence the name.
+        'latest_known_list_date': (
+            ScrapedFolder.objects.exclude(inferred_date='')
+            .order_by('-inferred_date')
+            .values_list('inferred_date', flat=True)
+            .first()
+        ),
+        'daemon': {
+            'last_seen': last_seen,
+            'overdue': overdue,
+            # 0/None when the daemon has not reported its own cadence yet. The
+            # panel must stay silent about timing rather than invent it.
+            'interval_seconds': interval or None,
+            'batch_limit': batch or None,
+        },
+    }
+
+
 @api_view(['GET'])
 def inventory(request):
     """Return TraxDB inventory stats (date dirs, file counts, known lists).
@@ -72,6 +156,7 @@ def inventory(request):
                 download_status='downloaded').count(),
             'archive_location': 'mac',
             'reported_at': row.reported_at if row else None,
+            **_queue_state(),
         })
 
     try:
@@ -108,6 +193,8 @@ def inventory(request):
         'total_bytes': total_bytes,
         'db_folders_total': db_folders_total,
         'db_folders_downloaded': db_folders_downloaded,
+        'archive_location': 'vps',
+        **_queue_state(),
     })
 
 
@@ -402,10 +489,14 @@ def folders_list(request):
         tracks_downloaded_annotated=Count('tracks', filter=DBQ(tracks__downloaded=True)),
     ).order_by('-inferred_date', '-scraped_at', '-id')
 
-    # Filter by download status
+    # Filter by download status. Comma-separated so the panel can pull the
+    # whole in-flight queue (downloading + pending + failed) in one request
+    # rather than three that can disagree with each other mid-cycle.
     dl_status = request.query_params.get('download_status')
     if dl_status:
-        qs = qs.filter(download_status=dl_status)
+        wanted = [s for s in (p.strip() for p in dl_status.split(',')) if s]
+        if wanted:
+            qs = qs.filter(download_status__in=wanted)
 
     # Filter by date range
     date_from = request.query_params.get('date_from')
@@ -425,13 +516,33 @@ def folders_list(request):
     total = qs.count()
     qs = qs[offset:offset + limit]
 
-    serializer = ScrapedFolderSerializer(qs, many=True)
+    # Same context the inventory counts use, so a row's `queue_state` and the
+    # chip counting it are computed from one set of facts.
+    serializer = ScrapedFolderSerializer(qs, many=True, context=_queue_context())
     return Response({
         'results': serializer.data,
         'total': total,
         'limit': limit,
         'offset': offset,
     })
+
+
+@api_view(['POST'])
+def retry_failed_folders(request):
+    """Put every failed list back in the queue.
+
+    A failed download is nearly always a fixable outside cause — an expired
+    Pixeldrain key, a dropped connection — and the folder is the atomic unit,
+    so re-queuing is just "offer it to the daemon again". Without this the only
+    way back was a Django shell on the VPS, and failures piled up unnoticed.
+    Clears the lease too: a folder that failed while claimed keeps its token,
+    and the daemon only re-offers unclaimed rows.
+    """
+    n = ScrapedFolder.objects.filter(download_status='failed').update(
+        download_status='pending', claimed_at=None, claim_token='',
+    )
+    logger.info('Re-queued %d failed TraxDB folder(s)', n)
+    return Response({'requeued': n})
 
 
 @api_view(['GET'])

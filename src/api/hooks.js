@@ -587,6 +587,17 @@ export function useTraxDBFolders(params = {}, options = {}) {
   })
 }
 
+export function useRetryFailedFolders() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post('/traxdb/folders/retry-failed/', {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['traxdb-folders'] })
+      qc.invalidateQueries({ queryKey: ['traxdb-inventory'] })
+    },
+  })
+}
+
 export function useTraxDBFolderDetail(id) {
   return useQuery({
     queryKey: ['traxdb-folder', id],
