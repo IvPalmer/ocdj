@@ -96,13 +96,12 @@ def local_inventory(request):
         except (TypeError, ValueError):
             return None
 
-    # Optional, and only the daemon can know them: its poll interval lives in a
-    # launchd plist and its batch size in a Mac env var. Reported so the panel
-    # can quote a real cadence instead of a server-side guess.
+    # Optional, and only the daemon can know it: its poll interval lives in a
+    # launchd plist. Reported so the panel can quote a real cadence instead of a
+    # server-side guess.
     row = MacInventory.report(
         date_dirs, file_count=_int('file_count'), total_bytes=_int('total_bytes'),
         poll_interval_seconds=_int('poll_interval_seconds'),
-        batch_limit=_int('batch_limit'),
     )
     logger.info('traxdb local: Mac reported %d date dirs', len(row.date_dirs))
     return Response({'count': len(row.date_dirs), 'reported_at': row.reported_at})

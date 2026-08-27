@@ -9,6 +9,12 @@ Each cycle:
   2. POST /api/traxdb/local/claim/      — lease up to --limit lists
   3. download each list's files from Pixeldrain into <root>/<date>/
   4. POST .../complete/ or .../fail/
+  5. repeat 2-4 until the queue is empty (or --max-seconds runs out)
+
+A cycle drains the queue rather than taking a single batch. A list is roughly
+80 seconds, so a backlog is minutes of work — but one batch per launchd tick
+turned that into hours of a panel reading "waiting" with nothing the operator
+could do to hurry it.
 
 Safety rule that outranks everything: a date folder is atomic. If it exists
 locally — even empty — we never write into it. The operator prunes individual
@@ -137,16 +143,14 @@ class API:
         self.s.headers.update({"Authorization": f"Bearer {token}"})
 
     def report_inventory(self, date_dirs: List[str], file_count: int = 0,
-                         total_bytes: int = 0, poll_interval_seconds: int = 0,
-                         batch_limit: int = 0) -> int:
-        # The cadence travels with the inventory: launchd owns the interval and
-        # --limit owns the batch size, so the server can only ever quote them
-        # honestly if we tell it. Otherwise the panel guesses.
+                         total_bytes: int = 0, poll_interval_seconds: int = 0) -> int:
+        # The cadence travels with the inventory: launchd owns the interval, so
+        # the server can only quote it honestly if we tell it. Otherwise the
+        # panel guesses at the one number the operator plans around.
         r = self.s.post(f"{self.base}/local/inventory/",
                         json={"date_dirs": date_dirs, "file_count": file_count,
                               "total_bytes": total_bytes,
-                              "poll_interval_seconds": poll_interval_seconds,
-                              "batch_limit": batch_limit},
+                              "poll_interval_seconds": poll_interval_seconds},
                         timeout=self.timeout)
         r.raise_for_status()
         return r.json().get("count", 0)
@@ -309,7 +313,7 @@ def poll_interval_seconds() -> int:
         return 0
 
 
-def run_cycle(cfg: Dict[str, str], limit: int) -> int:
+def run_cycle(cfg: Dict[str, str], limit: int, max_seconds: float = 3600.0) -> int:
     root = cfg["TRAXDB_LOCAL_ROOT"]
     if not os.path.isdir(root):
         raise SystemExit(f"TRAXDB_LOCAL_ROOT does not exist: {root}")
@@ -330,49 +334,75 @@ def run_cycle(cfg: Dict[str, str], limit: int) -> int:
 
     files, size = archive_totals(root, dirs)
     api.report_inventory(dirs, files, size,
-                         poll_interval_seconds=poll_interval_seconds(),
-                         batch_limit=limit)
+                         poll_interval_seconds=poll_interval_seconds())
     log(f"reported {len(dirs)} local date folders, {files} files, "
         f"{size / 1e9:.1f} GB (newest {dirs[-1] if dirs else 'none'})")
 
-    items = api.claim(limit)
-    if not items:
-        log("nothing pending")
-        return 0
-
-    log(f"claimed {len(items)} list(s)")
+    # Work the queue until it is empty, rather than taking one batch and
+    # leaving. A list takes about 80 seconds, so a fourteen-list backlog is
+    # twenty minutes of work — but at one batch per launchd tick it was hours
+    # of a panel saying "waiting" with nothing the operator could do about it.
+    # `limit` is now just how many to lease at a time, not a cap on the cycle.
+    deadline = time.monotonic() + max_seconds
     done = 0
-    for item in items:
-        label = f"{item['folder_id']} ({item.get('inferred_date') or 'no date'})"
-        token = item.get("claim_token", "")
-        try:
-            records = download_one(client, item, root)
-        except Exception as e:
-            log(f"FAILED {label}: {e!r}")
-            api.fail(item["id"], token, repr(e)[:400])
-            continue
+    consecutive_failures = 0
+    while True:
+        if time.monotonic() >= deadline:
+            log(f"time budget reached after {done} list(s); rest next cycle")
+            break
 
-        # Write the receipt before reporting: if the POST or the process dies
-        # here, the next cycle replays it instead of stranding the folder.
-        save_receipt(root, item["id"], token, records)
-        try:
-            api.complete(item["id"], token, records)
-        except requests.RequestException as e:
-            log(f"downloaded {label} but confirm failed, receipt saved: {e!r}")
-            continue
-        try:
-            os.remove(os.path.join(receipts_dir(root), f"{item['id']}.json"))
-        except OSError:
-            pass
-        log(f"OK {label}: {len(records)} files")
-        done += 1
+        items = api.claim(limit)
+        if not items:
+            log("nothing pending" if done == 0 else f"queue drained: {done} list(s)")
+            break
+
+        log(f"claimed {len(items)} list(s)")
+        for item in items:
+            label = f"{item['folder_id']} ({item.get('inferred_date') or 'no date'})"
+            token = item.get("claim_token", "")
+            try:
+                records = download_one(client, item, root)
+            except Exception as e:
+                log(f"FAILED {label}: {e!r}")
+                api.fail(item["id"], token, repr(e)[:400])
+                consecutive_failures += 1
+                # Three in a row is not three unlucky lists, it is a dead
+                # Pixeldrain key or a dropped connection. Draining the whole
+                # queue against that would mark every remaining list failed in
+                # under a minute for one shared cause.
+                if consecutive_failures >= 3:
+                    log("3 consecutive failures — stopping cycle, cause looks systemic")
+                    return done
+                continue
+
+            consecutive_failures = 0
+            # Write the receipt before reporting: if the POST or the process
+            # dies here, the next cycle replays it instead of stranding the
+            # folder.
+            save_receipt(root, item["id"], token, records)
+            try:
+                api.complete(item["id"], token, records)
+            except requests.RequestException as e:
+                log(f"downloaded {label} but confirm failed, receipt saved: {e!r}")
+                continue
+            try:
+                os.remove(os.path.join(receipts_dir(root), f"{item['id']}.json"))
+            except OSError:
+                pass
+            log(f"OK {label}: {len(records)} files")
+            done += 1
 
     return done
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--limit", type=int, default=3, help="lists to claim per cycle")
+    ap.add_argument("--limit", type=int, default=3,
+                    help="lists to lease per claim (the cycle keeps going until "
+                         "the queue is empty)")
+    ap.add_argument("--max-seconds", type=float, default=3600.0,
+                    help="stop claiming new work after this long; the rest waits "
+                         "for the next cycle")
     ap.add_argument("--inventory-only", action="store_true",
                     help="report local folders and exit (no downloading)")
     args = ap.parse_args()
@@ -388,7 +418,7 @@ def main() -> int:
         return 0
 
     try:
-        run_cycle(cfg, args.limit)
+        run_cycle(cfg, args.limit, args.max_seconds)
     except requests.RequestException as e:
         log(f"API unreachable: {e!r}")
         return 1

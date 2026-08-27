@@ -208,17 +208,19 @@ function Queue({
   }, [rows])
   const visible = showAll ? ordered : ordered.slice(0, 6)
 
-  // Only quote an ETA when the daemon has told us its own cadence. The interval
-  // lives in a launchd plist and the batch size in a Mac env var; a number
-  // invented here would be the one figure the operator plans around, and wrong
-  // the moment either changes. Blocked lists are excluded — they are never
-  // handed out, so counting them makes a queue that never appears to clear.
+  // A cycle drains the queue, so the only wait worth quoting is the wait for
+  // the next cycle to start — which is the thing the operator actually can't
+  // hurry. Derived from the daemon's own reported interval; if it hasn't told
+  // us one, say nothing rather than invent a schedule. Blocked lists are
+  // excluded from "claimable": they are never handed out, so counting them
+  // would describe a queue that never appears to clear.
   const claimable = counts.claimed + counts.stalled + counts.waiting
   const intervalMin = daemon.interval_seconds ? Math.round(daemon.interval_seconds / 60) : null
-  const batch = daemon.batch_limit || null
-  const etaMin = (claimable > 0 && intervalMin && batch)
-    ? Math.ceil(claimable / batch) * intervalMin
-    : null
+  const nextRunMin = useMemo(() => {
+    if (!daemon.interval_seconds || !daemon.last_seen) return null
+    const due = new Date(daemon.last_seen).getTime() + daemon.interval_seconds * 1000
+    return Math.max(0, Math.round((due - Date.now()) / 60000))
+  }, [daemon.interval_seconds, daemon.last_seen])
 
   const chip = (key, label) => counts[key] > 0 && (
     <span className={`traxdb-chip traxdb-chip--${key}`}>
@@ -317,10 +319,14 @@ function Queue({
           <div className="traxdb-worker">
             <span className="traxdb-worker-label">Mac daemon</span>
             <span>
-              fetches these from Pixeldrain on its own schedule
-              {intervalMin && batch ? ` — up to ${batch} list${batch === 1 ? '' : 's'} every ${intervalMin} min` : ''}.
+              wakes {intervalMin ? `every ${intervalMin} min` : 'on its own schedule'} and works
+              through everything waiting before it sleeps — roughly a minute and a half per list.
               {' '}Last report {daemon.last_seen ? timeAgo(daemon.last_seen) : 'never'}.
-              {etaMin ? ` At that rate the queue clears in about ${formatDuration(etaMin)}.` : ''}
+              {claimable > 0 && nextRunMin !== null && (
+                nextRunMin === 0
+                  ? ' Next run is due now.'
+                  : ` Next run in about ${formatDuration(nextRunMin)}.`
+              )}
             </span>
           </div>
         ) : location === 'vps' ? (

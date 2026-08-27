@@ -132,12 +132,11 @@ class MacInventory(models.Model):
     total_bytes = models.BigIntegerField(default=0)
     reported_at = models.DateTimeField(auto_now=True)
 
-    # The daemon's own cadence, reported by the daemon. The interval lives in a
-    # launchd plist and the batch size in a Mac env var, so the server cannot
-    # know either — and a panel that states them from a hardcoded guess is
-    # inventing the one number the operator would plan around. 0 = not reported.
+    # How often the daemon wakes, reported by the daemon: the interval lives in
+    # a launchd plist, so the server cannot know it, and a panel stating it from
+    # a hardcoded guess is inventing the one number the operator plans around.
+    # 0 = never reported, in which case the panel says nothing about timing.
     poll_interval_seconds = models.IntegerField(default=0)
-    batch_limit = models.IntegerField(default=0)
 
     class Meta:
         verbose_name_plural = 'Mac inventory'
@@ -147,7 +146,7 @@ class MacInventory(models.Model):
 
     @classmethod
     def report(cls, date_dirs, *, merge=False, file_count=None, total_bytes=None,
-               poll_interval_seconds=None, batch_limit=None):
+               poll_interval_seconds=None):
         """Store the Mac's listing.
 
         `merge=True` adds to what's already recorded instead of replacing it —
@@ -163,7 +162,6 @@ class MacInventory(models.Model):
                     pk=1, date_dirs=sorted(incoming),
                     file_count=file_count or 0, total_bytes=total_bytes or 0,
                     poll_interval_seconds=poll_interval_seconds or 0,
-                    batch_limit=batch_limit or 0,
                 )
                 return row
             if merge:
@@ -181,9 +179,6 @@ class MacInventory(models.Model):
             if poll_interval_seconds is not None:
                 row.poll_interval_seconds = poll_interval_seconds
                 fields.append('poll_interval_seconds')
-            if batch_limit is not None:
-                row.batch_limit = batch_limit
-                fields.append('batch_limit')
             row.save(update_fields=fields)
         return row
 

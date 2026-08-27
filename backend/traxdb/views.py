@@ -93,7 +93,6 @@ def _queue_state():
     row = MacInventory.objects.filter(pk=1).first()
     last_seen = row.reported_at if row else None
     interval = (row.poll_interval_seconds or 0) if row else 0
-    batch = (row.batch_limit or 0) if row else 0
 
     # "Overdue", not "dead": the daemon reports at the top of each cycle, so
     # two missed intervals means we should have heard from it and didn't. That
@@ -117,10 +116,9 @@ def _queue_state():
         'daemon': {
             'last_seen': last_seen,
             'overdue': overdue,
-            # 0/None when the daemon has not reported its own cadence yet. The
+            # None when the daemon has not reported its own cadence yet. The
             # panel must stay silent about timing rather than invent it.
             'interval_seconds': interval or None,
-            'batch_limit': batch or None,
         },
     }
 
