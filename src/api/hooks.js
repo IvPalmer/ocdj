@@ -386,6 +386,10 @@ export function useTraxDBInventory() {
     queryKey: ['traxdb-inventory'],
     queryFn: () => api.get('/traxdb/inventory/'),
     staleTime: 60000, // 1 min — directory scan is lightweight but no need to spam it
+    // The Mac daemon downloads on its own 15-min cycle, outside any operation
+    // this panel knows about, so nothing here would ever invalidate these
+    // numbers. Without a poll the tiles keep whatever they showed on mount.
+    refetchInterval: 60000,
   })
 }
 
@@ -420,6 +424,11 @@ export function useTraxDBOperation(id) {
   })
 }
 
+// Sync/download are queued to Huey, so these mutations resolve when the job is
+// *accepted*, not when it has written anything. Invalidating the operations
+// list here only starts the 5s poll; the folder rows and inventory tiles are
+// refreshed by TraxDBPanel once that poll sees the operation reach a terminal
+// state.
 export function useTriggerSync() {
   const qc = useQueryClient()
   return useMutation({
@@ -563,7 +572,7 @@ export function useCancelTraxDBDownload() {
   })
 }
 
-export function useTraxDBFolders(params = {}) {
+export function useTraxDBFolders(params = {}, options = {}) {
   const searchParams = new URLSearchParams()
   if (params.download_status) searchParams.set('download_status', params.download_status)
   if (params.search) searchParams.set('search', params.search)
@@ -574,6 +583,7 @@ export function useTraxDBFolders(params = {}) {
   return useQuery({
     queryKey: ['traxdb-folders', params],
     queryFn: () => api.get(`/traxdb/folders/${qs ? '?' + qs : ''}`),
+    ...options,
   })
 }
 

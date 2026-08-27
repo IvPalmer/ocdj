@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   useTraxDBInventory,
   useTraxDBOperations,
@@ -84,10 +85,15 @@ function CheckAndDownload({
   // re-running sync on already-discovered lists would (correctly) report 0
   // new even when 17 are still pending download. Pull pending list metadata
   // straight from the folders endpoint so the UI matches reality.
-  const { data: pendingData } = useTraxDBFolders({
-    download_status: 'pending',
-    limit: 100,
-  })
+  //
+  // Poll it: the Mac daemon drains pending lists on its own 15-min cycle
+  // without creating a download operation, so there is no event this panel
+  // could hang an invalidation off. Left un-polled the panel keeps claiming
+  // "up to date" while lists sit pending.
+  const { data: pendingData } = useTraxDBFolders(
+    { download_status: 'pending', limit: 100 },
+    { refetchInterval: 30000 },
+  )
   const pendingFolders = pendingData?.results || []
   const newCount = pendingData?.total ?? pendingFolders.length
 
@@ -371,6 +377,18 @@ function TraxDBPanel() {
   const syncRunning = latestSync?.status === 'running' || latestSync?.status === 'pending'
   const downloadRunning = latestDownload?.status === 'running' || latestDownload?.status === 'pending'
   const auditRunning = latestAudit?.status === 'running' || latestAudit?.status === 'pending'
+
+  // Sync and download run in the Huey worker, so the trigger mutation resolves
+  // long before any row exists. Only the operations poll knows when the job
+  // actually finished — refresh the folder rows and inventory tiles off that
+  // transition. Without this a completed sync leaves the panel showing its
+  // mount-time snapshot: "no new lists pending" next to a DB full of them.
+  const qc = useQueryClient()
+  const opWatermark = `${latestSync?.id}:${latestSync?.status}|${latestDownload?.id}:${latestDownload?.status}`
+  useEffect(() => {
+    qc.invalidateQueries({ queryKey: ['traxdb-folders'] })
+    qc.invalidateQueries({ queryKey: ['traxdb-inventory'] })
+  }, [opWatermark, qc])
 
   return (
     <div className="traxdb-panel">
