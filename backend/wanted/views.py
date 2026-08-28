@@ -16,6 +16,7 @@ from .serializers import (
     TriggerImportSerializer, ConfirmImportSerializer,
 )
 from .services.dedup import _normalize
+from .services.preview import find_preview
 from drain.auth import require_drain_token
 from .services import (
     run_youtube_import, run_soundcloud_import,
@@ -47,6 +48,30 @@ class WantedItemViewSet(viewsets.ModelViewSet):
     filterset_fields = ['status', 'source', 'identified_via']
     search_fields = ['artist', 'title', 'notes']
     ordering_fields = ['added', 'updated', 'artist', 'title', 'status']
+
+    @action(detail=True, methods=['post'])
+    def preview(self, request, pk=None):
+        """Resolve (and cache) a 30s preview for this track.
+
+        On demand rather than at ingest: most rows are never played, and
+        resolving every one would mean two third-party lookups per track for
+        no reason. `refresh=true` re-asks a track previously found to have
+        none — worth it after a promo finally gets a proper release.
+        """
+        item = self.get_object()
+        refresh = str(request.data.get('refresh', '')).lower() in ('1', 'true', 'yes')
+
+        if item.preview_checked and not refresh:
+            return Response({'url': item.preview_url,
+                             'provider': item.preview_provider,
+                             'cached': True})
+
+        url, provider = find_preview(item.artist, item.title)
+        item.preview_url = url
+        item.preview_provider = provider
+        item.preview_checked = timezone.now()
+        item.save(update_fields=['preview_url', 'preview_provider', 'preview_checked'])
+        return Response({'url': url, 'provider': provider, 'cached': False})
 
     @action(detail=False, methods=['post'])
     def bulk_add(self, request):

@@ -74,6 +74,14 @@ class WantedItem(models.Model):
         blank=True,
     )
     acoustid_fingerprint = models.TextField(null=True, blank=True)
+
+    # 30s preview, resolved on demand from iTunes/Deezer and cached here.
+    # `preview_checked` is set even when nothing was found: a lot of what this
+    # app tracks is promo material no catalogue has, and without recording the
+    # miss every render would re-ask the same dead question.
+    preview_url = models.URLField(max_length=1000, blank=True)
+    preview_provider = models.CharField(max_length=20, blank=True)
+    preview_checked = models.DateTimeField(null=True, blank=True)
     file_path = models.CharField(max_length=1000, null=True, blank=True)
     error_message = models.TextField(blank=True)
 

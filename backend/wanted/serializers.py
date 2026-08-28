@@ -26,9 +26,11 @@ class WantedItemSerializer(serializers.ModelSerializer):
             'status', 'identified_via', 'acoustid_fingerprint',
             'file_path', 'error_message', 'search_count',
             'search_results_count',
+            'preview_url', 'preview_provider', 'preview_checked',
             'last_searched', 'best_match_score', 'added', 'updated',
         ]
-        read_only_fields = ['added', 'updated']
+        read_only_fields = ['added', 'updated',
+                            'preview_url', 'preview_provider', 'preview_checked']
 
 
 class BulkAddSerializer(serializers.Serializer):
