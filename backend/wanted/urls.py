@@ -14,6 +14,8 @@ urlpatterns = [
     path('import/trigger/', views.trigger_import, name='import-trigger'),
     path('import/operations/<int:pk>/confirm/', views.confirm_import, name='import-confirm'),
     path('import/config-status/', views.import_config_status, name='import-config-status'),
+    # Shazam feed (bearer-token authed, called by the Mac reader or an iOS Shortcut)
+    path('shazam/ingest/', views.shazam_ingest, name='shazam-ingest'),
     # Spotify OAuth
     path('import/spotify/auth/', views.spotify_auth_url, name='spotify-auth-url'),
     path('import/spotify/callback/', views.spotify_callback, name='spotify-callback'),

@@ -5,6 +5,7 @@ from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.db.models import Count
 from django.conf import settings
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
@@ -14,6 +15,8 @@ from .serializers import (
     ImportOperationSerializer, ImportOperationListSerializer,
     TriggerImportSerializer, ConfirmImportSerializer,
 )
+from .services.dedup import _normalize
+from drain.auth import require_drain_token
 from .services import (
     run_youtube_import, run_soundcloud_import,
     run_spotify_import, get_spotify_auth_url, handle_spotify_callback, check_spotify_status,
@@ -311,3 +314,83 @@ def import_config_status(request):
             'available': True,
         },
     })
+
+
+# ── Shazam ingest ─────────────────────────────────────────────
+
+@api_view(['POST'])
+@require_drain_token
+def shazam_ingest(request):
+    """Take a batch of Shazams and turn them into WantedItems.
+
+    Deliberately source-agnostic. Apple's Shazam library is not readable as a
+    file on macOS and has no history API, so whatever ends up feeding this is a
+    workaround — today the `Faixas do Shazam` playlist that Shazam syncs into
+    Apple Music, read off the Mac's Music.app; tomorrow possibly an iOS
+    Shortcut posting straight from the phone. Both send the same shape, so the
+    feed can be swapped without touching anything downstream.
+
+    Body: {"items": [{"artist", "title", "shazamed_at", "external_id",
+                      "album", "isrc", "device"}]}
+
+    `external_id` is what makes a repeat POST cheap: the caller has no reliable
+    cursor (a playlist read hands back everything every time), so the server
+    decides what is new. Falls back to artist+title when absent.
+    """
+    items = request.data.get('items')
+    if not isinstance(items, list):
+        return Response({'error': 'items must be a list'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    source, _ = WantedSource.objects.get_or_create(
+        source_type='shazam',
+        defaults={'name': 'Shazam', 'active': True},
+    )
+
+    created, skipped = [], 0
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        artist = (raw.get('artist') or '').strip()[:500]
+        title = (raw.get('title') or '').strip()[:500]
+        if not artist and not title:
+            skipped += 1
+            continue
+
+        # Match how the rest of the app decides "already have this": accent- and
+        # case-insensitive on artist+title, so a Shazam of something already
+        # imported from a blog or a playlist doesn't become a second row.
+        norm_a, norm_t = _normalize(artist), _normalize(title)
+        dupe = any(
+            _normalize(a) == norm_a and _normalize(t) == norm_t
+            for a, t in WantedItem.objects.values_list('artist', 'title')
+        )
+        if dupe:
+            skipped += 1
+            continue
+
+        note_bits = []
+        if raw.get('shazamed_at'):
+            note_bits.append(f"shazamed {raw['shazamed_at']}")
+        if raw.get('device'):
+            note_bits.append(f"on {raw['device']}")
+        if raw.get('isrc'):
+            note_bits.append(f"ISRC {raw['isrc']}")
+
+        item = WantedItem.objects.create(
+            artist=artist,
+            title=title,
+            release_name=(raw.get('album') or '').strip()[:500],
+            source=source,
+            identified_via='shazam',
+            notes=' · '.join(note_bits),
+            status='identified',
+        )
+        created.append({'id': item.id, 'artist': artist, 'title': title})
+
+    source.last_checked = timezone.now()
+    source.save(update_fields=['last_checked'])
+
+    logger.info('shazam ingest: %d new, %d already known', len(created), skipped)
+    return Response({'created': created, 'created_count': len(created),
+                     'skipped': skipped})

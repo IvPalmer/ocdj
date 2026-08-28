@@ -14,6 +14,7 @@ class WantedSource(models.Model):
         ('discogs', 'Discogs'),
         ('bandcamp', 'Bandcamp'),
         ('dig', 'Dig'),
+        ('shazam', 'Shazam'),
     ]
 
     name = models.CharField(max_length=255)
