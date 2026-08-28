@@ -1,0 +1,128 @@
+.shazam-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+
+.shazam-header .page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.shazam-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+/* ── Feed health ── */
+.shazam-feed {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent-green) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-green) 25%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-bottom: var(--s-4);
+}
+
+.shazam-feed--overdue {
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-amber) 40%, transparent);
+  color: var(--text);
+}
+
+.shazam-feed-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--accent-green);
+  transform: translateY(-1px);
+}
+
+.shazam-feed--overdue .shazam-feed-dot { background: var(--accent-amber); }
+
+.shazam-feed .mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg-surface);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+}
+
+/* ── Table ── */
+.shazam-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.shazam-table thead th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 0 var(--s-3) var(--s-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.shazam-table tbody td {
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.shazam-table tbody tr:hover { background: var(--bg-inset); }
+
+/* Already in the library — still worth seeing, just not competing for
+   attention with what still needs finding. */
+.shazam-row--done { opacity: 0.55; }
+
+.shazam-td-play { width: 40px; }
+.shazam-td-artist { font-weight: 600; color: var(--text); }
+.shazam-td-when { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.shazam-td-actions { text-align: right; white-space: nowrap; }
+
+/* ── Empty + caveat ── */
+.shazam-empty {
+  padding: var(--s-5, 24px) var(--s-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+}
+
+.shazam-empty p { margin: 0 0 var(--s-2); }
+.shazam-empty p:last-child { margin-bottom: 0; }
+
+.shazam-empty .mono,
+.shazam-caveat .mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg-surface);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+}
+
+.shazam-caveat {
+  margin-top: var(--s-4);
+  padding-top: var(--s-3);
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .shazam-td-when { display: none; }
+}

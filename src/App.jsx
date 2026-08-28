@@ -5,6 +5,7 @@ import WantedList from './components/WantedSection/WantedList'
 import SoulseekPanel from './components/SoulseekSection/SoulseekPanel'
 import TraxDBPanel from './components/TraxDBSection/TraxDBPanel'
 import RecognizePanel from './components/RecognizeSection/RecognizePanel'
+import ShazamPanel from './components/ShazamSection/ShazamPanel'
 import CratematePanel from './components/CratemateSection/CratematePanel'
 import OrganizePanel from './components/OrganizeSection/OrganizePanel'
 import YouTubePanel from './components/YouTubeSection/YouTubePanel'
@@ -24,6 +25,7 @@ function App() {
         <Route path="/youtube" element={<YouTubePanel />} />
         <Route path="/traxdb" element={<TraxDBPanel />} />
         <Route path="/recognize" element={<RecognizePanel />} />
+        <Route path="/shazam" element={<ShazamPanel />} />
         <Route path="/cratemate" element={<CratematePanel />} />
         <Route path="/organize" element={<OrganizePanel />} />
         <Route path="/library" element={<LibraryPanel />} />

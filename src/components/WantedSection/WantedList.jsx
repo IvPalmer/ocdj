@@ -1,96 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import {
   useWantedItems, useWantedSources, useCreateWantedItem,
   useUpdateWantedItem, useDeleteWantedItem, useBulkUpdateStatus,
   useBulkDeleteItems, useAddToQueue, useSearch,
 } from '../../api/hooks'
-import { api } from '../../api/client'
+import usePreviewPlayer from '../shared/usePreviewPlayer'
+import StatusBadge, { STATUS_LABELS } from '../shared/StatusBadge'
 import AddItemForm from './AddItemForm'
 import ImportPanel from './ImportPanel'
 import './WantedList.css'
 
-/* One <audio> for the whole table. Per-row elements would let two previews
-   overlap, and the fix for that ends up being this anyway. */
-function usePreviewPlayer() {
-  const audioRef = useRef(null)
-  const [playingId, setPlayingId] = useState(null)
-  const [loadingId, setLoadingId] = useState(null)
-
-  useEffect(() => {
-    const el = new Audio()
-    el.addEventListener('ended', () => setPlayingId(null))
-    el.addEventListener('error', () => setPlayingId(null))
-    audioRef.current = el
-    return () => { el.pause(); audioRef.current = null }
-  }, [])
-
-  const stop = () => {
-    if (audioRef.current) audioRef.current.pause()
-    setPlayingId(null)
-  }
-
-  const toggle = async (item) => {
-    if (playingId === item.id) return stop()
-    stop()
-    setLoadingId(item.id)
-    try {
-      // Resolve through the backend rather than calling iTunes from here: the
-      // answer is cached on the item, so the second play costs nothing.
-      const res = await api.post(`/wanted/items/${item.id}/preview/`, {})
-      if (!res?.url) return   // nobody has it — the button says so
-      audioRef.current.src = res.url
-      await audioRef.current.play()
-      setPlayingId(item.id)
-    } catch {
-      setPlayingId(null)
-    } finally {
-      setLoadingId(null)
-    }
-  }
-
-  return { toggle, playingId, loadingId }
-}
-
-const STATUS_LABELS = {
-  pending: 'Pending',
-  identified: 'Identified',
-  searching: 'Searching',
-  found: 'Found',
-  downloading: 'Downloading',
-  downloaded: 'Downloaded',
-  tagged: 'Tagged',
-  organized: 'Organized',
-  not_found: 'Not Found',
-  failed: 'Failed',
-}
-
-const STATUS_COLORS = {
-  pending: 'var(--accent-amber)',
-  identified: '#a78bfa',
-  searching: '#60a5fa',
-  found: 'var(--accent-green)',
-  downloading: '#34d399',
-  downloaded: '#10b981',
-  tagged: '#8b5cf6',
-  organized: '#6366f1',
-  not_found: 'var(--accent-red)',
-  failed: '#f87171',
-}
-
-function StatusBadge({ status }) {
-  const color = STATUS_COLORS[status] || 'var(--text-muted)'
-  return (
-    <span
-      className="status-badge-sm"
-      style={{
-        background: `color-mix(in srgb, ${color} 12%, transparent)`,
-        color: color,
-      }}
-    >
-      {STATUS_LABELS[status] || status}
-    </span>
-  )
-}
 
 function EditItemForm({ item, sources, onSubmit, onClose }) {
   const [artist, setArtist] = useState(item.artist || '')

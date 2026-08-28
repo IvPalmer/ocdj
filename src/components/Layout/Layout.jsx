@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import './Layout.css'
 
 // Grouped by workflow stage. Sidebar reflects the mental model:
-//   Capture (Recognize, TraxDB) -> Curate (Wanted) -> Fetch (Soulseek) ->
+//   Capture (Recognize, Shazam, TraxDB) -> Curate (Wanted) -> Fetch (Soulseek) ->
 //   Process (Organize) -> Library -> Settings.
 const NAV_GROUPS = [
   {
@@ -17,6 +17,7 @@ const NAV_GROUPS = [
     label: 'Capture',
     items: [
       { to: '/recognize', label: 'Recognize' },
+      { to: '/shazam', label: 'Shazam' },
       { to: '/cratemate', label: 'Crate-Mate' },
       { to: '/traxdb', label: 'TraxDB' },
     ],

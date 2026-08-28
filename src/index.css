@@ -189,3 +189,15 @@ table {
 @media (min-width: 768px) {
   .mobile-only { display: none !important; }
 }
+
+/* Status pill, shared by the Wanted list and the Shazam feed. */
+.status-badge-sm {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+

@@ -1,0 +1,152 @@
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../../api/client'
+import { useAddToQueue } from '../../api/hooks'
+import usePreviewPlayer from '../shared/usePreviewPlayer'
+import StatusBadge from '../shared/StatusBadge'
+import { useState } from 'react'
+import './ShazamPanel.css'
+
+function timeAgo(iso) {
+  if (!iso) return 'never'
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
+function whenShazamed(notes) {
+  // The reader writes "shazamed <date> · on <device>"; show the date it caught
+  // rather than when the row happened to be created.
+  const m = /shazamed ([^·]+)/.exec(notes || '')
+  return m ? m[1].trim() : ''
+}
+
+const DONE = new Set(['downloaded', 'tagged', 'organized', 'found'])
+
+export default function ShazamPanel() {
+  const [queuingId, setQueuingId] = useState(null)
+  const addToQueue = useAddToQueue()
+  const { toggle: togglePreview, playingId, loadingId } = usePreviewPlayer()
+
+  const { data: status } = useQuery({
+    queryKey: ['shazam-status'],
+    queryFn: () => api.get('/wanted/shazam/status/'),
+    refetchInterval: 60000,
+  })
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['shazam-items'],
+    queryFn: () => api.get('/wanted/items/?identified_via=shazam&ordering=-added&limit=100'),
+    refetchInterval: 60000,
+  })
+
+  const items = data?.results || []
+
+  const handleFind = async (id) => {
+    setQueuingId(id)
+    try {
+      await addToQueue.mutateAsync({ wanted_item_ids: [id] })
+    } finally {
+      setQueuingId(null)
+    }
+  }
+
+  return (
+    <div className="shazam-panel">
+      <div className="shazam-header">
+        <h1 className="page-title">Shazam</h1>
+        <span className="shazam-count">
+          {status?.total ?? 0} caught
+        </span>
+      </div>
+
+      {/* The feed is a LaunchAgent on a Mac that may be closed, asleep, or
+          erroring. Saying when it last reported is the difference between
+          "you haven't Shazamed anything" and "this stopped working". */}
+      <div className={`shazam-feed ${status?.overdue ? 'shazam-feed--overdue' : ''}`}>
+        <span className="shazam-feed-dot" />
+        <span>
+          {status?.overdue
+            ? <><strong>Feed is overdue</strong> — last report {timeAgo(status?.last_checked)}. Check{' '}
+                <span className="mono">~/Library/Logs/ocdj-shazam-local.log</span>.</>
+            : <>Feed healthy — the Mac checked in {timeAgo(status?.last_checked)}. Anything you
+                Shazam on your phone, Watch, or in Control Center lands here within 5 minutes.</>}
+        </span>
+      </div>
+
+      {isLoading ? (
+        <p className="muted">Loading…</p>
+      ) : items.length === 0 ? (
+        <div className="shazam-empty">
+          <p><strong>Nothing yet.</strong></p>
+          <p className="muted">
+            Your existing Shazams were deliberately left out — this feed starts
+            from when it was switched on. Shazam something and it shows up here.
+          </p>
+          <p className="muted small">
+            Changed your mind about the backlog? Run{' '}
+            <span className="mono">tools/shazam_sync/shazam_local.py --all</span> on the Mac.
+          </p>
+        </div>
+      ) : (
+        <table className="shazam-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Artist</th>
+              <th>Title</th>
+              <th>Shazamed</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(item => {
+              const noPreview = item.preview_checked && !item.preview_url
+              return (
+                <tr key={item.id} className={DONE.has(item.status) ? 'shazam-row--done' : ''}>
+                  <td className="shazam-td-play">
+                    <button
+                      className={`btn btn-xs${playingId === item.id ? ' btn-xs--active' : ''}`}
+                      onClick={() => togglePreview(item)}
+                      disabled={loadingId === item.id || noPreview}
+                      title={noPreview ? 'No preview — not in iTunes or Deezer' : 'Play 30s preview'}
+                    >
+                      {loadingId === item.id ? '…' : playingId === item.id ? '■' : noPreview ? '—' : '▶'}
+                    </button>
+                  </td>
+                  <td className="shazam-td-artist">{item.artist || '—'}</td>
+                  <td className="shazam-td-title">{item.title || '—'}</td>
+                  <td className="shazam-td-when mono">{whenShazamed(item.notes)}</td>
+                  <td>
+                    <StatusBadge status={item.status} />
+                  </td>
+                  <td className="shazam-td-actions">
+                    <button
+                      className="btn btn-xs btn-accent"
+                      onClick={() => handleFind(item.id)}
+                      disabled={queuingId !== null}
+                      title="Search Soulseek for this track"
+                    >
+                      {queuingId === item.id ? 'Finding…' : 'Find'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+
+      {/* Stated plainly because it is a real hole, not a rough edge: Shazam
+          only syncs what its streaming partner has, and the tracks most worth
+          catching in a club are the ones no catalogue carries. */}
+      <p className="shazam-caveat">
+        Only tracks Apple Music has in its catalogue arrive here. Promos and white
+        labels are Shazamed on your phone but never reach this list — Apple exposes
+        no way to read the Shazam library itself.
+      </p>
+    </div>
+  )
+}

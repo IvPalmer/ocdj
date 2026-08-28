@@ -362,6 +362,11 @@ def shazam_ingest(request):
     cursor (a playlist read hands back everything every time), so the server
     decides what is new. Falls back to artist+title when absent.
     """
+    # An empty batch is the normal case, not an error: the reader posts every
+    # cycle whether or not it found anything, so `last_checked` means "the feed
+    # is alive" rather than "something was Shazamed recently". Without that a
+    # healthy quiet week is indistinguishable from a dead LaunchAgent — the
+    # exact blind spot that hid a broken TraxDB download for two weeks.
     items = request.data.get('items')
     if not isinstance(items, list):
         return Response({'error': 'items must be a list'},
@@ -419,3 +424,32 @@ def shazam_ingest(request):
     logger.info('shazam ingest: %d new, %d already known', len(created), skipped)
     return Response({'created': created, 'created_count': len(created),
                      'skipped': skipped})
+
+
+@api_view(['GET'])
+def shazam_status(request):
+    """What the Shazam panel needs to say whether the feed is working.
+
+    `last_checked` is a heartbeat from the Mac reader, not the time of the last
+    Shazam — the reader posts every cycle even with nothing to send.
+    """
+    source = WantedSource.objects.filter(source_type='shazam').first()
+    qs = WantedItem.objects.filter(identified_via='shazam')
+
+    last_seen = source.last_checked if source else None
+    # The reader runs every 5 minutes. Four missed cycles is not jitter — the
+    # Mac is asleep, the agent is unloaded, or the script is erroring.
+    overdue = True
+    if last_seen:
+        overdue = (timezone.now() - last_seen).total_seconds() > 1200
+
+    return Response({
+        'connected': source is not None,
+        'last_checked': last_seen,
+        'overdue': overdue,
+        'total': qs.count(),
+        'by_status': {
+            row['status']: row['n']
+            for row in qs.values('status').annotate(n=Count('id')).order_by()
+        },
+    })

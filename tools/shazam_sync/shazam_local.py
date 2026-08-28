@@ -190,13 +190,15 @@ def main() -> int:
     seen = set() if args.all else load_seen()
     fresh = [r for r in rows if r["external_id"] not in seen]
     log(f"playlist has {len(rows)} track(s), {len(fresh)} not sent before")
-    if not fresh:
-        return 0
 
     if args.dry_run:
         for r in fresh[:20]:
             log(f"  would send: {r['artist']} — {r['title']}")
         return 0
+
+    # Post even when `fresh` is empty. The server treats the call as a
+    # heartbeat, which is what lets the panel tell "nothing Shazamed lately"
+    # apart from "this LaunchAgent has been dead for a week".
 
     resp = requests.post(
         ingest_url(cfg),
