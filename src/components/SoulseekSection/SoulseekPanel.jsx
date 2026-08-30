@@ -348,7 +348,7 @@ function SoulseekPanel() {
                   key={dl.id}
                   dl={dl}
                   onCancel={() => cancelMutation.mutate(dl.id)}
-                  cancelPending={cancelMutation.isPending || dl.untracked}
+                  cancelPending={cancelMutation.isPending}
                   formatSize={formatSize}
                   formatSpeed={formatSpeed}
                 />
@@ -401,7 +401,8 @@ function SoulseekPanel() {
                   <button
                     className="btn btn-xs btn-ghost dl-remove-btn"
                     onClick={() => deleteDlMutation.mutate(dl.id)}
-                    disabled={deleteDlMutation.isPending || dl.untracked}
+                    onClickCapture={undefined}
+                    disabled={deleteDlMutation.isPending}
                     title="Remove from list"
                   >
                     ✕

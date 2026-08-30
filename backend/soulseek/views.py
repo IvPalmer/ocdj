@@ -664,8 +664,28 @@ def downloads_status(request):
 
 @api_view(['POST'])
 def cancel_download(request):
-    """Cancel a download by our DB id."""
+    """Cancel a download, whether or not we have a row for it.
+
+    Transfers slskd is running that this app never recorded are just as
+    cancellable as our own — slskd only needs the peer and the transfer id.
+    Refusing them would leave the only copy of "stop this" inside slskd's own
+    interface, which is precisely the split that made three dead transfers sit
+    in a queue for a day with a greyed-out button next to them.
+    """
     dl_id = request.data.get('download_id')
+
+    if isinstance(dl_id, str) and dl_id.startswith('slskd:'):
+        # id shape from downloads_status: slskd:<username>:<transfer id>
+        _, username, transfer_id = dl_id.split(':', 2)
+        if not transfer_id:
+            return Response({'error': 'untracked transfer has no slskd id'}, status=400)
+        try:
+            SlskdClient().cancel_download(username, transfer_id, remove=True)
+        except Exception as e:
+            logger.warning('Could not cancel untracked slskd transfer: %s', e)
+            return Response({'error': str(e)[:200]}, status=502)
+        return Response({'status': 'cancelled', 'id': dl_id, 'untracked': True})
+
     if not dl_id:
         return Response({'error': 'download_id required'}, status=400)
 
@@ -828,7 +848,12 @@ def delete_download(request, download_id):
 
 @api_view(['POST'])
 def clear_downloads(request):
-    """Clear completed/cancelled/failed downloads from our DB."""
+    """Clear finished downloads — ours and slskd's own history.
+
+    Clearing only our rows left the button doing visibly nothing whenever the
+    finished transfers were slskd's rather than ours, which after the untracked
+    rows started being displayed is most of them.
+    """
     mode = request.data.get('mode', 'completed')
 
     if mode == 'all':
@@ -840,7 +865,35 @@ def clear_downloads(request):
     else:
         return Response({'error': 'Invalid mode'}, status=400)
 
-    return Response({'cleared': count})
+    # slskd keeps its own list of finished transfers. Remove the ones this call
+    # covers, so the panel empties instead of redrawing them next poll.
+    removed = 0
+    client = SlskdClient()
+    try:
+        for user_entry in client.get_downloads():
+            username = user_entry.get('username', '')
+            for directory in user_entry.get('directories', []):
+                for transfer in directory.get('files', []):
+                    state = transfer.get('state', '') or ''
+                    if 'Completed' not in state:
+                        continue
+                    succeeded = 'Succeeded' in state
+                    if mode == 'completed' and not succeeded:
+                        continue
+                    if mode == 'failed' and succeeded:
+                        continue
+                    tid = transfer.get('id')
+                    if not tid:
+                        continue
+                    try:
+                        client.cancel_download(username, tid, remove=True)
+                        removed += 1
+                    except Exception as e:
+                        logger.warning('Could not clear slskd transfer %s: %s', tid, e)
+    except Exception as e:
+        logger.warning('Could not reach slskd to clear its history: %s', e)
+
+    return Response({'cleared': count, 'slskd_cleared': removed})
 
 
 @api_view(['GET'])
