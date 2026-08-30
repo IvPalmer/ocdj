@@ -408,7 +408,7 @@ function SettingsPanel() {
     <div className="settings-panel">
       <h2 className="page-title">Settings</h2>
 
-      <Connections configData={configData} onJumpTo={jumpToCategory} />
+      <Connections schema={schemaData?.schema} configData={configData} onJumpTo={jumpToCategory} />
 
       <div className="settings-section">
         <h3 className="section-title">Service Status</h3>
