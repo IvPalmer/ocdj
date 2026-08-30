@@ -348,7 +348,7 @@ function SoulseekPanel() {
                   key={dl.id}
                   dl={dl}
                   onCancel={() => cancelMutation.mutate(dl.id)}
-                  cancelPending={cancelMutation.isPending}
+                  cancelPending={cancelMutation.isPending || dl.untracked}
                   formatSize={formatSize}
                   formatSpeed={formatSpeed}
                 />
@@ -364,14 +364,20 @@ function SoulseekPanel() {
                   <span className="dl-icon">✓</span>
                   <span className="dl-name">{dl.filename.split(/[/\\]/).pop()}</span>
                   <span className="dl-user">from {dl.username}</span>
-                  <button
-                    className="btn btn-xs btn-ghost dl-remove-btn"
-                    onClick={() => deleteDlMutation.mutate(dl.id)}
-                    disabled={deleteDlMutation.isPending}
-                    title="Remove from list"
-                  >
-                    ✕
-                  </button>
+                  {dl.untracked ? (
+                    <span className="dl-untracked" title="Live from slskd — this app has no record of it">
+                      slskd
+                    </span>
+                  ) : (
+                    <button
+                      className="btn btn-xs btn-ghost dl-remove-btn"
+                      onClick={() => deleteDlMutation.mutate(dl.id)}
+                      disabled={deleteDlMutation.isPending}
+                      title="Remove from list"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -387,10 +393,15 @@ function SoulseekPanel() {
                   <span className="dl-error" title={dl.error_message || dl.slskd_state}>
                     {dl.error_message || dl.slskd_state || dl.status}
                   </span>
+                  {dl.untracked && (
+                    <span className="dl-untracked" title="Live from slskd — this app has no record of it">
+                      slskd
+                    </span>
+                  )}
                   <button
                     className="btn btn-xs btn-ghost dl-remove-btn"
                     onClick={() => deleteDlMutation.mutate(dl.id)}
-                    disabled={deleteDlMutation.isPending}
+                    disabled={deleteDlMutation.isPending || dl.untracked}
                     title="Remove from list"
                   >
                     ✕

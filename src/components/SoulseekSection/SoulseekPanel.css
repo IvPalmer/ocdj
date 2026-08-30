@@ -906,3 +906,18 @@
     gap: var(--s-2);
   }
 }
+
+/* A transfer slskd is running that this app has no row for — started outside
+   the app, or accepted by slskd after our own bookkeeping failed. Shown so the
+   panel can never again claim nothing is happening while files move. */
+.dl-untracked {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+  white-space: nowrap;
+}

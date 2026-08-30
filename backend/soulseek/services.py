@@ -105,7 +105,19 @@ class SlskdClient:
             payload[0]['size'] = size
         r = self.session.post(self._url(f'/transfers/downloads/{username}'), json=payload, timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
-        return r.json()
+        # slskd answers a successful enqueue with 201 and an empty body, and
+        # only sometimes with a JSON object. Parsing unconditionally threw on
+        # the empty case — after slskd had already accepted the transfer — so
+        # the caller saw a failure for a download that was really running, and
+        # never recorded it. Absence of a body here means "accepted".
+        if not (r.text or '').strip():
+            return {'enqueued': [{'filename': filename}], 'failed': []}
+        try:
+            body = r.json()
+        except ValueError:
+            return {'enqueued': [{'filename': filename}], 'failed': []}
+        return body if isinstance(body, dict) else {'enqueued': [{'filename': filename}],
+                                                    'failed': [], 'message': body}
 
     def get_downloads(self):
         """Get all current downloads."""

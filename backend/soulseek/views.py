@@ -493,12 +493,18 @@ def downloads_status(request):
 
     our_downloads = Download.objects.all().order_by('-started')[:50]
 
+    # Keys we managed to match, so anything slskd is doing that we have no row
+    # for can be surfaced below instead of vanishing.
+    matched_keys = set()
+
     enriched = []
     for dl in our_downloads:
         data = DownloadSerializer(dl).data
 
         key = (dl.username.lower(), dl.filename.lower())
         transfer = slskd_transfer_map.get(key)
+        if transfer:
+            matched_keys.add(key)
 
         if transfer:
             state = transfer.get('state', '')
@@ -559,6 +565,47 @@ def downloads_status(request):
             data['slskd_transfer_id'] = ''
 
         enriched.append(data)
+
+    # Anything slskd is transferring that we have no row for. This panel used
+    # to list only our own Download rows and merely decorate them with slskd
+    # progress, so a transfer slskd accepted but we failed to record — or one
+    # started from slskd's own interface — was invisible here no matter how
+    # busy it was. Three files sat "Queued, Remotely" for a day while this page
+    # showed an empty list. Untracked entries are read-only: there is no local
+    # row to cancel or delete, and inventing one would be worse than saying so.
+    for (username, _fn), transfer in slskd_transfer_map.items():
+        key = (username, (transfer.get('filename') or '').lower())
+        if key in matched_keys:
+            continue
+        state = transfer.get('state', '') or ''
+        if 'Cancelled' in state:
+            continue
+        if 'Succeeded' in state:
+            status = 'completed'
+        elif 'Completed' in state:
+            status = 'failed'
+        elif 'InProgress' in state:
+            status = 'downloading'
+        else:
+            status = 'queued'
+        enriched.append({
+            'id': f"slskd:{username}:{transfer.get('id', '')}",
+            'untracked': True,
+            'username': username,
+            'filename': transfer.get('filename', ''),
+            'status': status,
+            'slskd_state': state,
+            'progress': transfer.get('percentComplete', 0),
+            'percent': transfer.get('percentComplete', 0),
+            'speed': transfer.get('averageSpeed', 0),
+            'bytes_transferred': transfer.get('bytesTransferred', 0),
+            'bytes_remaining': transfer.get('bytesRemaining', 0),
+            'elapsed': transfer.get('elapsedTime', ''),
+            'remaining': transfer.get('remainingTime', ''),
+            'slskd_transfer_id': transfer.get('id', ''),
+            'error_message': state if status == 'failed' else '',
+            'started': transfer.get('requestedAt', ''),
+        })
 
     # Auto-sync SearchQueueItem status
     queue_ids_seen = set()
