@@ -17,6 +17,7 @@ urlpatterns = [
     # Shazam feed (bearer-token authed, called by the Mac reader or an iOS Shortcut)
     path('shazam/ingest/', views.shazam_ingest, name='shazam-ingest'),
     path('shazam/status/', views.shazam_status, name='shazam-status'),
+    path('shazam/sync/', views.shazam_sync_now, name='shazam-sync'),
     # Spotify OAuth
     path('import/spotify/auth/', views.spotify_auth_url, name='spotify-auth-url'),
     path('import/spotify/callback/', views.spotify_callback, name='spotify-callback'),

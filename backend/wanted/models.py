@@ -21,6 +21,11 @@ class WantedSource(models.Model):
     url = models.URLField(blank=True)
     source_type = models.CharField(max_length=50, choices=SOURCE_TYPES, default='manual')
     last_checked = models.DateTimeField(null=True, blank=True)
+    # How far a polling source has already read. Free-form because each source
+    # counts differently — for the Shazam feed it is the `added_at` of the last
+    # playlist item taken, which is what makes "from now on, not the backlog"
+    # expressible without keeping a list of every id ever seen.
+    cursor = models.CharField(max_length=200, blank=True)
     active = models.BooleanField(default=True)
     created = models.DateTimeField(auto_now_add=True)
 

@@ -15,8 +15,8 @@ from .serializers import (
     ImportOperationSerializer, ImportOperationListSerializer,
     TriggerImportSerializer, ConfirmImportSerializer,
 )
-from .services.dedup import _normalize
 from .services.preview import find_preview
+from .services.shazam import ingest as ingest_shazam, sync_from_spotify
 from drain.auth import require_drain_token
 from .services import (
     run_youtube_import, run_soundcloud_import,
@@ -348,82 +348,35 @@ def import_config_status(request):
 def shazam_ingest(request):
     """Take a batch of Shazams and turn them into WantedItems.
 
-    Deliberately source-agnostic. Apple's Shazam library is not readable as a
-    file on macOS and has no history API, so whatever ends up feeding this is a
-    workaround — today the `Faixas do Shazam` playlist that Shazam syncs into
-    Apple Music, read off the Mac's Music.app; tomorrow possibly an iOS
-    Shortcut posting straight from the phone. Both send the same shape, so the
-    feed can be swapped without touching anything downstream.
+    Kept alongside the Spotify poller so a feed that isn't Spotify — anything
+    that can hold a bearer token and speak JSON — can still push here without
+    touching the rest of the app.
 
-    Body: {"items": [{"artist", "title", "shazamed_at", "external_id",
-                      "album", "isrc", "device"}]}
-
-    `external_id` is what makes a repeat POST cheap: the caller has no reliable
-    cursor (a playlist read hands back everything every time), so the server
-    decides what is new. Falls back to artist+title when absent.
+    An empty batch is the normal case, not an error: a caller may post every
+    cycle whether or not it found anything, so `last_checked` means "the feed
+    is alive" rather than "something was Shazamed recently".
     """
-    # An empty batch is the normal case, not an error: the reader posts every
-    # cycle whether or not it found anything, so `last_checked` means "the feed
-    # is alive" rather than "something was Shazamed recently". Without that a
-    # healthy quiet week is indistinguishable from a dead LaunchAgent — the
-    # exact blind spot that hid a broken TraxDB download for two weeks.
     items = request.data.get('items')
     if not isinstance(items, list):
         return Response({'error': 'items must be a list'},
                         status=status.HTTP_400_BAD_REQUEST)
+    return Response(ingest_shazam(items))
 
-    source, _ = WantedSource.objects.get_or_create(
-        source_type='shazam',
-        defaults={'name': 'Shazam', 'active': True},
-    )
 
-    created, skipped = [], 0
-    for raw in items:
-        if not isinstance(raw, dict):
-            continue
-        artist = (raw.get('artist') or '').strip()[:500]
-        title = (raw.get('title') or '').strip()[:500]
-        if not artist and not title:
-            skipped += 1
-            continue
+@api_view(['POST'])
+def shazam_sync_now(request):
+    """Poll Spotify immediately instead of waiting for the next cycle.
 
-        # Match how the rest of the app decides "already have this": accent- and
-        # case-insensitive on artist+title, so a Shazam of something already
-        # imported from a blog or a playlist doesn't become a second row.
-        norm_a, norm_t = _normalize(artist), _normalize(title)
-        dupe = any(
-            _normalize(a) == norm_a and _normalize(t) == norm_t
-            for a, t in WantedItem.objects.values_list('artist', 'title')
-        )
-        if dupe:
-            skipped += 1
-            continue
-
-        note_bits = []
-        if raw.get('shazamed_at'):
-            note_bits.append(f"shazamed {raw['shazamed_at']}")
-        if raw.get('device'):
-            note_bits.append(f"on {raw['device']}")
-        if raw.get('isrc'):
-            note_bits.append(f"ISRC {raw['isrc']}")
-
-        item = WantedItem.objects.create(
-            artist=artist,
-            title=title,
-            release_name=(raw.get('album') or '').strip()[:500],
-            source=source,
-            identified_via='shazam',
-            notes=' · '.join(note_bits),
-            status='identified',
-        )
-        created.append({'id': item.id, 'artist': artist, 'title': title})
-
-    source.last_checked = timezone.now()
-    source.save(update_fields=['last_checked'])
-
-    logger.info('shazam ingest: %d new, %d already known', len(created), skipped)
-    return Response({'created': created, 'created_count': len(created),
-                     'skipped': skipped})
+    `seed=true` advances the cursor past everything currently in the playlist
+    without importing it — connecting Shazam to Spotify backfills the whole
+    library, and this feed is meant to start from now.
+    """
+    seed = str(request.data.get('seed', '')).lower() in ('1', 'true', 'yes')
+    try:
+        return Response(sync_from_spotify(seed=seed))
+    except Exception as e:
+        logger.exception('shazam manual sync failed')
+        return Response({'error': repr(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
 
 @api_view(['GET'])
@@ -433,18 +386,27 @@ def shazam_status(request):
     `last_checked` is a heartbeat from the Mac reader, not the time of the last
     Shazam — the reader posts every cycle even with nothing to send.
     """
+    from .services.spotify import check_spotify_status
+
     source = WantedSource.objects.filter(source_type='shazam').first()
     qs = WantedItem.objects.filter(identified_via='shazam')
 
     last_seen = source.last_checked if source else None
-    # The reader runs every 5 minutes. Four missed cycles is not jitter — the
-    # Mac is asleep, the agent is unloaded, or the script is erroring.
+    # The poller runs every 10 minutes. Three missed cycles is not jitter —
+    # the worker is down or Spotify's refresh token has expired, and the
+    # latter fails silently: nothing arrives and nothing complains.
     overdue = True
     if last_seen:
-        overdue = (timezone.now() - last_seen).total_seconds() > 1200
+        overdue = (timezone.now() - last_seen).total_seconds() > 1800
+
+    try:
+        spotify = check_spotify_status()
+    except Exception:
+        spotify = {'configured': False, 'connected': False}
 
     return Response({
-        'connected': source is not None,
+        'spotify_connected': bool(spotify.get('connected')),
+        'seeded': bool(source and source.cursor),
         'last_checked': last_seen,
         'overdue': overdue,
         'total': qs.count(),

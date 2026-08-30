@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useAddToQueue } from '../../api/hooks'
 import usePreviewPlayer from '../shared/usePreviewPlayer'
@@ -25,6 +25,7 @@ function whenShazamed(notes) {
 const DONE = new Set(['downloaded', 'tagged', 'organized', 'found'])
 
 export default function ShazamPanel() {
+  const qc = useQueryClient()
   const [queuingId, setQueuingId] = useState(null)
   const addToQueue = useAddToQueue()
   const { toggle: togglePreview, playingId, loadingId } = usePreviewPlayer()
@@ -43,6 +44,20 @@ export default function ShazamPanel() {
 
   const items = data?.results || []
 
+  const [busy, setBusy] = useState(false)
+
+  const syncNow = async (seed) => {
+    setBusy(true)
+    try {
+      await api.post('/wanted/shazam/sync/', seed ? { seed: true } : {})
+      qc.invalidateQueries({ queryKey: ['shazam-items'] })
+      qc.invalidateQueries({ queryKey: ['shazam-status'] })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const importBacklog = () => syncNow(false)
+
   const handleFind = async (id) => {
     setQueuingId(id)
     try {
@@ -59,21 +74,37 @@ export default function ShazamPanel() {
         <span className="shazam-count">
           {status?.total ?? 0} caught
         </span>
+        <button className="btn btn-xs shazam-sync" onClick={() => syncNow(false)} disabled={busy}>
+          {busy ? 'Checking…' : 'Check now'}
+        </button>
       </div>
 
-      {/* The feed is a LaunchAgent on a Mac that may be closed, asleep, or
-          erroring. Saying when it last reported is the difference between
-          "you haven't Shazamed anything" and "this stopped working". */}
-      <div className={`shazam-feed ${status?.overdue ? 'shazam-feed--overdue' : ''}`}>
-        <span className="shazam-feed-dot" />
-        <span>
-          {status?.overdue
-            ? <><strong>Feed is overdue</strong> — last report {timeAgo(status?.last_checked)}. Check{' '}
-                <span className="mono">~/Library/Logs/ocdj-shazam-local.log</span>.</>
-            : <>Feed healthy — the Mac checked in {timeAgo(status?.last_checked)}. Anything you
-                Shazam on your phone, Watch, or in Control Center lands here within 5 minutes.</>}
-        </span>
-      </div>
+      {/* Two failure modes worth separating: Spotify not linked at all, and
+          linked but the poll has stopped. The second is silent by nature —
+          an expired refresh token means nothing arrives and nothing complains,
+          which reads as "I haven't Shazamed anything lately". */}
+      {!status ? null : !status.spotify_connected ? (
+        <div className="shazam-feed shazam-feed--overdue">
+          <span className="shazam-feed-dot" />
+          <span>
+            <strong>Spotify isn't linked.</strong> Shazam syncs what you identify into one
+            streaming service, and this feed reads it from there. Connect Spotify inside the
+            Shazam app on your phone, then authorise it here — nothing touches Apple Music
+            or your Music.app library.
+          </span>
+        </div>
+      ) : (
+        <div className={`shazam-feed ${status.overdue ? 'shazam-feed--overdue' : ''}`}>
+          <span className="shazam-feed-dot" />
+          <span>
+            {status.overdue
+              ? <><strong>Feed is overdue</strong> — last poll {timeAgo(status.last_checked)}.
+                  Most likely Spotify's authorisation expired; re-authorise under Wanted → Import.</>
+              : <>Feed healthy — polled {timeAgo(status.last_checked)}. Anything you Shazam on your
+                  phone, Watch, or in Control Center reaches here within 10 minutes.</>}
+          </span>
+        </div>
+      )}
 
       {isLoading ? (
         <p className="muted">Loading…</p>
@@ -85,8 +116,8 @@ export default function ShazamPanel() {
             from when it was switched on. Shazam something and it shows up here.
           </p>
           <p className="muted small">
-            Changed your mind about the backlog? Run{' '}
-            <span className="mono">tools/shazam_sync/shazam_local.py --all</span> on the Mac.
+            Want the backlog after all? <button className="btn btn-xs" onClick={importBacklog}
+            disabled={busy}>Import everything in the playlist</button>
           </p>
         </div>
       ) : (
@@ -143,9 +174,9 @@ export default function ShazamPanel() {
           only syncs what its streaming partner has, and the tracks most worth
           catching in a club are the ones no catalogue carries. */}
       <p className="shazam-caveat">
-        Only tracks Apple Music has in its catalogue arrive here. Promos and white
-        labels are Shazamed on your phone but never reach this list — Apple exposes
-        no way to read the Shazam library itself.
+        Only tracks Spotify has in its catalogue arrive here. Promos and white labels get
+        Shazamed on your phone and never reach this list — Apple exposes no way to read the
+        Shazam library itself, so a streaming playlist is the only feed there is.
       </p>
     </div>
   )
