@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   useHealth, useSlskdHealth, useConfig, useUpdateConfig, useConfigSchema,
   useImportConfigStatus, useSpotifyStatus,
   useAutomationConfig, useUpdateAutomationConfig, useRunAutomation,
   useAutomationStatus,
 } from '../../api/hooks'
+import Connections from './Connections'
 import './SettingsPanel.css'
 
 // Human titles + display order for schema categories.
@@ -83,7 +84,7 @@ function labelFor(key) {
   return FIELD_LABELS[key] || key.replace(/_/g, ' ')
 }
 
-function ConfigSection({ category, fields, configData, onSave, spotifyStatus }) {
+function ConfigSection({ category, fields, configData, onSave, spotifyStatus, highlight }) {
   const meta = CATEGORY_META[category] || { title: category }
   const [editing, setEditing] = useState(false)
   const [values, setValues] = useState({})
@@ -104,6 +105,13 @@ function ConfigSection({ category, fields, configData, onSave, spotifyStatus }) 
     setValues(initial)
     setEditing(true)
   }
+
+  // Arriving here from a connection card means the intent was already "I want
+  // to fill this in", so don't make it a second click.
+  useEffect(() => {
+    if (highlight && !editing) startEdit()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight])
 
   const handleSave = () => {
     const toSave = {}
@@ -157,7 +165,10 @@ function ConfigSection({ category, fields, configData, onSave, spotifyStatus }) 
   }
 
   return (
-    <div className="config-section">
+    <div
+      className={`config-section${highlight ? ' config-section--highlight' : ''}`}
+      id={`config-${category}`}
+    >
       <div className="config-section__header">
         <h4 className="config-section__title">{meta.title}</h4>
         <div className="config-section__status-row">
@@ -194,7 +205,11 @@ function ConfigSection({ category, fields, configData, onSave, spotifyStatus }) 
             <button className="btn btn-sm" onClick={startEdit}>
               {allSet ? 'Update' : 'Configure'}
             </button>
-            {meta.hasConnect && allSet && !spotifyStatus?.connected && (
+            {/* Gated on the credentials the OAuth flow actually needs. It used
+                to require `allSet`, which included SPOTIFY_DEFAULT_PLAYLIST —
+                a remembered convenience — so a fully working app could show no
+                way to connect at all. */}
+            {meta.hasConnect && spotifyStatus?.configured && !spotifyStatus?.connected && (
               <button className="btn btn-sm btn-accent" onClick={handleSpotifyConnect}>
                 Connect Spotify
               </button>
@@ -369,6 +384,19 @@ function SettingsPanel() {
 
   const handleSave = (values) => updateConfig.mutate(values)
 
+  // "Set up" on a connection card should land on the right fields, not dump
+  // you at the top of a long accordion to go hunting. Scrolling alone is not
+  // enough — it depends on where the page happens to be and can leave you
+  // staring at a collapsed block — so open that section's form too. The form
+  // being open is the part that survives a scroll landing slightly off.
+  const [highlight, setHighlight] = useState(null)
+  const jumpToCategory = (category) => {
+    setHighlight(category)
+    const el = document.getElementById(`config-${category}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    window.setTimeout(() => setHighlight(null), 2400)
+  }
+
   const sections = useMemo(() => {
     if (!schemaData?.schema) return []
     return CATEGORY_ORDER
@@ -379,6 +407,8 @@ function SettingsPanel() {
   return (
     <div className="settings-panel">
       <h2 className="page-title">Settings</h2>
+
+      <Connections configData={configData} onJumpTo={jumpToCategory} />
 
       <div className="settings-section">
         <h3 className="section-title">Service Status</h3>
@@ -433,6 +463,7 @@ function SettingsPanel() {
           {sections.map(section => (
             <ConfigSection
               key={section.category}
+              highlight={highlight === section.category}
               category={section.category}
               fields={section.fields}
               configData={configData}
