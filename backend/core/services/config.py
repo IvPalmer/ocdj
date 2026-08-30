@@ -60,6 +60,9 @@ SCHEMA: list[ConfigSpec] = [
     ConfigSpec('SPOTIFY_CLIENT_SECRET', 'spotify', 'str', '', is_secret=True),
     ConfigSpec('SPOTIFY_REDIRECT_URI', 'spotify', 'url',
                'http://localhost:8002/api/wanted/import/spotify/callback/'),
+    # The OAuth token itself. It used to sit in a file inside the container,
+    # which meant every backend deploy silently signed Spotify out.
+    ConfigSpec('SPOTIFY_TOKEN_CACHE', 'spotify', 'str', '', is_secret=True),
     ConfigSpec('SPOTIFY_DEFAULT_PLAYLIST', 'spotify', 'url', ''),
     ConfigSpec('SPOTIFY_DEFAULT_PLAYLIST_NAME', 'spotify', 'str', ''),
 

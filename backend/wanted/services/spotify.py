@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -15,6 +16,33 @@ SPOTIFY_CLIENT_ID = None
 SPOTIFY_CLIENT_SECRET = None
 SPOTIFY_REDIRECT_URI = None
 CACHE_PATH = None
+
+
+class ConfigStoreCacheHandler:
+    """Keep the Spotify OAuth token in the DB config store.
+
+    spotipy's default handler writes a file next to the code. In this
+    deployment that path is inside the container image, so every `docker
+    compose up --build` of the backend threw the token away and signed Spotify
+    out — presenting later as spotipy blocking on `input()` for an interactive
+    auth prompt that nothing can answer. The config store is where every other
+    credential here already lives, and it survives redeploys.
+    """
+
+    def get_cached_token(self):
+        from core.services.config import get_config
+        raw = get_config('SPOTIFY_TOKEN_CACHE')
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            logger.warning('SPOTIFY_TOKEN_CACHE is not valid JSON; ignoring')
+            return None
+
+    def save_token_to_cache(self, token_info):
+        from core.services.config import set_config
+        set_config('SPOTIFY_TOKEN_CACHE', json.dumps(token_info))
 
 
 def _get_config():
@@ -38,7 +66,8 @@ def _get_sp():
         client_secret=config['client_secret'],
         redirect_uri=config['redirect_uri'],
         scope='playlist-read-private playlist-read-collaborative',
-        cache_handler=spotipy.CacheFileHandler(cache_path=config['cache_path']),
+        cache_handler=ConfigStoreCacheHandler(),
+        open_browser=False,
     )
     return spotipy.Spotify(auth_manager=auth_manager), auth_manager
 
@@ -54,7 +83,8 @@ def get_spotify_auth_url():
         client_secret=config['client_secret'],
         redirect_uri=config['redirect_uri'],
         scope='playlist-read-private playlist-read-collaborative',
-        cache_handler=spotipy.CacheFileHandler(cache_path=config['cache_path']),
+        cache_handler=ConfigStoreCacheHandler(),
+        open_browser=False,
     )
     return auth_manager.get_authorize_url()
 
@@ -70,7 +100,8 @@ def handle_spotify_callback(code):
         client_secret=config['client_secret'],
         redirect_uri=config['redirect_uri'],
         scope='playlist-read-private playlist-read-collaborative',
-        cache_handler=spotipy.CacheFileHandler(cache_path=config['cache_path']),
+        cache_handler=ConfigStoreCacheHandler(),
+        open_browser=False,
     )
     auth_manager.get_access_token(code)
     return True
@@ -91,7 +122,8 @@ def check_spotify_status():
             client_secret=config['client_secret'],
             redirect_uri=config['redirect_uri'],
             scope='playlist-read-private playlist-read-collaborative',
-            cache_handler=spotipy.CacheFileHandler(cache_path=config['cache_path']),
+            cache_handler=ConfigStoreCacheHandler(),
+            open_browser=False,
         )
         token_info = auth_manager.get_cached_token()
         if token_info:
