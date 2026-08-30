@@ -291,10 +291,16 @@ def spotify_callback(request):
 
     try:
         handle_spotify_callback(code)
-        # Redirect to frontend
-        frontend_url = request.query_params.get('state', 'http://localhost:5174')
+        # Back to wherever this deployment actually lives. This used to take
+        # the destination from the OAuth `state` parameter and fall back to
+        # http://localhost:5174 — and since the auth URL never sets `state`,
+        # every successful sign-in in production ended on a dead dev address,
+        # which looks exactly like the sign-in failing. Deriving the origin
+        # from the request also closes the open redirect that reading a
+        # caller-supplied URL created.
         from django.shortcuts import redirect
-        return redirect(f'{frontend_url}?spotify=connected')
+        origin = request.build_absolute_uri('/').rstrip('/')
+        return redirect(f'{origin}/settings?spotify=connected')
     except Exception as e:
         return Response(
             {'error': str(e)},
