@@ -31,11 +31,25 @@ const OCDJ = (() => {
           markAsAdded(btn);
           const artist = result.item?.artist || '';
           const title = result.item?.title || result.item?.release_name || '';
-          showToast(`Saved: ${artist}${artist && title ? ' - ' : ''}${title}`, 'success');
+          if (result.offline) {
+            // The app was unreachable and this went to browser storage instead.
+            // Saying "Saved" would claim it reached the Wanted List; it didn't.
+            showToast('Saved locally — app unreachable, not in Wanted List', 'duplicate');
+          } else {
+            showToast(`Saved: ${artist}${artist && title ? ' - ' : ''}${title}`, 'success');
+          }
         } else if (result && result.error) {
           btn.classList.remove('ocdj-dig-btn--loading');
           btn.textContent = label;
           showToast(result.error, 'error');
+        } else {
+          // Any shape we don't recognise. Without this the button keeps its
+          // loading state forever and the click looks like it broke the page —
+          // which is exactly what a dropped round trip to the service worker
+          // looked like in Safari, where MV3 workers are torn down eagerly.
+          btn.classList.remove('ocdj-dig-btn--loading');
+          btn.textContent = label;
+          showToast('No answer from the extension — try again', 'error');
         }
       } catch (err) {
         btn.classList.remove('ocdj-dig-btn--loading');
@@ -155,6 +169,11 @@ const OCDJ = (() => {
             reject(new Error(chrome.runtime.lastError.message || 'Extension error'));
           } else if (response && response.error) {
             reject(new Error(response.error));
+          } else if (response === undefined) {
+            // Safari can tear the service worker down mid-round-trip and hand
+            // back nothing without setting lastError. Treat a missing answer as
+            // a failure rather than resolving undefined into the caller.
+            reject(new Error('No answer from the extension — try again'));
           } else {
             resolve(response);
           }
