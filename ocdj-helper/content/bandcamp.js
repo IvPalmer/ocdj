@@ -73,7 +73,13 @@
 
     // Main buttons near buy/download — Queue + Dig
     const buyArea = document.querySelector('.buyButtons, .tralbumCommands, .inline_player');
-    if (buyArea && !OCDJ.isInjected(buyArea)) {
+    // Guard against the place the group actually lands. It is inserted as a
+    // *sibling* of buyArea below, while isInjected() searches descendants — so
+    // the marker was never where the check looked and every run of this script
+    // stacked another Queue/Wantlist pair on the album header. The per-track
+    // loop was always fine because its group ends up inside the row it checks.
+    const already = buyArea?.parentElement?.querySelector(':scope > .ocdj-btn-group');
+    if (buyArea && !already) {
       const group = document.createElement('div');
       group.className = 'ocdj-btn-group';
       group.setAttribute(OCDJ.INJECTED_ATTR, 'true');
