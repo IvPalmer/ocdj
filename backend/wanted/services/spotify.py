@@ -7,6 +7,8 @@ import threading
 from django import db
 from django.conf import settings
 
+from spotipy.cache_handler import CacheHandler
+
 from wanted.models import ImportOperation
 from .dedup import check_duplicates
 
@@ -18,7 +20,7 @@ SPOTIFY_REDIRECT_URI = None
 CACHE_PATH = None
 
 
-class ConfigStoreCacheHandler:
+class ConfigStoreCacheHandler(CacheHandler):
     """Keep the Spotify OAuth token in the DB config store.
 
     spotipy's default handler writes a file next to the code. In this
