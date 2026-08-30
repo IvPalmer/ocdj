@@ -466,6 +466,7 @@
 					"-framework",
 					SafariServices,
 				);
+				CODE_SIGN_ENTITLEMENTS = "OCDJ Helper Extension/OCDJ_Helper_Extension.entitlements";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJHelperApp.SafariExt";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -500,6 +501,7 @@
 					"-framework",
 					SafariServices,
 				);
+				CODE_SIGN_ENTITLEMENTS = "OCDJ Helper Extension/OCDJ_Helper_Extension.entitlements";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJHelperApp.SafariExt";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -540,6 +542,7 @@
 					"-framework",
 					WebKit,
 				);
+				CODE_SIGN_ENTITLEMENTS = "OCDJ Helper/OCDJ_Helper.entitlements";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJHelperApp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -581,6 +584,7 @@
 					"-framework",
 					WebKit,
 				);
+				CODE_SIGN_ENTITLEMENTS = "OCDJ Helper/OCDJ_Helper.entitlements";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.ocdj.OCDJHelperApp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
