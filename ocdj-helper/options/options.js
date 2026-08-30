@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'backendUrl', 'siteSettings', 'showToasts',
   ]);
 
-  urlInput.value = stored.backendUrl || 'http://localhost:8002';
+  urlInput.value = stored.backendUrl || 'https://ocdj.grooveops.dev';
 
   const siteSettings = stored.siteSettings || {};
   sites.forEach(s => {
@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     sites.forEach(s => { siteSettings[s] = siteToggles[s].checked; });
 
     await chrome.storage.local.set({
-      backendUrl: urlInput.value.replace(/\/$/, '') || 'http://localhost:8002',
+      backendUrl: urlInput.value.replace(/\/$/, '') || 'https://ocdj.grooveops.dev',
       siteSettings,
       showToasts: toastToggle.checked,
     });

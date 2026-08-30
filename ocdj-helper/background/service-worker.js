@@ -1,7 +1,9 @@
 // OCDJ Dig — Background Service Worker
 // Handles API calls, connection state, badge updates, recent activity
 
-const DEFAULT_BACKEND = 'http://localhost:8002';
+// The app runs on the VPS; localhost was left over from when the backend
+// ran on this machine. Still overridable in the extension's options.
+const DEFAULT_BACKEND = 'https://ocdj.grooveops.dev';
 const PING_INTERVAL = 60000; // 60s
 const MAX_RECENT = 20;
 
@@ -35,6 +37,9 @@ async function pingBackend() {
     const resp = await fetch(`${backendUrl}/api/dig/status/`, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
+      // Inherit the oauth2-proxy session from this browser rather than
+      // carrying a second credential of our own.
+      credentials: 'include',
       signal: AbortSignal.timeout(5000),
     });
     if (resp.ok) {
@@ -72,6 +77,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
     },
+    credentials: 'include',
     signal: AbortSignal.timeout(10000),
   };
   if (body) opts.body = JSON.stringify(body);

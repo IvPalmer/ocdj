@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "OCDJ Standalone",
+  "name": "OCDJ Dig",
   "version": "1.0.0",
-  "description": "Save tracks to your wantlist and queue music from Discogs, Bandcamp, YouTube, SoundCloud, and Spotify",
-  "permissions": ["storage", "activeTab", "declarativeNetRequestWithHostAccess", "scripting"],
+  "description": "Add tracks to your OCDJ Wanted List from Discogs, Bandcamp, YouTube, SoundCloud, and Spotify",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "declarativeNetRequestWithHostAccess",
+    "scripting"
+  ],
   "host_permissions": [
+    "https://ocdj.grooveops.dev/*",
     "http://localhost:8002/*",
     "http://127.0.0.1:8002/*",
     "https://api.discogs.com/*",
@@ -18,37 +24,72 @@
     "service_worker": "background/service-worker.js"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://bandcamp.com https://*.bandcamp.com https://w.soundcloud.com https://open.spotify.com"
+    "extension_pages": "script-src 'self'; frame-src https://ocdj.grooveops.dev https://www.youtube.com https://www.youtube-nocookie.com https://bandcamp.com https://*.bandcamp.com https://w.soundcloud.com https://open.spotify.com"
   },
   "content_scripts": [
     {
-      "matches": ["*://*.discogs.com/*"],
-      "js": ["content/shared.js", "content/discogs.js"],
-      "css": ["styles/injected.css"],
+      "matches": [
+        "*://*.discogs.com/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/discogs.js"
+      ],
+      "css": [
+        "styles/injected.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*.bandcamp.com/*"],
-      "js": ["content/shared.js", "content/bandcamp.js"],
-      "css": ["styles/injected.css"],
+      "matches": [
+        "*://*.bandcamp.com/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/bandcamp.js"
+      ],
+      "css": [
+        "styles/injected.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*.youtube.com/*"],
-      "js": ["content/shared.js", "content/youtube.js"],
-      "css": ["styles/injected.css"],
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/youtube.js"
+      ],
+      "css": [
+        "styles/injected.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://*.soundcloud.com/*"],
-      "js": ["content/shared.js", "content/soundcloud.js"],
-      "css": ["styles/injected.css"],
+      "matches": [
+        "*://*.soundcloud.com/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/soundcloud.js"
+      ],
+      "css": [
+        "styles/injected.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://open.spotify.com/*"],
-      "js": ["content/shared.js", "content/spotify.js"],
-      "css": ["styles/injected.css"],
+      "matches": [
+        "*://open.spotify.com/*"
+      ],
+      "js": [
+        "content/shared.js",
+        "content/spotify.js"
+      ],
+      "css": [
+        "styles/injected.css"
+      ],
       "run_at": "document_idle"
     }
   ],

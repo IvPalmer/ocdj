@@ -2,7 +2,8 @@
 // Syncs wantlist to OCDJ backend, falls back to local storage if offline
 // Safari-compatible: no sidePanel API, guarded world:'MAIN' registration
 
-const DEFAULT_BACKEND = 'http://localhost:8002';
+// The app runs on the VPS; localhost dated from when it ran on this Mac.
+const DEFAULT_BACKEND = 'https://ocdj.grooveops.dev';
 let backendUrl = DEFAULT_BACKEND;
 
 // Load backend URL on startup and install
@@ -25,6 +26,7 @@ async function apiCall(endpoint, method = 'GET', body = null) {
   const opts = {
     method,
     headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    credentials: 'include',
     signal: AbortSignal.timeout(10000),
   };
   if (body) opts.body = JSON.stringify(body);
@@ -168,6 +170,7 @@ async function fetchDiscogsVideos(releaseId) {
 
   const resp = await fetch(`https://api.discogs.com/releases/${releaseId}`, {
     headers,
+    credentials: 'include',
     signal: AbortSignal.timeout(10000),
   });
 
