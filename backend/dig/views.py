@@ -18,6 +18,7 @@ from wanted.models import WantedSource, WantedItem
 from wanted.serializers import WantedItemSerializer
 from wanted.services.dedup import check_duplicates
 from .serializers import DigAddSerializer, DigBatchSerializer, DigCheckSerializer
+from .auth import require_dig_token
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def _get_or_create_source(source_site, source_url=''):
 
 
 @api_view(['POST'])
+@require_dig_token
 def add_item(request):
     """Add a single item from the browser extension with dedup check."""
     ser = DigAddSerializer(data=request.data)
@@ -79,6 +81,7 @@ def add_item(request):
 
 
 @api_view(['POST'])
+@require_dig_token
 def batch_add(request):
     """Batch add items from label/listing pages."""
     ser = DigBatchSerializer(data=request.data)
@@ -133,6 +136,7 @@ def batch_add(request):
 
 
 @api_view(['POST'])
+@require_dig_token
 def check_items(request):
     """Check items for duplicates without adding them."""
     ser = DigCheckSerializer(data=request.data)
@@ -371,6 +375,7 @@ def yt_search(request):
 
 
 @api_view(['GET'])
+@require_dig_token
 def dig_status(request):
     """Health check and status for the extension."""
     wanted_count = WantedItem.objects.filter(
