@@ -38,20 +38,82 @@ for p in "$HERE" "$HERE/bin" /opt/homebrew/bin /usr/local/bin /opt/local/bin; do
   [ -x "$p/ffmpeg" ] && PATH="$p:$PATH"
 done
 
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  echo "${RED}ffmpeg não encontrado.${RESET}"
+# Nothing installed? Fetch a self-contained ffmpeg rather than sending the
+# person off to install Homebrew. Two things make this safe and simple:
+# curl does not set the quarantine flag the way a browser does, so the binary
+# runs without a Gatekeeper prompt; and these are static builds with no
+# dependencies. Nothing is installed system-wide — the binaries live in a bin/
+# folder beside this script and can be deleted with it.
+FFDIR="$HERE/bin"
+
+fetch_ffmpeg() {
+  local arch tag base
+  arch="$(uname -m)"
+  case "$arch" in
+    arm64)  base="ffmpeg-darwin-arm64" ;;
+    x86_64) base="ffmpeg-darwin-x64" ;;
+    *) echo "${RED}Arquitetura não reconhecida ($arch).${RESET}"; return 1 ;;
+  esac
+
+  # The latest release when this was written; ask GitHub for the current one
+  # and fall back to the pinned tag if there is no answer.
+  tag="$(curl -fsSL --max-time 15 https://api.github.com/repos/eugeneware/ffmpeg-static/releases/latest 2>/dev/null \
+         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+  [ -z "$tag" ] && tag="b6.1.1"
+
+  mkdir -p "$FFDIR" || return 1
+  local url_base="https://github.com/eugeneware/ffmpeg-static/releases/download/$tag"
+
+  for tool in ffmpeg ffprobe; do
+    local remote="${base/ffmpeg/$tool}"
+    echo "  baixando $tool (~20 MB) …"
+    if ! curl -fL --max-time 300 --progress-bar \
+         -o "$FFDIR/$tool.gz" "$url_base/$remote.gz"; then
+      echo "${RED}  falhou o download de $tool.${RESET}"
+      return 1
+    fi
+    gunzip -f "$FFDIR/$tool.gz" || return 1
+    chmod +x "$FFDIR/$tool" || return 1
+  done
+
+  # Never report success on a binary that cannot run — a wrong architecture or
+  # a truncated download would otherwise surface later as a confusing error.
+  if ! "$FFDIR/ffmpeg" -version >/dev/null 2>&1; then
+    echo "${RED}  o ffmpeg baixado não executa nesta máquina.${RESET}"
+    return 1
+  fi
+  PATH="$FFDIR:$PATH"
+  return 0
+}
+
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+  echo "${YELLOW}Falta o ffmpeg — é o programa que faz a conversão.${RESET}"
+  echo "${DIM}Posso baixar uma cópia aqui nesta pasta (uns 40 MB no total).${RESET}"
+  echo "${DIM}Não instala nada no sistema; some quando você apagar esta pasta.${RESET}"
   echo
-  echo "Instale com uma destas opções e rode este script de novo:"
+  read -r -p "Baixar agora? [S/n] " resp
+  case "${resp:-s}" in
+    [Nn]*)
+      echo
+      echo "Sem problema. Para instalar por conta própria:"
+      echo "  brew install ffmpeg"
+      echo "ou baixe em https://evermeet.cx/ffmpeg/ (ffmpeg E ffprobe) e"
+      echo "coloque os dois nesta pasta."
+      echo
+      read -r -p "Enter para fechar."
+      exit 1 ;;
+  esac
   echo
-  echo "  ${BOLD}1.${RESET} Homebrew (recomendado) — cole no Terminal:"
-  echo "     /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-  echo "     brew install ffmpeg"
+  if ! fetch_ffmpeg; then
+    echo
+    echo "${RED}Não consegui preparar o ffmpeg.${RESET}"
+    echo "Verifique a internet, ou instale manualmente com:  brew install ffmpeg"
+    echo
+    read -r -p "Enter para fechar."
+    exit 1
+  fi
+  echo "${GREEN}ffmpeg pronto.${RESET}"
   echo
-  echo "  ${BOLD}2.${RESET} Baixe pronto em https://evermeet.cx/ffmpeg/ e coloque"
-  echo "     o programa 'ffmpeg' em /usr/local/bin"
-  echo
-  read -r -p "Enter para fechar."
-  exit 1
 fi
 
 # ── What to convert ──────────────────────────────────────────

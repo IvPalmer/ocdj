@@ -13,20 +13,21 @@ ninguem notar.
 
 MAC
 ---
-1. Instale o ffmpeg (uma vez so). Abra o Terminal e cole:
-
-       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-       brew install ffmpeg
-
-2. Clique duas vezes em "Converter FLAC para AIFF.command"
+1. Clique duas vezes em "Converter FLAC para AIFF.command"
    e escolha a pasta com os FLAC.
 
    Na primeira vez o macOS pode reclamar que o arquivo veio da internet.
    Nesse caso: clique com o botao direito no arquivo -> Abrir -> Abrir.
 
-   Alternativa sem instalar nada: baixe o ffmpeg em https://evermeet.cx/ffmpeg/
-   (precisa de ffmpeg E ffprobe) e copie os dois para esta mesma pasta.
+2. So isso.
 
+   Se voce nao tiver o ffmpeg (o programa que faz a conversao), o script
+   avisa e se oferece para baixar uma copia — uns 40 MB, guardada numa
+   pasta "bin" aqui do lado. Nada e instalado no sistema: apagou esta
+   pasta, sumiu tudo. Da segunda vez em diante ele reaproveita.
+
+   Se preferir instalar por conta propria, tambem funciona:
+       brew install ffmpeg
 
 WINDOWS
 -------
