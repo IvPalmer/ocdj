@@ -45,7 +45,27 @@ async function noteApiError(endpoint, err) {
   } catch (_) { /* diagnostics must never break the call path */ }
 }
 
+// Read the settings at call time instead of trusting module state. Safari
+// tears these workers down constantly, and on each wake the message handler
+// can run before the startup callback has populated backendUrl/digToken — the
+// request then goes out with no Authorization header and comes back 401, which
+// is exactly how this first failed after the token was set correctly.
+async function currentSettings() {
+  try {
+    const r = await chrome.storage.local.get(['backendUrl', 'digToken']);
+    return {
+      url: r.backendUrl || DEFAULT_BACKEND,
+      token: r.digToken || '',
+    };
+  } catch (_) {
+    return { url: backendUrl || DEFAULT_BACKEND, token: digToken || '' };
+  }
+}
+
 async function apiCall(endpoint, method = 'GET', body = null) {
+  const cfg = await currentSettings();
+  backendUrl = cfg.url;
+  digToken = cfg.token;
   const opts = {
     method,
     headers: {
