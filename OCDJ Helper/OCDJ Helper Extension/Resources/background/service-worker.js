@@ -5,11 +5,16 @@
 // The app runs on the VPS; localhost dated from when it ran on this Mac.
 const DEFAULT_BACKEND = 'https://ocdj.grooveops.dev';
 let backendUrl = DEFAULT_BACKEND;
+// Safari refuses to send the app's session cookie from an extension origin, so
+// the app is reached with a bearer token instead. Set it in the extension's
+// options; without it every call comes back 401 and saves go nowhere.
+let digToken = '';
 
 // Load backend URL on startup and install
 function loadBackendUrl() {
-  chrome.storage.local.get(['backendUrl'], (result) => {
+  chrome.storage.local.get(['backendUrl', 'digToken'], (result) => {
     backendUrl = result.backendUrl || DEFAULT_BACKEND;
+    digToken = result.digToken || '';
   });
 }
 chrome.runtime.onStartup?.addListener(loadBackendUrl);
@@ -17,6 +22,7 @@ chrome.runtime.onInstalled?.addListener(loadBackendUrl);
 loadBackendUrl();
 
 chrome.storage.onChanged.addListener((changes) => {
+  if (changes.digToken) digToken = changes.digToken.newValue || '';
   if (changes.backendUrl) {
     backendUrl = changes.backendUrl.newValue || DEFAULT_BACKEND;
   }
@@ -42,7 +48,11 @@ async function noteApiError(endpoint, err) {
 async function apiCall(endpoint, method = 'GET', body = null) {
   const opts = {
     method,
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      ...(digToken ? { 'Authorization': `Bearer ${digToken}` } : {}),
+    },
     credentials: 'include',
     signal: AbortSignal.timeout(10000),
   };
@@ -257,6 +267,19 @@ const messageHandlers = {
       }
       return result;
     } catch (e) {
+      // Whatever sent us down the offline path, recorded where it can be read.
+      // The fetch wrapper only catches network errors; anything thrown while
+      // building the request lands here instead and was invisible.
+      try {
+        await chrome.storage.local.set({
+          lastApiError: {
+            endpoint: '/api/dig/add/', backendUrl,
+            name: e?.name || '', message: e?.message || String(e),
+            stack: (e?.stack || '').slice(0, 300),
+            at: new Date().toISOString(),
+          },
+        });
+      } catch (_) { /* diagnostics must never break the fallback */ }
       // Offline fallback: store locally
       const { wantlist = [] } = await chrome.storage.local.get('wantlist');
       const item = {

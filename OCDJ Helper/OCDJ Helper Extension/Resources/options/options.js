@@ -9,14 +9,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const siteToggles = {};
   sites.forEach(s => { siteToggles[s] = document.getElementById(`site-${s}`); });
   const toastToggle = document.getElementById('show-toasts');
+  const digTokenInput = document.getElementById('dig-token');
 
   // ── Load Settings ────────────────────────────────────────
 
   const stored = await chrome.storage.local.get([
-    'discogsToken', 'siteSettings', 'showToasts',
+    'discogsToken', 'siteSettings', 'showToasts', 'digToken',
   ]);
 
   discogsTokenInput.value = stored.discogsToken || '';
+  digTokenInput.value = stored.digToken || '';
 
   const siteSettings = stored.siteSettings || {};
   sites.forEach(s => {
@@ -32,6 +34,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await chrome.storage.local.set({
       discogsToken: discogsTokenInput.value.trim(),
+      digToken: digTokenInput.value.trim(),
       siteSettings,
       showToasts: toastToggle.checked,
     });
