@@ -70,6 +70,23 @@ function startPingTimer() {
 
 // ── API Helpers ──────────────────────────────────────────────
 
+// Record why a call failed where it can be read without a console. Safari
+// offers no practical way to see a web-extension service worker's errors from
+// outside, and guessing at this cost several wrong diagnoses.
+async function noteApiError(endpoint, err) {
+  try {
+    await chrome.storage.local.set({
+      lastApiError: {
+        endpoint,
+        backendUrl,
+        name: err?.name || '',
+        message: err?.message || String(err),
+        at: new Date().toISOString(),
+      },
+    });
+  } catch (_) { /* diagnostics must never break the call path */ }
+}
+
 async function apiCall(endpoint, method = 'GET', body = null) {
   const opts = {
     method,
@@ -82,7 +99,13 @@ async function apiCall(endpoint, method = 'GET', body = null) {
   };
   if (body) opts.body = JSON.stringify(body);
 
-  const resp = await fetch(`${backendUrl}${endpoint}`, opts);
+  let resp;
+  try {
+    resp = await fetch(`${backendUrl}${endpoint}`, opts);
+  } catch (err) {
+    await noteApiError(endpoint, err);
+    throw err;
+  }
 
   let data;
   try {
