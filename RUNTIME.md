@@ -31,6 +31,13 @@ is disabled here. Never run:
    apps (in `/home/ubuntu/<slug>/`) need a manual `git pull && docker
    compose up -d --build` on the VPS.
 
+## What isn't in this repo
+
+The Traefik auth exemptions on the VPS, the LaunchAgents on this Mac, and the
+signing recipe for the Safari extension all live outside git and are the usual
+cause of "works here, not there". See
+[docs/EDGE-AND-LOCAL.md](docs/EDGE-AND-LOCAL.md).
+
 ## Why this exists
 
 A separate Claude session (or a stale memory) tried to spin this project
