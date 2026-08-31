@@ -215,8 +215,29 @@ drain_one() {
   # iTunes Match + any Rekordbox/Traktor syncs that watch the library.
   local import_path="${MUSIC_IMPORT_DIR}/${filename}"
   if [[ -e "$import_path" ]]; then
-    log "drain: target already exists, refusing overwrite id=$id path=$import_path"
-    api_fail "$id" "target already exists in MUSIC_IMPORT_DIR" "$claim_token"
+    # A file already there is usually this same track, delivered on an earlier
+    # cycle whose confirm never landed. Failing on that is wrong twice over: the
+    # track *is* on the Mac, and after five attempts the item parks in
+    # archive_state=failed with its copy stranded on the VPS forever — which is
+    # exactly what happened to three tracks on 2026-08-29, unnoticed for two
+    # days. Compare content: same bytes means delivered, so confirm instead.
+    local existing_sha
+    existing_sha=$(shasum -a 256 "$import_path" 2>/dev/null | cut -d' ' -f1)
+    if [[ -n "$existing_sha" && "$existing_sha" == "$sha" ]]; then
+      log "drain: already delivered id=$id (identical file in _Review) — confirming"
+      if api_confirm "$id" "_REVIEW_LANDED" "$claim_token"; then
+        log "drain: DONE id=$id (was already there)"
+        rm -rf "$staging_track_dir"
+        return 0
+      fi
+      log "drain: confirm failed id=$id — will retry next cycle"
+      rm -rf "$staging_track_dir"
+      return 1
+    fi
+    # Different content under the same name is a genuine collision. Never
+    # overwrite: the operator prunes and renames by hand in this folder.
+    log "drain: target exists with DIFFERENT content, refusing overwrite id=$id path=$import_path"
+    api_fail "$id" "different file already at target name in MUSIC_IMPORT_DIR" "$claim_token"
     rm -rf "$staging_track_dir"
     return 1
   fi
