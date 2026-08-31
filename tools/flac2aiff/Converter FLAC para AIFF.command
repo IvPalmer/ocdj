@@ -31,7 +31,10 @@ echo
 # ── ffmpeg ───────────────────────────────────────────────────
 # Homebrew installs outside the PATH a double-clicked script inherits, so look
 # in the usual places before giving up.
-for p in /opt/homebrew/bin /usr/local/bin /opt/local/bin; do
+# Beside this script first, so dropping the binaries in this folder is a valid
+# way to run without installing anything — same as the Windows side.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+for p in "$HERE" "$HERE/bin" /opt/homebrew/bin /usr/local/bin /opt/local/bin; do
   [ -x "$p/ffmpeg" ] && PATH="$p:$PATH"
 done
 

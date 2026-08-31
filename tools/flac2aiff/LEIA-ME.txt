@@ -24,6 +24,9 @@ MAC
    Na primeira vez o macOS pode reclamar que o arquivo veio da internet.
    Nesse caso: clique com o botao direito no arquivo -> Abrir -> Abrir.
 
+   Alternativa sem instalar nada: baixe o ffmpeg em https://evermeet.cx/ffmpeg/
+   (precisa de ffmpeg E ffprobe) e copie os dois para esta mesma pasta.
+
 
 WINDOWS
 -------
