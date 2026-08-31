@@ -1,0 +1,60 @@
+FLAC -> AIFF, sem perda de qualidade
+====================================
+
+Converte arquivos .flac para .aiff sem tocar no audio: mesma taxa de
+amostragem, mesma profundidade de bits, mesmas amostras. Os .flac originais
+nao sao apagados nem alterados.
+
+Cada arquivo convertido e conferido: o audio original e o convertido sao
+decodificados e comparados. Se por qualquer motivo derem diferente, o .aiff e
+apagado e o erro aparece na tela — em vez de ficar um arquivo estragado sem
+ninguem notar.
+
+
+MAC
+---
+1. Instale o ffmpeg (uma vez so). Abra o Terminal e cole:
+
+       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+       brew install ffmpeg
+
+2. Clique duas vezes em "Converter FLAC para AIFF.command"
+   e escolha a pasta com os FLAC.
+
+   Na primeira vez o macOS pode reclamar que o arquivo veio da internet.
+   Nesse caso: clique com o botao direito no arquivo -> Abrir -> Abrir.
+
+
+WINDOWS
+-------
+1. Instale o ffmpeg (uma vez so). Abra o PowerShell e cole:
+
+       winget install Gyan.FFmpeg
+
+   Feche e abra o PowerShell depois de instalar.
+
+   Alternativa sem instalar nada: baixe em
+   https://www.gyan.dev/ffmpeg/builds/ (release essentials), descompacte, e
+   copie ffmpeg.exe e ffprobe.exe para esta mesma pasta.
+
+2. Arraste a pasta com os FLAC para cima de "Converter FLAC para AIFF.bat".
+   Ou clique duas vezes nele e informe o caminho da pasta.
+
+
+DETALHES, PARA QUEM SE IMPORTA
+------------------------------
+FLAC e AIFF sao os dois sem perda. FLAC e PCM comprimido; AIFF e o mesmo PCM
+sem compressao. Converter certo e so trocar o involucro.
+
+O erro comum e gravar um arquivo de 24 bits como 16 bits, o que joga fora os
+8 bits mais baixos de cada amostra. Aqui a profundidade e lida de cada arquivo
+e o codec correspondente e escolhido para cada um (16, 24 ou 32 bits).
+
+Nao ha reamostragem, nao ha mixagem de canais, nao ha dither, nao ha
+normalizacao e nao ha filtro nenhum.
+
+Capa e tags sao levadas junto quando o arquivo tem. As tags vao como ID3, que
+e o formato que Rekordbox e Serato leem de AIFF.
+
+Aviso de tamanho: AIFF nao e comprimido. Espere de 2 a 3 vezes o tamanho dos
+FLAC de origem. Uma pasta de 10 GB em FLAC vira algo perto de 25 GB.
