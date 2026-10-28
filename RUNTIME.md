@@ -29,7 +29,10 @@ is disabled here. Never run:
 1. Edit on Mac, commit, push to the branch this project's VPS clone tracks.
 2. Dokploy-managed apps redeploy via webhook automatically. Plain-compose
    apps (in `/home/ubuntu/<slug>/`) need a manual `git pull && docker
-   compose up -d --build` on the VPS.
+   compose up -d --build` on the VPS. ocdj is plain compose, so on the VPS:
+   `cd /home/ubuntu/ocdj && git pull --ff-only && GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build`.
+   Pass `GIT_SHA` from git like this and never pin it in the host `.env`: the
+   fleet snapshot reads the deployed commit from the image label (#1).
 
 ## What isn't in this repo
 
