@@ -41,12 +41,25 @@ No settings were changed. Declared matches are distinct from Safari's grants.
 | Beatport | Public track `/track/so-fly/31141959` rendered heading and artist/mix metadata with no OCDJ controls | No integration in installed source |
 | Bandcamp | Existing album page had one header Queue/Wantlist pair | Presence only |
 | Discogs | Existing release page had header and per-track pairs | Presence only |
-| SoundCloud | Attempted public track URL redirected to Discover | Eligible-track live QA inconclusive |
+| SoundCloud | Public `/ohxalarecords/urubu-violeta-radio-edit-2` track rendered inside a nested `/n/ohxalarecords/urubu-violeta-radio-edit-2` frame; no OCDJ controls | Presence failure on the new layout; no action available |
 
 YouTube acknowledgments alone do not prove VPS Wanted persistence, queue playback,
 or that an entry was not already present. No server data or credentials were read
 for this check. New code has not been installed, so all patched behavior remains
 fixture-verified rather than live Safari verified.
+
+Follow-up native inspection confirmed SoundCloud's new track layout is a nested
+HTML document, rather than the legacy `.soundTitle` / `.soundActions` layout used
+by the fixtures. Both the accessibility tree and screenshot showed the track
+heading and native actions in that frame, without OCDJ controls. The installed
+content-script declaration has no `all_frames`, and the current adapter does not
+handle `/n/` track routes. Retrying the outer document cannot repair that boundary.
+The existing SoundCloud fixture passing is therefore **not** acceptance evidence
+for this observed layout. A follow-up must choose and verify a frame-aware
+integration under the no-permission-change constraint, or obtain separate
+authorization if its solution changes the manifest/access scope. Do not simply
+enable frame injection: route handling and metadata/action ownership also need
+verification. No manifest or Safari setting was changed during this inspection.
 
 ## Changes and workflow ownership
 
@@ -99,6 +112,9 @@ These queues are extension storage, not a VPS download/organize job.
    following EDGE-AND-LOCAL.md. Recheck registration and resource hashes afterward.
    `ocdj-helper` and the Xcode Resources changes are deliberate; the legacy Safari
    and standalone snapshots are not release inputs for this registered app.
+5. **SoundCloud layout:** resolve the nested-document integration described above
+   before claiming #14 is fully repaired. The existing DOM retry patch alone does
+   not provide controls inside the observed new track layout.
 
 ## Focused local checks
 
