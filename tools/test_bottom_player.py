@@ -36,7 +36,7 @@ with sync_playwright() as p:
     jobs = [dict(id=i, status='completed', title=title, url=url, engine='shazam',
                  tracklist=[dict(artist='Fixture artist', title=title, timestamp_start=12,
                                  timestamp_end=20, confidence='high')], description_tracks=[])
-            for i, title, url in [(1, 'YouTube segment', 'https://www.youtube.com/watch?v=fixture'),
+            for i, title, url in [(1, 'YouTube segment', 'https://www.youtube.com/watch?feature=share&v=fixture'),
                                    (2, 'SoundCloud segment', 'https://soundcloud.com/fixture/mix'),
                                    (3, 'Unsupported segment', 'https://mixcloud.com/fixture/mix')]]
     wav = audio_bytes()
@@ -78,7 +78,7 @@ with sync_playwright() as p:
       window.adapterCalls = [];
       window.YT = { Player: function(host, config) {
         const frame = document.createElement('iframe'); frame.title = 'Synthetic YouTube source'; host.appendChild(frame);
-        window.adapterCalls.push(['youtube-start', config.playerVars.start]);
+        window.adapterCalls.push(['youtube-segment', config.videoId, config.playerVars.start, config.playerVars.end]);
         this.playVideo = () => { window.adapterCalls.push(['youtube-play']); config.events.onStateChange({data: 1}) };
         this.pauseVideo = () => { window.adapterCalls.push(['youtube-pause']); config.events.onStateChange({data: 2}) };
         this.destroy = () => { frame.remove() };
@@ -146,7 +146,7 @@ with sync_playwright() as p:
     page.get_by_role('link', name='Recognize', exact=True).click()
     page.get_by_role('button', name='Play Fixture artist — YouTube segment', exact=True).click()
     page.wait_for_function("window.adapterCalls.some(c => c[0] === 'youtube-play')")
-    assert page.evaluate("window.adapterCalls.some(c => c[0] === 'youtube-start' && c[1] === 12)")
+    assert page.evaluate("window.adapterCalls.some(c => c[0] === 'youtube-segment' && c[1] === 'fixture' && c[2] === 12 && c[3] === 20)")
     player.get_by_role('button', name='Pause playback').click()
     page.wait_for_function("window.adapterCalls.some(c => c[0] === 'youtube-pause')")
     # History rows are selectable, preserving the existing job navigation.

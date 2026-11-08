@@ -6,15 +6,36 @@ export function directSource(track) {
   return url && /^(https?:\/\/|\/api\/)/.test(url) ? { kind: 'audio', url } : null
 }
 
+function mixSource(value) {
+  let url
+  try { url = new URL(value) } catch { return null }
+  if (!['https:', 'http:'].includes(url.protocol)) return null
+
+  const [, section, id] = url.pathname.split('/')
+  let videoId
+  if (url.hostname === 'youtu.be') {
+    videoId = section
+  } else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(url.hostname)) {
+    videoId = section === 'watch' ? url.searchParams.get('v')
+      : ['embed', 'shorts', 'live'].includes(section) ? id : null
+  }
+  if (videoId && /^[a-zA-Z0-9_-]+$/.test(videoId)) {
+    return { kind: 'youtube', url: url.href, videoId }
+  }
+  if (['soundcloud.com', 'www.soundcloud.com', 'on.soundcloud.com'].includes(url.hostname)) {
+    return { kind: 'soundcloud', url: url.href }
+  }
+  return null
+}
+
 export function recognizedTrack(track, job, index) {
-  const youtube = job.url?.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/embed\/)([^&?/]+)/)
-  const source = directSource(track) || (youtube
-    ? { kind: 'youtube', url: job.url, videoId: youtube[1] }
-    : /^https?:\/\/(?:www\.)?soundcloud\.com\//.test(job.url || '') ? { kind: 'soundcloud', url: job.url } : null)
+  const preview = directSource(track)
+  const source = preview || mixSource(job.url)
+  const start = track.timestamp_start || 0
+  const end = track.timestamp_end > start ? track.timestamp_end : job.tracklist[index + 1]?.timestamp_start
   return { artist: track.artist, title: track.title, source,
-    start: source?.kind === 'audio' ? 0 : track.timestamp_start || 0,
-    end: source?.kind === 'audio' ? undefined : job.tracklist[index + 1]?.timestamp_start,
-    description: source?.kind === 'audio' ? 'Catalog preview' : 'Original mix · identified segment' }
+    start: preview ? 0 : start, end: preview ? undefined : end,
+    description: preview ? 'Catalog preview' : 'Original mix · identified segment' }
 }
 
 export default function TrackPlayback({ track, unavailable = 'No browser-playable audio source supplied.' }) {
