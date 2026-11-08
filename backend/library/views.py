@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status as http_status
 from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q
+from django.db.models.functions import Lower, Trim
 
 from .models import LibraryTrack
 from .serializers import LibraryTrackSerializer
@@ -149,3 +150,25 @@ def library_stats(request):
     """Library statistics."""
     from .services import get_library_stats
     return Response(get_library_stats())
+
+
+@api_view(['GET'])
+def track_match(request):
+    """Read existing index records only; never inspect files or start a scan."""
+    from .matching import match_key, match_result
+
+    artist = match_key(request.query_params.get('artist'))
+    title = match_key(request.query_params.get('title'))
+    if not artist or not title:
+        return Response({'error': 'Artist and title are required (1–500 characters each).'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+
+    candidates = LibraryTrack.objects.annotate(
+        match_artist=Lower(Trim('artist')), match_title=Lower(Trim('title')),
+    ).filter(match_artist=artist, match_title=title)
+    rows = list(candidates.filter(missing=False).order_by('id').values(
+        'id', 'format', 'bitrate', 'sample_rate')[:4])
+    result = match_result(rows, missing=not rows and candidates.filter(missing=True).exists())
+    response = Response(result)
+    response['Cache-Control'] = 'private, no-store'
+    return response
