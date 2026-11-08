@@ -41,6 +41,10 @@ const OCDJ = (() => {
           btn.classList.remove('ocdj-dig-btn--loading');
           btn.textContent = label;
           showToast(result.error, 'error');
+        } else {
+          btn.classList.remove('ocdj-dig-btn--loading');
+          btn.textContent = label;
+          showToast('No answer from the extension — try again', 'error');
         }
       } catch (err) {
         btn.classList.remove('ocdj-dig-btn--loading');
@@ -165,6 +169,8 @@ const OCDJ = (() => {
             reject(new Error(msg));
           } else if (response && response.error) {
             reject(new Error(response.error));
+          } else if (response === undefined) {
+            reject(new Error('No answer from the extension — try again'));
           } else {
             resolve(response);
           }

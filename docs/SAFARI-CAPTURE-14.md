@@ -63,6 +63,11 @@ verification. No manifest or Safari setting was changed during this inspection.
 
 ## Changes and workflow ownership
 
+Empty worker replies now restore both actions for retry instead of leaving
+Wantlist loading; fixtures verify a subsequent successful Wantlist/Queue action.
+This retains the installed release's existing missing-response behavior in the
+main source trees without changing authentication.
+
 The shared observer retries after delayed rendering and DOM replacement, excludes
 its own additions/updates, and throttles continuous host changes. Page identity
 changes rebuild button closures. Injection guards compare host text/links without
@@ -118,10 +123,25 @@ These queues are extension storage, not a VPS download/organize job.
 
 ## Focused local checks
 
-DOM fixtures use Node's test runner and an **already installed** jsdom, with no new
-runtime dependency or package-lock changes. If jsdom is available to this repo,
+DOM fixtures use Node's test runner and jsdom, with no new repository dependency
+or package-lock changes. The latest run passed **20 tests** with jsdom 26.1.0 in
+an isolated temporary directory (installed with `--ignore-scripts`). The earlier
+18-test run reused a preinstalled package. If jsdom is available to this repo,
 run `node --test tools/extension-tests/capture.test.mjs`. Otherwise point
-`OCDJ_TEST_JSDOM_PACKAGE` to an existing jsdom package.json before that command.
+`OCDJ_TEST_JSDOM_PACKAGE` to a jsdom package.json before that command.
+For a fresh isolated test environment, without altering the repository:
+
+```bash
+OCDJ_TEST_DIR=$(mktemp -d)
+npm install --prefix "$OCDJ_TEST_DIR" --no-audit --no-fund --ignore-scripts jsdom@26.1.0
+OCDJ_TEST_JSDOM_PACKAGE="$OCDJ_TEST_DIR/package.json" node --test tools/extension-tests/capture.test.mjs
+```
+
+All 23 JavaScript files in the two active trees pass `node --check`;
+`git diff --check` passes. There are no configured PR CI checks.
+The latest read-only inspection again matched all 22 installed Resources to
+`origin/vps-deploy` and native Safari reproduced the SoundCloud nested frame.
+
 Fixtures cover both active source trees, asynchronous injection, SPA remounts,
 recycled Spotify rows, correct source payloads, Bandcamp idempotence, Discogs
 regression, Beatport track/release metadata and honest offline acknowledgment.

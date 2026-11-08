@@ -131,6 +131,25 @@ for (const root of roots) {
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
     } finally { await f.close(); }
   });
+  test(`${root}: missing worker replies restore Wantlist and Queue for retry`, async () => {
+    const f = fixture(root, 'spotify', 'https://open.spotify.com/track/abc', '<header><h1>Song</h1><a href="/artist/a">Artist</a></header>');
+    try {
+      f.w.chrome.runtime.sendMessage = (message, done) => done(undefined);
+      for (const selector of ['.ocdj-dig-btn', '.ocdj-play-btn']) {
+        click(f.w, selector);
+        await new Promise(resolve => setImmediate(resolve));
+        const button = f.w.document.querySelector(selector);
+        assert.equal(button.textContent, selector.includes('dig') ? 'Wantlist' : 'Queue');
+        assert.doesNotMatch(button.className, /--loading|--added|--queued/);
+      }
+      assert.match(f.w.document.querySelector('.ocdj-toast').textContent, /No answer from the extension/);
+      f.w.chrome.runtime.sendMessage = (message, done) => done({ created: true, queued: true, item: message.data });
+      click(f.w, '.ocdj-dig-btn'); click(f.w, '.ocdj-play-btn');
+      await new Promise(resolve => setImmediate(resolve));
+      assert.match(f.w.document.querySelector('.ocdj-dig-btn').className, /--added/);
+      assert.match(f.w.document.querySelector('.ocdj-play-btn').className, /--queued/);
+    } finally { await f.close(); }
+  });
   test(`${root}: Beatport release payload and offline acknowledgment`, async () => {
     const f = fixture(root, 'beatport', 'https://www.beatport.com/release/release/123', '<section><h1>Release</h1></section>', '<title>Artist - Release [Label] | Beatport</title>');
     try {
