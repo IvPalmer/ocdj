@@ -65,7 +65,7 @@ Proposed names below describe semantics; they do not freeze #13's wire format or
 
 ### Reconciliation with #13's first contract
 
-Reviewed [PR #19](https://github.com/IvPalmer/ocdj/pull/19) at `f67e48bccd7daba36d4ee8028fd76349329891f9`, including its [draft contract](https://github.com/IvPalmer/ocdj/blob/f67e48bccd7daba36d4ee8028fd76349329891f9/docs/instagram-recognition-contract.md) and implementation. This is proposed branch behavior, not merged or deployed behavior. The earlier absence of a published contract is historical; an initial contract now exists, with the following integration gates still open.
+Reviewed [PR #19](https://github.com/IvPalmer/ocdj/pull/19) at `6fd34c1e4d28dc34030e93ae9fe89126457a8537`, including its [draft contract](https://github.com/IvPalmer/ocdj/blob/6fd34c1e4d28dc34030e93ae9fe89126457a8537/docs/instagram-recognition-contract.md) and implementation. This is proposed branch behavior, not merged or deployed behavior. The earlier absence of a published contract is historical; an initial contract now exists, with the following integration gates still open. Since the previous review at `f67e48b`, all three acceptance paths additionally require both existing artist/title to be empty before auto-populating a single candidate. That preserves nonempty corrections without supplying durable human provenance.
 
 | #13 first-slice fact | Cleanup mapping / remaining gate |
 | --- | --- |
@@ -123,6 +123,20 @@ Human protection is separate from provider certainty. Mix `manual=True` protects
 
 Keep an immutable first-observed snapshot and every evaluation's input and field-level delta, policy version, evidence refs, decision reason, application revision and receipt. Never overwrite originals on retry. A preexisting row's first-observed values are not proof of its creation-time values; unavailable raw source values remain unknown rather than reconstructed. Undo is a later guarded compensating proposal, not an unqualified overwrite: subsequent human edits must survive it. Existing shared Wanted relations are not merged, relinked, or propagated by cleanup; related subjects need their own revision/protection checks and evaluations. Do not write embedded file tags or trigger search/download/organize as a side effect of this flow.
 
+### Named protection and copy boundaries for coordinator review
+
+Creation capture alone cannot establish who confirmed the copied fields. These are future integration requirements, not edits installed by this PR:
+
+| Existing boundary | Required provenance/revision behavior |
+| --- | --- |
+| `recognize.views.update_track` | Retain `manual=True` protection; increment the selected occurrence's metadata/protection revision even for edit-then-revert. A protected row remains protected after rerun/recluster identity reconciliation. |
+| `instagram.views.media_action`, `action='edit'` | Artist/title corrections and explicit review confirmation fence cleanup as well as recognition. Record actor/action and field protection, including an intentionally blank value. Candidate choice currently arrives through artist/title edits; do not infer a durable candidate ID from matching strings. Clearing `reviewed` alone must not erase correction provenance. |
+| Inherited `WantedItemViewSet.update` / `partial_update`, `WantedItemSerializer.update`; `WantedItemAdmin` saves | Route metadata edits/confirmations through the reviewed revision/protection boundary. The API is also used by `ocdj-sidecar/ocdj_tools.py:_update_wanted`, so an authenticated PATCH alone cannot prove a human confirmed the tags. Status-only updates do not establish metadata confirmation. |
+| `recognize.views.add_to_wanted`; Instagram `media_action(..., action='wishlist')` | When creating, carry exact source values, source revision, evidence refs and known field protection into the new subject's snapshot. Current mix copy drops `manual`/`verified`; Instagram sets `identified_via='manual'` regardless of human confirmation. Neither destination representation establishes trustworthy provenance today. Reusing an existing Wanted row attaches an origin only; it must not overwrite that row's protection or promote matching strings to confirmed identity. |
+| `confirm_import`, Dig `add_item` / `batch_add`, direct/bulk Wanted creation | Selecting an import, clicking Wanted or submitting captured names proves an action, not field-by-field confirmation. Explicit confirmation needs its own recorded semantics; otherwise preserve unknown provenance and remain proposal-only. |
+
+For the missing-artist case, a blank copied from a known unprotected machine observation is eligible for a supported artist proposal. A blank explicitly confirmed by a human stays `protected`, including after copying to a newly created Wanted subject. A blank from a legacy row or an ingress without provenance stays proposal-only. Do not silently downgrade protected or unknown origin fields to unprotected at a copy boundary. Tests must cover all three inputs with identical display values, plus an existing Wanted target with different protection. Subject revision fences remain necessary even when values are equal.
+
 ## Concrete synthetic cases and required proof
 
 | Input / event | Required result |
@@ -134,6 +148,7 @@ Keep an immutable first-observed snapshot and every evaluation's input and field
 | Recognized title is incomplete/wrong; selected provider recording ref resolves full compatible title and artist | proposal records both observed values and only supported corrections; raw recognition evidence preserved |
 | Shazam matches original while source explicitly says Lena Remix, or version absent in provider detail | `uncertain/version_conflict` or `uncertain/version_unknown`, no rewrite |
 | Human confirms a blank artist, or edits while research runs (including edit then revert) | `protected` or revision fence -> `superseded`, zero metadata writes |
+| A manually corrected mix/Instagram identification is copied to a new Wanted row; alternatively a machine copy is labeled `manual` | Preserve known source field protection on creation; label alone cannot establish confirmation. Unknown provenance stays proposal-only. Reusing a Wanted target preserves its own protection and revision |
 | Same create event twice; Wanted and recognition events refer to linked subjects | one intent/receipt per subject revision; links may share evidence, never create another Wanted item or overwrite another subject |
 | Mix recluster reorders JSON / same recording occurs twice | stable occurrence/revision targeting; stale proposal cannot affect another index or erase the second play |
 | Timeout vs successful empty search; missing credentials | distinct `transport_error`, `no_match`, `unavailable`; bounded retry only for transient failure |
@@ -158,3 +173,5 @@ Only this document is changed. Source locations and producer call sites were ins
 Earlier follow-up source review on 2026-11-08 confirmed remote main remained at the baseline, #13 then had no published identified-track contract, and PR #17 changes documentation only. AST inspection verified 19 named hook functions/classes across ten source files; Markdown fences and `git diff --check` passed. The review added standalone TrackID coverage, release-level Wanted protection and preview-evidence retention requirements. These are source/design checks, not runtime or independent review.
 
 Contract reconciliation verification on 2026-11-08: remote main remains at the baseline; PR #19 now publishes the first contract at the pinned revision above. AST checks confirmed 24 inventory/reuse symbols across 13 baseline files and all five relevant Instagram symbols on the #13 branch. Markdown fences are balanced, the PR file sets do not overlap, and `git diff --check` passed. This remains documentation/source validation and self-review only; no cleanup implementation or runtime tests are claimed.
+
+Latest source refresh on 2026-11-08 compared PR #19 `6fd34c1` with the previously reviewed `f67e48b`: the three single-candidate guards now preserve existing nonempty metadata, and the contract states that explicitly. Read `update_track`, `add_to_wanted`, Wanted API/serializer/admin and sidecar PATCH boundaries to add the protection/copy mapping above. Main remains `fdeaa6e`; this PR still changes only this document. No runtime/provider/production verification is claimed.
