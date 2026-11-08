@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
+from wanted.models import WantedItem
 from .models import Media, Post
 from .serializers import COLLECTION_ID
 from . import cache
@@ -68,6 +69,28 @@ class WorkspaceTests(TestCase):
         self.media.refresh_from_db()
         self.assertEqual((self.media.artist, self.media.title, self.media.reviewed, self.media.wanted_id), ('Artist', 'Title', True, first))
         self.assertEqual(self.media.position, 5)
+
+    def test_wishlist_correction_relinks_current_match_without_mutating_old_item(self):
+        url = f'/api/instagram/media/{self.media.pk}/'
+        self.client.patch(url, {'artist': 'Artist A', 'title': 'Track A', 'reviewed': True}, format='json')
+        original = self.action('wishlist').data
+        self.assertTrue(original['wanted_matches_current'])
+        corrected = self.client.patch(url, {'artist': 'Artist B', 'title': 'Track B'}, format='json').data
+        self.assertFalse(corrected['wanted_matches_current'])
+        self.assertTrue(corrected['reviewed'])
+        current = self.action('wishlist').data
+        self.assertTrue(current['wanted_matches_current'])
+        self.assertNotEqual(current['wanted_id'], original['wanted_id'])
+        self.assertEqual(self.action('wishlist').data['wanted_id'], current['wanted_id'])
+        self.assertEqual(WantedItem.objects.filter(artist='Artist B', title='Track B').count(), 1)
+        old = WantedItem.objects.get(pk=original['wanted_id'])
+        self.assertEqual((old.artist, old.title), ('Artist A', 'Track A'))
+        self.media.refresh_from_db()
+        self.assertTrue(self.media.reviewed)
+        # Reverting the correction can reuse A, and case-only edits still match.
+        self.client.patch(url, {'artist': 'artist a', 'title': 'track a'}, format='json')
+        self.assertEqual(self.action('wishlist').data['wanted_id'], old.pk)
+        self.assertTrue(self.client.get('/api/instagram/').data['posts'][0]['media'][0]['wanted_matches_current'])
 
     def test_later_video_recognition_dedupe_claim_and_stale_fence(self):
         second = Media.objects.get(post=self.media.post, position=1)

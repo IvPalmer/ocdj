@@ -4,7 +4,7 @@ import api from '../../api/client'
 import './InstagramPanel.css'
 
 const filters = ['all', 'pending', 'identified', 'reviewed', 'wishlist', 'error']
-const matches = (m, filter) => filter === 'all' || (filter === 'reviewed' ? m.reviewed : filter === 'wishlist' ? !!m.wanted_id : filter === 'pending' ? ['pending', 'running'].includes(m.status) && !m.reviewed : m.status === filter)
+const matches = (m, filter) => filter === 'all' || (filter === 'reviewed' ? m.reviewed : filter === 'wishlist' ? m.wanted_matches_current : filter === 'pending' ? ['pending', 'running'].includes(m.status) && !m.reviewed : m.status === filter)
 
 function Editor({ media, act, busy }) {
   const [artist, setArtist] = useState(media.artist)
@@ -12,7 +12,7 @@ function Editor({ media, act, busy }) {
   useEffect(() => { setArtist(media.artist); setTitle(media.title) }, [media.artist, media.title])
   const dirty = artist !== media.artist || title !== media.title
   return <div className="ig-editor">
-    <div className="ig-status"><span>{media.kind === 'image' ? 'Image · not counted in recognition' : media.status}</span>{media.reviewed && <span>Reviewed</span>}{media.wanted_id && <span>In wishlist</span>}</div>
+    <div className="ig-status"><span>{media.kind === 'image' ? 'Image · not counted in recognition' : media.status}</span>{media.reviewed && <span>Reviewed</span>}{media.wanted_matches_current && <span>In wishlist</span>}</div>
     {media.kind === 'video' && <>
       <button disabled={busy || media.queued} onClick={() => act('recognize')}>{media.queued ? 'Recognition queued · waiting for Mac' : ['error', 'no-match'].includes(media.status) ? 'Retry Shazam' : 'Recognize with Shazam'}</button>
       {media.status === 'no-match' && <p>No match in the sampled audio. You can retry or enter a correction.</p>}
@@ -23,7 +23,7 @@ function Editor({ media, act, busy }) {
         <label>Track title<input value={title} maxLength={500} onChange={e => setTitle(e.target.value)} /></label>
         <button disabled={busy || !dirty}>Save correction</button>
       </form>
-      <div className="ig-actions"><button disabled={busy || !media.artist || !media.title || !!media.wanted_id || dirty} onClick={() => act('wishlist')}>{media.wanted_id ? 'Added to wishlist' : 'Add to wishlist'}</button>
+      <div className="ig-actions"><button disabled={busy || !media.artist || !media.title || !!media.wanted_matches_current || dirty} onClick={() => act('wishlist')}>{media.wanted_matches_current ? 'Added to wishlist' : 'Add to wishlist'}</button>
       <button disabled={busy} onClick={() => act('', { reviewed: !media.reviewed })}>{media.reviewed ? 'Mark unreviewed' : 'Mark reviewed'}</button></div>
     </>}
     <p className="ig-note">Reviewed is your workspace progress. Instagram saves stay untouched.</p>
@@ -36,6 +36,7 @@ export default function InstagramPanel() {
   const [selectedMedia, setSelectedMedia] = useState(null)
   const [filter, setFilter] = useState('all')
   const [playbackError, setPlaybackError] = useState(false)
+  const [playbackAttempt, setPlaybackAttempt] = useState(0)
   const query = useQuery({ queryKey: ['instagram'], queryFn: () => api.get('/instagram/'), refetchInterval: 5000 })
   const mutation = useMutation({ mutationFn: ({ id, action, data }) => action ? api.post(`/instagram/media/${id}/${action}/`, {}) : api.patch(`/instagram/media/${id}/`, data), onSuccess: () => client.invalidateQueries({ queryKey: ['instagram'] }) })
   const posts = query.data?.posts || []
@@ -47,6 +48,12 @@ export default function InstagramPanel() {
   const identified = videos.filter(m => m.status === 'identified').length
   const act = (action, data) => mutation.mutate({ id: media.id, action, data })
   useEffect(() => { setPlaybackError(false); mutation.reset() }, [media?.id])
+
+  const retryPlayback = async () => {
+    await query.refetch()
+    setPlaybackAttempt(attempt => attempt + 1)
+    setPlaybackError(false)
+  }
 
   return <section className="ig-workspace">
     <header className="ig-heading"><div><p className="ig-eyebrow">Capture / Instagram</p><h1>Track Downloads</h1><p>Five newest saved posts. Every carousel video, one at a time.</p></div><button onClick={() => query.refetch()} disabled={query.isFetching}>Refresh status</button></header>
@@ -64,7 +71,7 @@ export default function InstagramPanel() {
           })}</nav>
           <article className="ig-focus"><div className="ig-source"><strong>@{post.author}</strong><a href={post.permalink} target="_blank" rel="noopener noreferrer">Open Instagram</a></div>
             {media && <>
-              <div className="ig-player">{media.kind === 'image' ? <p>Image {media.position+1} · open the original post to view.</p> : media.playback_url && !playbackError ? <video key={media.id} controls preload="metadata" playsInline src={media.playback_url} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setPlaybackError(true)} /> : <p role="status">{playbackError ? 'Playback unavailable or cache expired.' : 'Video waiting for Mac upload or cache refresh.'} Rerun the connector to refresh this media.</p>}</div>
+              <div className="ig-player">{media.kind === 'image' ? <p>Image {media.position+1} · open the original post to view.</p> : media.playback_url && !playbackError ? <video key={`${media.id}:${playbackAttempt}`} controls preload="metadata" playsInline src={media.playback_url} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setPlaybackError(true)} /> : <div><p role="status">{playbackError ? 'Playback unavailable or cache expired.' : 'Video waiting for Mac upload or cache refresh.'} Rerun the connector to refresh this media.</p><button disabled={query.isFetching} onClick={retryPlayback}>Retry playback</button></div>}</div>
               <div className="ig-child-heading">Carousel · {media.position+1} of {post.media.length}</div>
               <div className="ig-children" aria-label="Carousel children">{post.media.map(m => <button key={m.id} aria-label={`${m.kind} ${m.position+1}, ${m.status}${m.reviewed ? ', reviewed' : ''}`} aria-pressed={m.id === media.id} onClick={() => setSelectedMedia(m.id)}><span>{m.kind === 'video' ? 'Video' : 'Image'} {m.position+1}</span><small>{m.reviewed ? 'Reviewed' : m.kind === 'image' ? 'Image' : m.status}</small></button>)}</div>
               {mutation.isError && <p role="alert">{mutation.error.data ? JSON.stringify(mutation.error.data) : 'Could not save. Try again.'}</p>}

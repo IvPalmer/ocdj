@@ -1,6 +1,8 @@
 """Optional real Chromium fixture test: pip install -r tools/instagram/qa-requirements.txt.
 Runs entirely within Django's temporary PostgreSQL test database and live server.
 """
+from concurrent.futures import ThreadPoolExecutor
+from django.db import connections
 import json
 import os
 from pathlib import Path
@@ -40,6 +42,15 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                                 headers={'Authorization': 'Bearer fixture-test-token'}, timeout=10)
                             self.assertEqual(response.status_code, 200, response.text)
                             return response.json()
+                        def db_call(fn):
+                            # Playwright's sync API runs an event loop on this thread.
+                            def run():
+                                try:
+                                    return fn()
+                                finally:
+                                    connections.close_all()
+                            with ThreadPoolExecutor(max_workers=1) as pool:
+                                return pool.submit(run).result()
                         with sync_playwright() as pw:
                             browser = pw.chromium.launch(executable_path=os.environ.get('CHROME'), args=['--no-sandbox'])
                             page = browser.new_page(viewport={'width': 1440, 'height': 1150})
@@ -52,6 +63,28 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
                             player.evaluate('(v) => { v.pause(); v.currentTime = 1.5 }')
                             page.wait_for_function('document.querySelector("video").currentTime >= 1.4')
+                            # Real stream failure and connector reupload for the same selected child.
+                            from instagram.models import Media
+                            from instagram import cache
+                            first = db_call(lambda: Media.objects.get(pk=int(first_src.split('/')[-3])))
+                            cached = cache.path(first.cache_key)
+                            payload = cached.read_bytes(); cached.unlink()
+                            player.evaluate("(v) => { v.src += '?failure=1'; v.load() }")
+                            expect(page.get_by_text('Playback unavailable or cache expired.', exact=False)).to_be_visible()
+                            page.screenshot(path=str(scratch/'instagram-playback-failure.png'), full_page=True)
+                            response = requests.post(self.live_server_url+f'/api/instagram/connector/media/{first.pk}/upload/',
+                                files={'file': ('fixture.mp4', payload, 'video/mp4')},
+                                headers={'Authorization': 'Bearer fixture-test-token'}, timeout=10)
+                            self.assertEqual(response.status_code, 200, response.text)
+                            page.get_by_role('button', name='Refresh status').click()
+                            expect(page.get_by_role('button', name='Retry playback')).to_be_enabled()
+                            page.get_by_role('button', name='Retry playback').click()
+                            expect(page.locator('video')).to_have_attribute('src', first_src)
+                            page.locator('video').evaluate('(v) => v.play()')
+                            page.wait_for_function('document.querySelector("video").currentTime > 0.2')
+                            page.locator('video').evaluate('(v) => { v.pause(); v.currentTime = 1.5 }')
+                            page.wait_for_function('document.querySelector("video").currentTime >= 1.4')
+                            page.screenshot(path=str(scratch/'instagram-playback-recovered.png'), full_page=True)
                             page.get_by_role('button', name='video 2, pending', exact=True).click()
                             expect(page.locator('video')).not_to_have_attribute('src', first_src)
                             self.assertEqual(page.locator('video').count(), 1)
@@ -73,9 +106,27 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             expect(page.get_by_role('button', name='Mark unreviewed', exact=True)).to_be_visible()
                             page.get_by_role('button', name='Add to wishlist', exact=True).click()
                             expect(page.get_by_role('button', name='Added to wishlist', exact=True)).to_be_disabled()
+                            from wanted.models import WantedItem
+                            previous = db_call(lambda: WantedItem.objects.get(artist='Corrected fixture artist', title='Corrected fixture title'))
+                            page.get_by_label('Artist', exact=True).fill('Corrected track B artist')
+                            page.get_by_label('Track title', exact=True).fill('Corrected track B title')
+                            page.get_by_role('button', name='Save correction').click()
+                            expect(page.get_by_role('button', name='Add to wishlist', exact=True)).to_be_enabled()
+                            expect(page.get_by_text('In wishlist', exact=True)).to_have_count(0)
+                            expect(page.get_by_role('button', name='Mark unreviewed', exact=True)).to_be_visible()
+                            page.screenshot(path=str(scratch/'instagram-corrected-before-wishlist.png'), full_page=True)
+                            page.get_by_role('button', name='Add to wishlist', exact=True).click()
+                            expect(page.get_by_role('button', name='Added to wishlist', exact=True)).to_be_disabled()
+                            current = db_call(lambda: Media.objects.get(artist='Corrected track B artist'))
+                            repeated = livepost(f'media/{current.pk}/wishlist/', {})
+                            self.assertEqual(repeated['wanted_id'], current.wanted_id)
+                            self.assertEqual(db_call(lambda: WantedItem.objects.filter(artist='Corrected track B artist', title='Corrected track B title').count()), 1)
+                            db_call(previous.refresh_from_db)
+                            self.assertEqual((previous.artist, previous.title), ('Corrected fixture artist', 'Corrected fixture title'))
+                            self.assertTrue(current.reviewed)
                             livepost('connector/sync/', data)
                             page.get_by_role('button', name='Refresh status').click()
-                            expect(page.get_by_label('Artist', exact=True)).to_have_value('Corrected fixture artist')
+                            expect(page.get_by_label('Artist', exact=True)).to_have_value('Corrected track B artist')
                             page.screenshot(path=str(scratch/'instagram-desktop.png'), full_page=True)
                             page.set_viewport_size({'width': 390, 'height': 844})
                             expect(page.get_by_label('Artist', exact=True)).to_be_visible()

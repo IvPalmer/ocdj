@@ -20,18 +20,25 @@ def collection():
     return Collection.objects.get_or_create(instagram_id=COLLECTION_ID)[0]
 
 
+def wanted_matches_current(m):
+    return bool(m.wanted_id and m.artist and m.title
+                and m.wanted.artist.casefold() == m.artist.casefold()
+                and m.wanted.title.casefold() == m.title.casefold())
+
+
 def child_json(m):
     ready = bool(m.cache_key and m.cache_until and m.cache_until > timezone.now())
     return dict(id=m.pk, instagram_id=m.instagram_id, position=m.position, kind=m.kind,
                 status=m.status, candidates=m.candidates, artist=m.artist, title=m.title,
-                reviewed=m.reviewed, wanted_id=m.wanted_id, queued=m.queued,
+                reviewed=m.reviewed, wanted_id=m.wanted_id,
+                wanted_matches_current=wanted_matches_current(m), queued=m.queued,
                 playback_url=f'/api/instagram/media/{m.pk}/stream/' if ready else None)
 
 
 @api_view(['GET'])
 def workspace(request):
     c = collection()
-    posts = c.posts.filter(active=True).prefetch_related('media')
+    posts = c.posts.filter(active=True).prefetch_related('media__wanted')
     now = timezone.now()
     online = c.heartbeat_at and now - c.heartbeat_at < timedelta(minutes=3)
     return Response(dict(name=c.name, fixture=c.fixture, synced_at=c.synced_at,
@@ -60,7 +67,8 @@ def media_action(request, pk, action='edit'):
         elif action == 'wishlist' and request.method == 'POST':
             if not m.artist or not m.title:
                 raise ValidationError('Choose or correct artist and title first')
-            if not m.wanted_id:
+            if not wanted_matches_current(m):
+                # Relink corrections without editing the previous (possibly shared) item.
                 # Media lock deduplicates retries; also reuse a previously wanted track.
                 item = WantedItem.objects.filter(artist__iexact=m.artist, title__iexact=m.title).first()
                 m.wanted = item or WantedItem.objects.create(artist=m.artist, title=m.title,

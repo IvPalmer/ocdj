@@ -23,6 +23,8 @@
 .ig-source { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-4); font-size: 13px; }
 .ig-source a { color: var(--accent); }
 .ig-player { aspect-ratio: 16/10; background: var(--text); color: var(--bg-raised); display: flex; align-items: center; justify-content: center; border-radius: var(--r); overflow: hidden; }
+.ig-player > div { text-align: center; }
+.ig-player button { color: var(--text); }
 .ig-player video { width: 100%; height: 100%; object-fit: contain; }
 .ig-player p { padding: var(--s-5); max-width: 440px; text-align: center; }
 .ig-child-heading { font: 12px var(--mono); margin: var(--s-4) 0 var(--s-2); }
