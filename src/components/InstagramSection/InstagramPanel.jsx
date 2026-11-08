@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import api from '../../api/client'
+import TrackPlayback from '../Player/TrackPlayback'
+import { usePlayer } from '../Player/PlayerContext'
 import './InstagramPanel.css'
 
 const filters = ['all', 'pending', 'identified', 'reviewed', 'wishlist', 'error']
 const matches = (m, filter) => filter === 'all' || (filter === 'reviewed' ? m.reviewed : filter === 'wishlist' ? m.wanted_matches_current : filter === 'pending' ? ['pending', 'running'].includes(m.status) && !m.reviewed : m.status === filter)
 
-function Editor({ media, act, busy, audioRef, pauseVideo }) {
+function Editor({ media, act, busy }) {
+  const player = usePlayer()
   const [artist, setArtist] = useState(media.artist)
   const [title, setTitle] = useState(media.title)
   useEffect(() => { setArtist(media.artist); setTitle(media.title) }, [media.artist, media.title])
-  const [previewPlaybackError, setPreviewPlaybackError] = useState(false)
   const preview = useMutation({
     mutationFn: candidate => api.post(`/instagram/media/${media.id}/candidate-preview/`, candidate),
   })
@@ -20,8 +22,12 @@ function Editor({ media, act, busy, audioRef, pauseVideo }) {
   const dirty = artist !== media.artist || title !== media.title
 
   function listen(candidate) {
-    setPreviewPlaybackError(false)
-    preview.mutate(candidate)
+    preview.mutate(candidate, {
+      onSuccess: (data, candidate) => {
+        if (data.url) player.play({ ...candidate, source: { kind: 'audio', url: data.url },
+          description: `Catalog preview · ${data.provider === 'itunes' ? 'iTunes' : 'Deezer'}` })
+      },
+    })
   }
 
   return <div className="ig-editor">
@@ -50,10 +56,7 @@ function Editor({ media, act, busy, audioRef, pauseVideo }) {
           {preview.isSuccess && !preview.data.url && <p>No catalog preview is available for this match.</p>}
           {preview.data?.url && <>
             <strong>{selectedCandidate.artist} — {selectedCandidate.title}</strong>
-            <audio ref={audioRef} controls autoPlay preload="none" src={preview.data.url}
-              aria-label="Recognized track preview" onPlay={pauseVideo}
-              onError={() => setPreviewPlaybackError(true)} />
-            {previewPlaybackError && <p>Could not play the preview. Select Listen to try again.</p>}
+            <TrackPlayback track={{ ...selectedCandidate, source: { kind: 'audio', url: preview.data.url }, description: 'Catalog preview' }} />
             <small>Preview courtesy of {preview.data.provider === 'itunes' ? 'iTunes' : 'Deezer'}</small>
             {preview.data.track_url && <a href={preview.data.track_url} target="_blank" rel="noopener noreferrer">
               Open catalog track
@@ -80,7 +83,7 @@ export default function InstagramPanel() {
   const [filter, setFilter] = useState('all')
   const [postView, setPostView] = useState('grid')
   const videoRef = useRef(null)
-  const audioRef = useRef(null)
+  const player = usePlayer()
   const postDetailRef = useRef(null)
   const [playbackError, setPlaybackError] = useState(false)
   const [playbackAttempt, setPlaybackAttempt] = useState(0)
@@ -150,11 +153,14 @@ export default function InstagramPanel() {
           </nav>
           <article className="ig-focus" ref={postDetailRef}><div className="ig-source"><strong>@{post.author}</strong><a href={post.permalink} target="_blank" rel="noopener noreferrer">Open Instagram</a></div>
             {media && <>
-              <div className="ig-player">{media.kind === 'image' && media.playback_url && !playbackError ? <img key={media.playback_version} src={media.playback_url} alt={`Carousel image ${media.position+1}`} onError={() => setPlaybackError(true)} /> : media.playback_url && !playbackError ? <video key={`${media.id}:${playbackAttempt}:${media.playback_version}`} ref={videoRef} data-playback-version={media.playback_version} controls preload="metadata" playsInline src={media.playback_url} onPlay={() => audioRef.current?.pause()} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setPlaybackError(true)} /> : <div><p role="status">{playbackError ? 'Playback unavailable or cache expired.' : media.playback_requested ? 'Selected video requested. Waiting for the authorized Mac transport.' : media.playback_error ? 'Selected video could not be loaded.' : 'Load this selected video through the private cache.'}</p><button disabled={query.isFetching || media.playback_requested} onClick={() => retryPlayback().catch(() => setPlaybackError(true))}>{playbackError ? 'Retry playback' : media.playback_requested ? 'Video requested' : media.kind === 'image' ? 'Load image' : 'Load video'}</button></div>}</div>
+              <div className="ig-player">{media.kind === 'image' && media.playback_url && !playbackError ? <img key={media.playback_version} src={media.playback_url} alt={`Carousel image ${media.position+1}`} onError={() => setPlaybackError(true)} /> : media.playback_url && !playbackError ? <video key={`${media.id}:${playbackAttempt}:${media.playback_version}`} ref={videoRef} data-playback-version={media.playback_version} controls preload="metadata" playsInline src={media.playback_url} onPlay={player.pause} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setPlaybackError(true)} /> : <div><p role="status">{playbackError ? 'Playback unavailable or cache expired.' : media.playback_requested ? 'Selected video requested. Waiting for the authorized Mac transport.' : media.playback_error ? 'Selected video could not be loaded.' : 'Load this selected video through the private cache.'}</p><button disabled={query.isFetching || media.playback_requested} onClick={() => retryPlayback().catch(() => setPlaybackError(true))}>{playbackError ? 'Retry playback' : media.playback_requested ? 'Video requested' : media.kind === 'image' ? 'Load image' : 'Load video'}</button></div>}</div>
+              {media.kind === 'video' && <TrackPlayback track={{ artist: media.artist, title: media.title || `Instagram video ${media.position + 1}`,
+                source: media.playback_url && !playbackError ? { kind: 'audio', url: media.playback_url } : null,
+                description: 'Instagram · original video audio' }} unavailable="No cached source audio available. Load the selected video first." />}
               <div className="ig-child-heading">Carousel · {media.position+1} of {post.media.length}</div>
               <div className="ig-children" aria-label="Carousel children">{post.media.map(m => <button key={m.id} aria-label={`${m.kind} ${m.position+1}, ${m.status}${m.reviewed ? ', reviewed' : ''}`} aria-pressed={m.id === media.id} onClick={() => setSelectedMedia(m.id)}><span>{m.kind === 'video' ? 'Video' : 'Image'} {m.position+1}</span><small>{m.reviewed ? 'Reviewed' : m.kind === 'image' ? 'Image' : m.status}</small></button>)}</div>
               {mutation.isError && <p role="alert">{mutation.error.data ? JSON.stringify(mutation.error.data) : 'Could not save. Try again.'}</p>}
-              <Editor key={media.id} media={media} act={act} busy={mutation.isPending} audioRef={audioRef} pauseVideo={() => videoRef.current?.pause()} />
+              <Editor key={media.id} media={media} act={act} busy={mutation.isPending} />
             </>}
           </article>
         </div>}

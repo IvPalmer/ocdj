@@ -1,3 +1,4 @@
+import TrackPlayback, { directSource } from '../Player/TrackPlayback'
 import { useState } from 'react'
 import {
   useWantedItems, useWantedSources, useCreateWantedItem,
@@ -385,6 +386,8 @@ function WantedList() {
                   {new Date(item.added).toLocaleDateString('pt-BR')}
                 </td>
                 <td className="td-actions">
+                  <TrackPlayback track={{ ...item, wantedId: item.id, source: directSource(item), description: 'Wanted preview' }} unavailable="No preview URL or browser stream provided for this Wanted item." />
+
                   <button
                     className="btn btn-xs"
                     onClick={() => setEditingItem(item)}
