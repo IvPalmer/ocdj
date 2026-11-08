@@ -122,12 +122,17 @@ class WorkspaceTests(TestCase):
         self.assertEqual(self.complete(job, 'identified', []).status_code, 400)
 
     def test_auth_disabled_bad_and_valid(self):
-        url = '/api/instagram/connector/claim/'
-        self.assertEqual(self.client.post(url, {}).status_code, 401)
-        self.client.credentials(HTTP_AUTHORIZATION='Bearer wrong')
-        self.assertEqual(self.client.post(url, {}).status_code, 401)
-        with patch.dict(os.environ, {'DRAIN_TOKEN': ''}):
-            self.assertEqual(self.worker.post(url, {}).status_code, 503)
+        routes = ['heartbeat/', 'sync/', 'claim/',
+                  f'media/{self.media.pk}/upload/', f'media/{self.media.pk}/complete/']
+        for route in routes:
+            url = '/api/instagram/connector/'+route
+            with self.subTest(route=route):
+                self.client.credentials()
+                self.assertEqual(self.client.post(url, {}).status_code, 401)
+                self.client.credentials(HTTP_AUTHORIZATION='Bearer wrong')
+                self.assertEqual(self.client.post(url, {}).status_code, 401)
+                with patch.dict(os.environ, {'DRAIN_TOKEN': ''}):
+                    self.assertEqual(self.worker.post(url, {}).status_code, 503)
 
     def test_strict_sync_source_and_count_validation(self):
         for mutate in [lambda d: d.update(collection_id='other'),

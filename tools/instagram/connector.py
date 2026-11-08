@@ -17,6 +17,7 @@ import requests
 COLLECTION = '18117783274346248'
 MAX_BYTES = 64 * 1024 * 1024
 IG = 'https://www.instagram.com'
+STOP_STATUSES = frozenset(['session-expired', 'restricted', 'rate-limited'])
 
 
 class ConnectorError(Exception):
@@ -190,6 +191,7 @@ def run(args):
                 api.post('heartbeat/', {'status': 'ready'})
                 job = api.post('claim/')
                 if job:
+                    stop_error = None
                     try:
                         if args.fixture:
                             matches = [{'artist': 'Fixture artist', 'title': 'Synthetic preview tone'}]
@@ -199,15 +201,21 @@ def run(args):
                             download(urls[job['instagram_id']], video)
                             matches = asyncio.run(recognize(video, directory, ffmpeg))
                         status = 'identified' if matches else 'no-match'
-                    except Exception:
+                    except Exception as exc:
                         status, matches = 'error', []
+                        if isinstance(exc, ConnectorError) and str(exc) in STOP_STATUSES:
+                            stop_error = exc
                     finally:
                         video.unlink(missing_ok=True)
                     api.post(f"media/{job['id']}/complete/", {'token': job['token'], 'status': status, 'candidates': matches})
+                    # Keep the per-media failure, then stop before any new claim
+                    # or Instagram request. The outer handler publishes the state.
+                    if stop_error is not None:
+                        raise stop_error
                 elif time.monotonic() >= deadline: break
                 else: time.sleep(3)
     except ConnectorError as e:
-        status = str(e) if str(e) in ['session-expired', 'restricted', 'rate-limited'] else 'error'
+        status = str(e) if str(e) in STOP_STATUSES else 'error'
         api.post('heartbeat/', {'status': status})
         raise ConnectorError(status) from None
 

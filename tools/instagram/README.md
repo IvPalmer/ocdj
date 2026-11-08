@@ -86,14 +86,47 @@ one bounded per-video queue slot. Sync updates IDs/positions/metadata while
 preserving corrections, candidates, reviewed and wishlist links. Inactive
 posts/children cannot be played or claimed.
 
-Browser JSON/actions/streaming share the incumbent `/api/` Cloudflare Access
-boundary, like the existing application APIs. **The Django origin must remain
-private behind that boundary**; this feature does not introduce Django user
-login or trust an unverified forwarded identity header. The connector paths
-must be reachable through the existing authorized connector access setup;
-never broaden the browser/media path into a public Access bypass. Security
-review and live Mac verification must confirm the actual ingress rules before
-release. No production config changes are made by this implementation.
+Browser JSON/actions/streaming use Django `AllowAny`: they require the
+incumbent **outer browser authentication and a private origin**. Do not infer
+protection from this Django code or the internal nginx proxy. The repository's
+`docs/ROADMAP.md` D4/T-005 records oauth2-proxy, not Cloudflare Access, as the
+deployed browser model. The historical routing receipt is commit
+[`2b682499d36d3ae9dc6b966933f0f2918b5357de`](https://github.com/IvPalmer/ocdj/commit/2b682499d36d3ae9dc6b966933f0f2918b5357de):
+`/api/drain/*` uses `DRAIN_TOKEN`, while the exact POST
+`/api/organize/pipeline/kick/` has a separate Traefik priority-300 router and
+requires **KICK_TOKEN**. That token does not authenticate Instagram endpoints.
+The receipt locates host-managed routing in
+`/etc/dokploy/traefik/dynamic/ocdj-auth.yml`; that file is not in this checkout.
+These are source/history facts, **not current live ingress verification**.
+
+No existing rule shown here establishes reachability for the new
+`/api/instagram/connector/` namespace. A working drain route does not prove
+that these routes can bypass browser login. The connector sends only the
+existing `DRAIN_TOKEN` bearer and refuses redirects; an oauth2-proxy login
+redirect means it cannot run through that URL. Do not add a public browser/media
+bypass, reuse KICK_TOKEN, copy browser login cookies, provision access, or change
+production routing to make the pilot pass. Have the existing GROA-553 lane and
+project lead verify the already authorized private access path; if none exists,
+record the exact missing route/access and keep security acceptance blocked.
+
+Before security resubmission, attach a sanitized live boundary matrix from the
+existing access path (record target, UTC time, method, status, serving layer and
+tested commit; omit credentials, cookies, signed URLs and raw login bodies):
+
+| Probe | Required evidence |
+| --- | --- |
+| Anonymous `GET /api/instagram/`, `HEAD /api/instagram/media/ID/stream/`, and browser action requests | Denied by the outer browser boundary, without JSON, bytes, or state mutation |
+| Direct backend/frontend origin, including their API/media paths | Unreachable to an external unauthenticated client or explicitly denied; no path around browser auth |
+| Existing authorized Mac bearer to connector sync with an invalid empty payload | Django validation rejection (400), proving reachability/auth without ingesting or claiming work |
+| Missing and invalid bearer to each connector route | Django rejection (401); 503 if DRAIN_TOKEN is disabled, including when outer routing is reachable |
+| Existing Mac bearer sent to browser JSON/media/action routes | Still requires browser authentication; connector access grants no browser bypass |
+| Authorized browser to JSON/media/actions on an approved test instance | Successful listing, two-child playback/seek and scoped fixture/live actions |
+
+Django fixture tests prove only the in-app bearer checks. A login redirect can
+prove a particular browser denial but cannot prove connector reachability.
+Network errors, a 404 on an undeployed route, and historical configuration prove
+neither the live boundary nor end-to-end success. No production configuration
+changes are made by this implementation.
 
 MP4 uploads have a 64 MiB per-file limit and a 512 MiB aggregate cache limit.
 Only server-generated opaque names are used; caller filenames are ignored.
@@ -116,6 +149,6 @@ pinned Chrome Profile 1 and collection. Confirm five posts/all children, play
 and seek two different carousel videos from the VPS-hosted browser, identify
 one with Shazam, correct it, add it once to wishlist twice, mark reviewed, and
 resync to prove persistence. Check offline/session-expired/rate-limited status
-and the actual Access/media boundary. Attach live evidence separately from
+and the actual oauth2-proxy/origin/media boundary using the matrix above. Attach live evidence separately from
 fixture screenshots. Last reviewer merges after checks; production deployment
 is a separate operator decision.

@@ -1,6 +1,7 @@
 import unittest
-from unittest.mock import Mock, patch
-from tools.instagram.connector import parse_posts, cdn_url, ConnectorError, read_collection, API
+from types import SimpleNamespace
+from unittest.mock import Mock, call, patch
+from tools.instagram.connector import parse_posts, cdn_url, ConnectorError, read_collection, API, run
 
 
 class ConnectorTests(unittest.TestCase):
@@ -30,6 +31,41 @@ class ConnectorTests(unittest.TestCase):
             session = Mock(); session.get.return_value.status_code = code
             with self.assertRaisesRegex(ConnectorError, status): read_collection(session)
             self.assertFalse(session.get.call_args.kwargs['allow_redirects'])
+
+    def test_run_completes_error_then_stops_for_each_instagram_stop_signal(self):
+        for code, status in [(401, 'session-expired'), (403, 'restricted'), (429, 'rate-limited')]:
+            with self.subTest(status=status):
+                initial = Mock(status_code=200)
+                initial.json.return_value = {'status': 'ok', 'items': []}
+                session = Mock()
+                session.get.side_effect = [initial, Mock(status_code=code)]
+                api = Mock()
+                job = {'id': 7, 'instagram_id': '202', 'token': 'lease-token'}
+                api.post.side_effect = lambda endpoint, *a, **kw: (
+                    {'media': []} if endpoint == 'sync/' else
+                    job if endpoint == 'claim/' and api.post.call_args_list.count(call('claim/')) == 1
+                    else None)
+                args = SimpleNamespace(api='https://example.test', profile='Profile 1',
+                                       fixture=None, work_seconds=0)
+                with patch.dict('os.environ', {'DRAIN_TOKEN': 'test-only'}), \
+                     patch('tools.instagram.connector.API', return_value=api), \
+                     patch('tools.instagram.connector.ffmpeg_path', return_value='fixture-ffmpeg'), \
+                     patch('tools.instagram.connector.instagram_session', return_value=session), \
+                     patch('tools.instagram.connector.download') as download, \
+                     patch('tools.instagram.connector.recognize') as recognize:
+                    with self.assertRaisesRegex(ConnectorError, '^'+status+'$'):
+                        run(args)
+                self.assertEqual(session.get.call_count, 2)  # initial sync + failing job refresh
+                download.assert_not_called()
+                recognize.assert_not_called()
+                self.assertEqual(api.post.call_args_list, [
+                    call('sync/', {'collection_id': '18117783274346248', 'posts': []}),
+                    call('heartbeat/', {'status': 'ready'}),
+                    call('heartbeat/', {'status': 'ready'}),
+                    call('claim/'),
+                    call('media/7/complete/', {'token': 'lease-token', 'status': 'error', 'candidates': []}),
+                    call('heartbeat/', {'status': status}),
+                ])
 
     def test_read_stops_at_five_and_ignores_publication_order(self):
         session = Mock(); session.get.return_value.status_code = 200

@@ -185,8 +185,9 @@ def upload(request, pk):
 
 @api_view(['GET', 'HEAD'])
 def stream(request, pk):
-    # Same-origin /api route inherits OCDJ's Cloudflare Access boundary. Files are
-    # never served under MEDIA_URL, static, or an unauthenticated Mac web server.
+    # Requires the existing outer browser auth boundary and a private origin;
+    # Django does not authenticate browser routes. Verify ingress before release.
+    # Files are never served under MEDIA_URL, static, or a Mac web server.
     m = get_object_or_404(Media, pk=pk, active=True, post__active=True, cache_until__gt=timezone.now())
     if not m.cache_key:
         return Response(status=410)
