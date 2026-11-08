@@ -781,19 +781,71 @@ def delete_download(request, download_id):
 
 @api_view(['POST'])
 def clear_downloads(request):
-    """Clear completed/cancelled/failed downloads from our DB."""
+    """Clear selected terminal history in slskd before deleting local rows."""
     mode = request.data.get('mode', 'completed')
-
-    if mode == 'all':
-        count, _ = Download.objects.exclude(status__in=['queued', 'downloading']).delete()
-    elif mode == 'completed':
-        count, _ = Download.objects.filter(status='completed').delete()
-    elif mode == 'failed':
-        count, _ = Download.objects.filter(status__in=['failed', 'cancelled']).delete()
-    else:
+    statuses = {
+        'completed': ['completed'],
+        'failed': ['failed', 'cancelled'],
+        'all': ['completed', 'failed', 'cancelled'],
+    }
+    if not isinstance(mode, str) or mode not in statuses:
         return Response({'error': 'Invalid mode'}, status=400)
 
-    return Response({'cleared': count})
+    client = SlskdClient()
+    try:
+        users = client.get_downloads()
+    except Exception:
+        # Without live state we cannot safely distinguish stale local terminal
+        # rows from retried/active transfers, or prevent slskd rows reappearing.
+        return Response({'error': 'Could not reach slskd. History was preserved; try again.',
+                         'cleared': 0, 'slskd_cleared': 0}, status=502)
+
+    transfers_by_id = {}
+    transfers_by_file = {}
+    removed = set()
+    failed = 0
+    for user in users:
+        username = user.get('username', '')
+        for directory in user.get('directories', []):
+            for transfer in directory.get('files', []):
+                tid = transfer.get('id', '')
+                key = (username.lower(), tid)
+                transfers_by_id[key] = transfer
+                file_key = (username.lower(), transfer.get('filename', '').lower())
+                transfers_by_file.setdefault(file_key, []).append(key)
+                state = {part.strip() for part in (transfer.get('state') or '').split(',')}
+                if 'Completed' not in state or 'InProgress' in state or 'Queued' in state:
+                    continue
+                succeeded = 'Succeeded' in state
+                if (mode == 'completed' and not succeeded) or (mode == 'failed' and succeeded):
+                    continue
+                if not tid:
+                    failed += 1
+                    continue
+                try:
+                    client.remove_download_history(username, tid)
+                    removed.add(key)
+                except Exception:
+                    # Keep failures visible and retryable; do not expose peer
+                    # names, paths, or upstream response bodies to the browser.
+                    failed += 1
+
+    local_ids = []
+    for dl in Download.objects.filter(status__in=statuses[mode]):
+        if dl.slskd_id:
+            key = (dl.username.lower(), dl.slskd_id)
+            keys = [key] if key in transfers_by_id else []
+        else:
+            # Legacy rows have no transfer id. Preserve them if any matching
+            # transfer remains (including active retries of the same file).
+            keys = transfers_by_file.get((dl.username.lower(), dl.filename.lower()), [])
+        if all(key in removed for key in keys):
+            local_ids.append(dl.pk)
+    count, _ = Download.objects.filter(pk__in=local_ids, status__in=statuses[mode]).delete()
+    result = {'cleared': count, 'slskd_cleared': len(removed), 'slskd_failed': failed}
+    if failed:
+        result['error'] = 'Some slskd history could not be cleared. Remaining entries were preserved; try again.'
+    return Response(result, status=502 if failed else 200)
 
 
 @api_view(['GET'])
