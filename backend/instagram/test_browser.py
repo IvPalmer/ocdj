@@ -70,6 +70,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             page.get_by_role('button', name='List', exact=True).click()
                             expect(cards.first).to_have_attribute('aria-current', 'true')
                             player = page.locator('video'); first_src = player.get_attribute('src')
+                            first_version = player.get_attribute('data-playback-version')
                             player.evaluate('(v) => v.play()')
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
                             player.evaluate('(v) => { v.pause(); v.currentTime = 1.5 }')
@@ -96,6 +97,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             livepost(f"connector/media/{first.pk}/complete/", {
                                 'token': refresh_job['token'], 'status': 'no-match', 'candidates': []})
                             page.get_by_role('button', name='Refresh status').click()
+                            expect(page.locator('video')).not_to_have_attribute('data-playback-version', first_version)
                             expect(page.locator('video')).to_have_attribute('src', first_src)
                             page.locator('video').evaluate('(v) => v.play()')
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
