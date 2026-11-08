@@ -162,3 +162,24 @@ python3 traxdb_sync/audit.py \
 ```
 
 
+
+### Atomic local daemon file concurrency
+
+`local_daemon.py` reads `TRAXDB_FILE_CONCURRENCY` from its existing config
+file (`~/.config/ocdj/traxdb-local.env`). Default: `4`; allowed: `1`–`16`.
+Use `1` for serial transfers. This controls files within one folder; folder
+leases and the daemon cycle remain sequential. Each transfer owns an independent
+Pixeldrain client/session and retains the existing bounded retries and size check.
+
+The daemon refuses undated folders and dates at or before `2026-08-12`.
+All filenames and duplicates are checked before creating staging or downloading.
+Each folder uses a unique `<date>.<random>.part` sibling; existing partials are
+preserved. Failed transfers join all workers before removing their own staging.
+Publication uses an atomic no-replace rename on macOS/Linux, protecting even an
+empty destination created during the transfer. Completion logs include bytes,
+elapsed seconds, aggregate MB/s, and configured file concurrency.
+
+Adopt only after review, through the existing launchd job at a safe folder/cycle
+boundary. Leave an active partial download running; never start a second daemon
+or a parallel folder consumer. Compare completed-folder timings after adoption;
+no fixed speedup is assumed.

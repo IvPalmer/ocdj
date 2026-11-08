@@ -35,12 +35,20 @@ class PixeldrainClient:
         user_agent: str = "traxdb_sync/1.0",
         timeout_s: int = 60,
     ) -> None:
+        self._client_options = dict(api_key=api_key, user_agent=user_agent, timeout_s=timeout_s)
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": user_agent})
         self._timeout = timeout_s
 
         if api_key:
             self._session.auth = HTTPBasicAuth("", api_key)
+
+    def clone(self) -> "PixeldrainClient":
+        """Create an independent session for a download worker."""
+        return type(self)(**self._client_options)
+
+    def close(self) -> None:
+        self._session.close()
 
     @staticmethod
     def parse_list_id(url_or_id: str) -> str:
