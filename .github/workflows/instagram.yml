@@ -4,6 +4,7 @@ on:
     paths:
       - 'backend/**'
       - 'tools/instagram/**'
+      - 'tools/test_library_match.py'
       - 'src/**'
       - 'package*.json'
       - '.github/workflows/instagram.yml'
@@ -43,7 +44,17 @@ jobs:
       - run: npm ci && npm run build
       - run: python backend/manage.py makemigrations instagram --check --dry-run
       - run: python -m unittest tools.instagram.test_connector -v
-      - run: python backend/manage.py test instagram --noinput
+      - run: python backend/manage.py test instagram library --noinput
+      - name: Library match UI (synthetic API responses only)
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 5187 > /tmp/ocdj-library-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5187/ > /dev/null; then break; fi
+            sleep 1
+          done
+          python tools/test_library_match.py http://127.0.0.1:5187
       - uses: actions/upload-artifact@v4
         if: always()
         with:

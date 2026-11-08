@@ -19,3 +19,7 @@
 @media (min-width: 768px) {
   .layout .sidebar { position: sticky; top: 0; align-self: flex-start; height: calc(100dvh - var(--player-height, 100px)); }
 }
+
+.track-controls { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.track-library-match { display: block; font-size: 11px; color: var(--text-muted, #aaa); max-width: 230px; overflow-wrap: anywhere; }
+.track-library-coverage { display: block; opacity: .8; }
