@@ -9,7 +9,8 @@
 .ig-summary { display: flex; flex-wrap: wrap; gap: var(--s-5); font-size: 13px; padding: var(--s-4) 0; }
 .ig-banner { background: var(--bg-raised); border-left: 3px solid var(--accent); padding: var(--s-3) var(--s-4); margin: var(--s-3) 0; }
 .ig-progress { width: 100%; height: 5px; accent-color: var(--accent); display: block; margin-bottom: var(--s-5); }
-.ig-filters { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-5); }
+.ig-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-5); }
+.ig-filters, .ig-view-switch { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .ig-workspace button[aria-pressed=true] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .ig-columns { display: grid; grid-template-columns: minmax(220px, 30%) minmax(0, 1fr); gap: var(--s-5); align-items: start; }
 .ig-queue { display: flex; flex-direction: column; gap: var(--s-2); }
@@ -18,6 +19,7 @@
 .ig-queue strong, .ig-queue small, .ig-caption { display: block; }
 .ig-caption { font-size: 13px; font-weight: 400; margin: var(--s-2) 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ig-queue small { font-weight: 400; color: var(--text-muted); }
+.ig-post-info { display: flex; align-items: start; gap: var(--s-3); min-width: 0; overflow-wrap: anywhere; }
 .ig-post-number { font: 12px var(--mono); color: var(--text-muted); padding-top: 3px; }
 .ig-focus { border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-5); min-width: 0; }
 .ig-source { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-4); font-size: 13px; }
@@ -38,9 +40,34 @@
 .ig-editor form button { justify-self: start; }
 .ig-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .ig-note { font-size: 12px; color: var(--text-muted); margin-top: var(--s-4); }
-.ig-candidates { font-size: 13px; display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-4); }
-.ig-candidates p { width: 100%; max-width: none; }
+.ig-candidates { font-size: 13px; display: grid; gap: var(--s-2); margin-top: var(--s-4); }
+.ig-candidate { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.ig-candidate strong { flex: 1 1 12rem; overflow-wrap: anywhere; }
+.ig-preview { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: var(--s-2); padding: var(--s-3); background: var(--bg-raised); border-radius: var(--r-sm); }
+.ig-preview strong { overflow-wrap: anywhere; }
+.ig-preview audio { width: 100%; max-width: 24rem; }
+.ig-preview a { color: var(--accent); }
 .ig-empty { padding: var(--s-7); background: var(--bg-raised); border-radius: var(--r-lg); max-width: 700px; }
 .ig-empty h2 { font-family: var(--font-serif); font-weight: 400; color: var(--text); margin-bottom: var(--s-3); }
 @media (max-width: 1000px) { .ig-columns { grid-template-columns: 1fr; } .ig-queue { flex-direction: row; overflow-x: auto; padding-bottom: var(--s-2); } .ig-queue button { min-width: 220px; max-width: 270px; flex-shrink: 0; } }
 @media (max-width: 600px) { .ig-heading { align-items: start; flex-direction: column; } .ig-heading h1 { font-size: 32px; } .ig-focus { padding: var(--s-3); } .ig-editor form { grid-template-columns: 1fr; } .ig-empty { padding: var(--s-5); } .ig-summary { gap: var(--s-2) var(--s-4); } }
+
+.ig-grid-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-5); }
+.ig-grid.ig-queue {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
+  overflow: visible;
+}
+.ig-grid.ig-queue button { flex-direction: column; min-width: 0; max-width: none; padding: var(--s-2); }
+.ig-grid .ig-post-info { padding: var(--s-2); }
+.ig-cover {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  overflow: hidden;
+  border-radius: var(--r-sm);
+}
+.ig-cover video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
