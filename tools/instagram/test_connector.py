@@ -40,7 +40,7 @@ class ConnectorTests(unittest.TestCase):
                 session = Mock()
                 session.get.side_effect = [initial, Mock(status_code=code)]
                 api = Mock()
-                job = {'id': 7, 'instagram_id': '202', 'token': 'lease-token'}
+                job = {'id': 7, 'instagram_id': '202', 'post_instagram_id': '20', 'position': 0, 'token': 'lease-token'}
                 api.post.side_effect = lambda endpoint, *a, **kw: (
                     {'media': []} if endpoint == 'sync/' else
                     job if endpoint == 'claim/' and api.post.call_args_list.count(call('claim/')) == 1
@@ -63,16 +63,97 @@ class ConnectorTests(unittest.TestCase):
                     call('heartbeat/', {'status': 'ready'}),
                     call('heartbeat/', {'status': 'ready'}),
                     call('claim/'),
-                    call('media/7/complete/', {'token': 'lease-token', 'status': 'error', 'candidates': []}),
+                    call('media/7/complete/', {'token': 'lease-token', 'status': 'error', 'candidates': [], 'recognition': {'source': 'shazam', 'certainty': 'tentative', 'comments': 'not-read', 'outcome': 'error'}}),
                     call('heartbeat/', {'status': status}),
                 ])
 
-    def test_read_stops_at_five_and_ignores_publication_order(self):
-        session = Mock(); session.get.return_value.status_code = 200
-        session.get.return_value.json.return_value = {'status': 'ok', 'items': [
-            {'pk': i, 'code': f'post{i}', 'media_type': 1} for i in range(8)], 'more_available': True, 'next_max_id': 'next'}
+    def test_full_cursor_walk_deduplicates_in_saved_order(self):
+        def page(ids, more, cursor=None):
+            response = Mock(status_code=200)
+            response.json.return_value = {'status': 'ok', 'items': [
+                {'pk': i, 'code': f'post{i}', 'media_type': 1} for i in ids],
+                'more_available': more, 'next_max_id': cursor}
+            return response
+        session = Mock()
+        session.get.side_effect = [page(range(10, 0, -1), True, 'next'), page([1, 20, 21], False)]
         data, _ = read_collection(session)
-        self.assertEqual(len(data['posts']), 5); self.assertEqual(session.get.call_count, 1)
+        self.assertEqual([p['id'] for p in data['posts']], [str(i) for i in range(10, 0, -1)] + ['20', '21'])
+        self.assertEqual(session.get.call_args.kwargs['params']['max_id'], 'next')
+
+    def test_metadata_import_does_not_download_or_require_ffmpeg(self):
+        api = Mock()
+        api.post.side_effect = lambda endpoint, *a, **kw: {'media': [dict(id=1, kind='video')]} if endpoint == 'sync/' else None
+        args = SimpleNamespace(api='https://example.test', profile='Profile 1', fixture=None, work_seconds=0)
+        with patch.dict('os.environ', {'DRAIN_TOKEN': 'fixture-only'}), \
+             patch('tools.instagram.connector.API', return_value=api), \
+             patch('tools.instagram.connector.instagram_session'), \
+             patch('tools.instagram.connector.read_collection', return_value=({'posts': []}, {})), \
+             patch('tools.instagram.connector.download') as download, \
+             patch('tools.instagram.connector.ffmpeg_path') as ffmpeg:
+            run(args)
+        download.assert_not_called(); ffmpeg.assert_not_called()
+        self.assertEqual(api.post.call_args_list[0], call('sync/', {'posts': []}))
+
+    def test_source_audio_extraction_no_match_and_transport_failure(self):
+        import asyncio
+        import tempfile
+        from pathlib import Path
+        from backend.instagram.recognition import recognize
+        from unittest.mock import AsyncMock, MagicMock
+        shazam = MagicMock()
+        shazam.__aenter__.return_value = shazam
+        shazam.recognize = AsyncMock(return_value={})
+        def extract(command, **kwargs):
+            Path(command[-1]).write_bytes(b'x'*1001)
+            return SimpleNamespace(returncode=0)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict('sys.modules', {'shazamio': SimpleNamespace(Shazam=lambda: shazam)}), \
+             patch('backend.instagram.recognition.subprocess.run', side_effect=extract) as ffmpeg:
+            self.assertEqual(asyncio.run(recognize(Path(directory)/'source.mp4', directory, 'ffmpeg')), [])
+            self.assertEqual(shazam.recognize.await_count, 3)
+            shazam.__aenter__.assert_awaited_once()
+            shazam.__aexit__.assert_awaited_once_with(None, None, None)
+            self.assertTrue(all('-vn' in c.args[0] for c in ffmpeg.call_args_list))
+            shazam.recognize.side_effect = TimeoutError('fixture service timeout')
+            with self.assertRaises(TimeoutError):
+                asyncio.run(recognize(Path(directory)/'source.mp4', directory, 'ffmpeg'))
+            self.assertEqual(shazam.__aexit__.await_count, 2)
+            self.assertIs(shazam.__aexit__.await_args.args[0], TimeoutError)
+
+    def test_twenty_two_pages_full_collection_metadata_without_download(self):
+        items = [{'pk': i, 'code': f'post{i}', 'carousel_media': [
+            {'pk': 100000+i*20+j, 'media_type': 2} for j in range(5 if i < 208 else 4)]}
+            for i in range(256)]
+        responses = []
+        for offset in range(0, 256, 12):
+            response = Mock(status_code=200)
+            response.json.return_value = dict(status='ok', items=items[offset:offset+12],
+                more_available=offset+12 < 256, next_max_id=str(offset+12))
+            responses.append(response)
+        session = Mock(); session.get.side_effect = responses
+        data, urls = read_collection(session)
+        self.assertEqual(len(data['posts']), 256)
+        self.assertEqual(sum(len(p['children']) for p in data['posts']), 1232)
+        self.assertEqual(session.get.call_count, 22)
+        self.assertEqual(urls, {})
+
+    def test_incomplete_or_cyclic_snapshot_fails_before_sync(self):
+        for cursor in [None, 'loop']:
+            session = Mock()
+            session.get.return_value.status_code = 200
+            session.get.return_value.json.return_value = {'status': 'ok', 'items': [],
+                'more_available': True, 'next_max_id': cursor}
+            with self.assertRaisesRegex(ConnectorError, 'incomplete'): read_collection(session)
+            self.assertLessEqual(session.get.call_count, 2)
+
+    def test_explicit_ids_preserve_versions_and_numbered_carousel_position(self):
+        from backend.instagram.recognition import explicit_candidates
+        candidates, evidence = explicit_candidates('Tracklist:\n1. Artist - Title (Dub Mix)\n2. Other - Track', 0)
+        self.assertEqual(candidates, [{'artist': 'Artist', 'title': 'Title (Dub Mix)'}])
+        self.assertEqual(evidence[0]['source'], 'caption')
+        candidates, evidence = explicit_candidates('Great night - thank you!', 0, [{'id': '12', 'text': 'ID: DJ - Track'}])
+        self.assertEqual(candidates, [{'artist': 'DJ', 'title': 'Track'}])
+        self.assertEqual(evidence[0]['comment_id'], '12')
 
 
 if __name__ == '__main__': unittest.main()
