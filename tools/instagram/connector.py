@@ -178,7 +178,7 @@ def run(args):
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token: raise ConnectorError('DRAIN_TOKEN missing')
     api = API(args.api, token)
-    ffmpeg = ffmpeg_path()
+    ffmpeg = ffmpeg_path() if args.fixture else None
     try:
         if args.fixture:
             data = json.loads(Path(args.fixture).read_text()); urls = {}; session = None
@@ -230,6 +230,7 @@ def run(args):
                                 with video.open('rb') as f:
                                     api.post(f"media/{job['id']}/upload/", files={'file': ('source', f, source_mime)})
                                 if job.get('action', 'recognize') == 'recognize':
+                                    ffmpeg = ffmpeg or ffmpeg_path()
                                     matches = asyncio.run(recognize(video, directory, ffmpeg))
                         status = 'identified' if matches else 'no-match'
                     except Exception as exc:

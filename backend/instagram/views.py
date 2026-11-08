@@ -87,7 +87,7 @@ def media_action(request, pk, action='edit'):
                     m.candidates = candidates; m.status = 'identified'
                     m.recognition = dict(source='caption', certainty='explicit', outcome='identified',
                                          comments='not-read', records=records)
-                    if not m.reviewed and len(candidates) == 1:
+                    if not m.reviewed and len(candidates) == 1 and not (m.artist or m.title):
                         m.artist = candidates[0]['artist']; m.title = candidates[0]['title']
                 else:
                     m.queued = True; m.status = 'pending'; m.recognition = {}
@@ -180,7 +180,7 @@ def complete(request, pk):
             m.status = d['status']; m.candidates = d['candidates']; m.queued = False
             m.recognition = d.get('recognition', dict(source='shazam', certainty='tentative',
                                  outcome=d['status'], comments='not-read'))
-            if m.candidates and not m.reviewed and len(m.candidates) == 1:
+            if len(m.candidates) == 1 and not m.reviewed and not (m.artist or m.title):
                 m.artist = m.candidates[0]['artist']; m.title = m.candidates[0]['title']
         if m.lease_action == 'playback' or (m.cache_key and m.cache_until and m.cache_until > timezone.now()):
             m.playback_error = m.playback_requested and d['status'] == 'error'

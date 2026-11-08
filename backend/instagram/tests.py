@@ -320,3 +320,12 @@ class WorkspaceTests(TestCase):
         cache.path(self.media.cache_key).unlink()
         self.assertEqual(self.action('playback').status_code, 200)
         self.assertEqual(self.claim().data['action'], 'playback')
+
+    def test_recognition_candidates_do_not_replace_unreviewed_correction(self):
+        self.client.patch(f'/api/instagram/media/{self.media.pk}/',
+            {'artist': 'Human', 'title': 'Correction'}, format='json')
+        self.action('recognize')
+        self.complete(self.claim().data, candidates=[{'artist': 'New', 'title': 'Candidate'}])
+        self.media.refresh_from_db()
+        self.assertEqual((self.media.artist, self.media.title), ('Human', 'Correction'))
+        self.assertEqual(self.media.candidates, [{'artist': 'New', 'title': 'Candidate'}])

@@ -80,6 +80,40 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual([p['id'] for p in data['posts']], [str(i) for i in range(10, 0, -1)] + ['20', '21'])
         self.assertEqual(session.get.call_args.kwargs['params']['max_id'], 'next')
 
+    def test_metadata_import_does_not_download_or_require_ffmpeg(self):
+        api = Mock()
+        api.post.side_effect = lambda endpoint, *a, **kw: {'media': [dict(id=1, kind='video')]} if endpoint == 'sync/' else None
+        args = SimpleNamespace(api='https://example.test', profile='Profile 1', fixture=None, work_seconds=0)
+        with patch.dict('os.environ', {'DRAIN_TOKEN': 'fixture-only'}), \
+             patch('tools.instagram.connector.API', return_value=api), \
+             patch('tools.instagram.connector.instagram_session'), \
+             patch('tools.instagram.connector.read_collection', return_value=({'posts': []}, {})), \
+             patch('tools.instagram.connector.download') as download, \
+             patch('tools.instagram.connector.ffmpeg_path') as ffmpeg:
+            run(args)
+        download.assert_not_called(); ffmpeg.assert_not_called()
+        self.assertEqual(api.post.call_args_list[0], call('sync/', {'posts': []}))
+
+    def test_source_audio_extraction_no_match_and_transport_failure(self):
+        import asyncio
+        import tempfile
+        from pathlib import Path
+        from backend.instagram.recognition import recognize
+        from unittest.mock import AsyncMock
+        shazam = SimpleNamespace(recognize=AsyncMock(return_value={}))
+        def extract(command, **kwargs):
+            Path(command[-1]).write_bytes(b'x'*1001)
+            return SimpleNamespace(returncode=0)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict('sys.modules', {'shazamio': SimpleNamespace(Shazam=lambda: shazam)}), \
+             patch('backend.instagram.recognition.subprocess.run', side_effect=extract) as ffmpeg:
+            self.assertEqual(asyncio.run(recognize(Path(directory)/'source.mp4', directory, 'ffmpeg')), [])
+            self.assertEqual(shazam.recognize.await_count, 3)
+            self.assertTrue(all('-vn' in c.args[0] for c in ffmpeg.call_args_list))
+            shazam.recognize.side_effect = TimeoutError('fixture service timeout')
+            with self.assertRaises(TimeoutError):
+                asyncio.run(recognize(Path(directory)/'source.mp4', directory, 'ffmpeg'))
+
     def test_twenty_two_pages_full_collection_metadata_without_download(self):
         items = [{'pk': i, 'code': f'post{i}', 'carousel_media': [
             {'pk': 100000+i*20+j, 'media_type': 2} for j in range(5 if i < 208 else 4)]}

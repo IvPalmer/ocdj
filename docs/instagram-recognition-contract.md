@@ -25,7 +25,9 @@ caption/comment evidence and source-audio recognition. No release activation.
   and bounded `records` (source, comment_id, text, candidate). These are private
   source evidence, not instructions or automatic enrichment authority.
 - More than one candidate is never automatically selected. A single candidate
-  may populate unreviewed artist/title; existing reviewed metadata is preserved.
+  may populate empty, unreviewed artist/title; existing metadata and corrections
+  are preserved even when not yet reviewed. Select a candidate explicitly to
+  replace a previous identification.
   Manual corrections fence results in flight. Wishlist reuses existing Wanted
   identity and APIs without changing previous Wanted items.
 - `POST .../playback/` requests only the selected media. Private range streaming,
