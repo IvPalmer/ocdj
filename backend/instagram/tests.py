@@ -283,11 +283,13 @@ class WorkspaceTests(TestCase):
         self.assertEqual(self.media.recognition['source'], 'shazam')
         self.assertFalse(self.media.queued)
         self.action('recognize')
-        # A sync callback avoids Django ORM inside asyncio in the real task test.
-        def concurrent(*args):
+        # Simulate a correction arriving while the worker is outside its DB
+        # transaction. The fixture callback runs outside asyncio's ORM guard.
+        def concurrent(coroutine):
+            coroutine.close()
             Media.objects.filter(pk=self.media.pk).update(lease_token='', queued=False, artist='Human', title='Edited')
-            return match()
-        with patch('instagram.recognition.recognize', side_effect=concurrent):
+            return [{'artist': 'Stale', 'title': 'Candidate'}]
+        with patch('asyncio.run', side_effect=concurrent):
             recognize_cached.call_local(self.media.pk)
         self.media.refresh_from_db()
         self.assertEqual(self.media.artist, 'Human')

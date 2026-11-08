@@ -83,7 +83,9 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             player.evaluate("(v) => { v.src += '?failure=1'; v.load() }")
                             expect(page.get_by_text('Playback unavailable or cache expired.', exact=False)).to_be_visible()
                             page.screenshot(path=str(scratch/'instagram-playback-failure.png'), full_page=True)
-                            page.get_by_role('button', name='Retry playback').click()
+                            with page.expect_response(lambda r: r.url.endswith('/playback/') and r.request.method == 'POST') as requested:
+                                page.get_by_role('button', name='Retry playback').click()
+                            self.assertEqual(requested.value.status, 200)
                             refresh_job = livepost('connector/claim/', {})
                             self.assertEqual(refresh_job['action'], 'playback')
                             self.assertEqual(refresh_job['id'], first.pk)
