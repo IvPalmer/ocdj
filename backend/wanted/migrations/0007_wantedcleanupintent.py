@@ -4,7 +4,7 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('wanted', '0005_alter_wantedsource_source_type'),
+        ('wanted', '0006_add_bandcamp_import_type'),
     ]
 
     operations = [
