@@ -1,4 +1,5 @@
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest import skipUnless
 from uuid import uuid4
@@ -70,6 +71,13 @@ class CleanupIntakeTests(TransactionTestCase):
     def test_missing_subject_creates_no_receipt(self):
         with self.assertRaises(WantedItem.DoesNotExist):
             self.capture(uuid4(), 999999)
+        from .models import WantedCleanupIntent
+        self.assertEqual(WantedCleanupIntent.objects.count(), 0)
+
+    def test_serialized_keys_return_original_receipt(self):
+        receipt = self.capture(uuid4())
+        replay = self.capture(str(receipt.event_id), str(self.item.pk))
+        self.assertEqual(replay.pk, receipt.pk)
 
     def test_invalid_event_key_rejected_before_database_work(self):
         for value in ('not-a-uuid', '', None, 12):
@@ -99,11 +107,39 @@ class CleanupIntakeTests(TransactionTestCase):
         from .models import WantedCleanupIntent
         self.assertEqual(WantedCleanupIntent.objects.count(), 1)
 
+    def test_concurrent_cross_subject_key_reuse_preserves_winner(self):
+        from .models import WantedCleanupIntent
+        from .services.cleanup_intake import IntakeEventConflict
+        barrier = threading.Barrier(2)
+        event = uuid4()
+        other = WantedItem.objects.create(title='Another version')
+
+        def deliver(wanted_id):
+            barrier.wait(timeout=10)
+            try:
+                return self.capture(event, wanted_id).snapshot['wanted_id']
+            except IntakeEventConflict:
+                return 'conflict'
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(self.in_connection, lambda pk=pk: deliver(pk))
+                       for pk in (self.item.pk, other.pk)]
+            results = [future.result(timeout=20) for future in futures]
+        self.assertEqual(results.count('conflict'), 1)
+        receipt = WantedCleanupIntent.objects.get(pk=event)
+        self.assertIn(receipt.snapshot['wanted_id'], results)
+        self.assertEqual(receipt.wanted_id, receipt.snapshot['wanted_id'])
+        self.assertEqual(WantedCleanupIntent.objects.count(), 1)
+
     def test_capture_waits_for_concurrent_edit_and_never_overwrites_it(self):
         started = threading.Event()
         completed = threading.Event()
+        backend_pid = []
 
         def capture():
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_backend_pid()')
+                backend_pid.append(cursor.fetchone()[0])
             started.set()
             receipt = self.capture(uuid4())
             completed.set()
@@ -114,7 +150,15 @@ class CleanupIntakeTests(TransactionTestCase):
                 item = WantedItem.objects.select_for_update().get(pk=self.item.pk)
                 future = pool.submit(self.in_connection, capture)
                 self.assertTrue(started.wait(timeout=10))
-                self.assertFalse(completed.wait(timeout=0.2))
+                deadline = time.monotonic() + 10
+                blockers = []
+                while not blockers and not completed.is_set() and time.monotonic() < deadline:
+                    with connection.cursor() as cursor:
+                        cursor.execute('SELECT pg_blocking_pids(%s)', backend_pid)
+                        blockers = cursor.fetchone()[0]
+                    if not blockers:
+                        time.sleep(0.01)
+                self.assertTrue(blockers, 'Capture must wait for the locked subject')
                 item.artist = 'Confirmed blank replaced by human'
                 item.save(update_fields=['artist'])
             receipt = future.result(timeout=20)
