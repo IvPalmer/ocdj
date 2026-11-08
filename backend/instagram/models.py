@@ -8,6 +8,7 @@ class Collection(models.Model):
     heartbeat_at = models.DateTimeField(null=True)
     connector_status = models.CharField(max_length=32, default='offline')
     fixture = models.BooleanField(default=False)
+    post_links = models.JSONField(default=list)
 
 
 class Post(models.Model):

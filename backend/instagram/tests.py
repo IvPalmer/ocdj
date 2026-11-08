@@ -48,6 +48,21 @@ class WorkspaceTests(TestCase):
         return self.worker.post(f'/api/instagram/connector/media/{self.media.pk}/upload/',
                                 {'file': SimpleUploadedFile(filename, body, content_type=mime)})
 
+    def test_link_index_requires_connector_auth_and_survives_pilot_sync(self):
+        url = '/api/instagram/connector/links/'
+        posts = [
+            {'permalink': f'https://www.instagram.com/p/saved{n}/', 'author': 'fixture'}
+            for n in range(30)
+        ]
+        self.assertEqual(self.client.post(url, {'posts': posts}, format='json').status_code, 401)
+        self.assertEqual(self.worker.post(url, {'posts': posts}, format='json').status_code, 200)
+        self.sync()
+        self.assertEqual(self.worker.post(url, {'posts': [{'permalink': 'https://example.com/'}]},
+                                          format='json').status_code, 400)
+        index = self.client.get('/api/instagram/links/').data
+        self.assertEqual([p['permalink'] for p in index['posts']], [p['permalink'] for p in posts])
+        self.assertEqual(len(self.client.get('/api/instagram/').data['posts']), 5)
+
     def test_preview_rejects_unrecognized_track(self):
         url = f'/api/instagram/media/{self.media.pk}/candidate-preview/'
         response = self.client.post(url, {'artist': 'Unknown', 'title': 'Track'}, format='json')

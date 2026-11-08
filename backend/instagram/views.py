@@ -13,7 +13,7 @@ from drain.auth import require_drain_token
 from wanted.models import WantedItem
 from wanted.services.preview import find_exact_preview
 from .models import Collection, Post, Media
-from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion
+from .serializers import COLLECTION_ID, Candidate, LinkIndexInput, SyncInput, EditInput, Completion
 from . import cache
 
 
@@ -46,6 +46,21 @@ def workspace(request):
                          connector_status=c.connector_status if online else 'offline',
                          posts=[dict(id=p.pk, author=p.author, caption=p.caption, permalink=p.permalink,
                                      media=[child_json(m) for m in p.media.all() if m.active]) for p in posts]))
+
+
+@api_view(['GET'])
+def links(request):
+    return Response({'posts': collection().post_links}, headers={'Cache-Control': 'private, no-store'})
+
+
+@api_view(['POST'])
+@require_drain_token
+def sync_links(request):
+    payload = LinkIndexInput(data=request.data)
+    payload.is_valid(raise_exception=True)
+    posts = payload.validated_data['posts']
+    Collection.objects.filter(pk=collection().pk).update(post_links=posts)
+    return Response({'posts': len(posts)})
 
 
 @api_view(['POST'])
@@ -99,7 +114,10 @@ def heartbeat(request):
     status = request.data.get('status')
     if status not in ['ready', 'session-expired', 'restricted', 'rate-limited', 'error']:
         raise ValidationError('Invalid connector status')
-    c = collection(); c.heartbeat_at = timezone.now(); c.connector_status = status; c.save()
+    c = collection()
+    c.heartbeat_at = timezone.now()
+    c.connector_status = status
+    c.save(update_fields=['heartbeat_at', 'connector_status'])
     cache.cleanup()
     return Response({'ok': True})
 
@@ -125,7 +143,9 @@ def sync(request):
             for pos, ch in enumerate(p['children']):
                 Media.objects.update_or_create(instagram_id=ch['id'], defaults=dict(post=post,
                     position=pos, kind=ch['kind'], active=True))
-        c.synced_at = timezone.now(); c.fixture = data['fixture']; c.save()
+        c.synced_at = timezone.now()
+        c.fixture = data['fixture']
+        c.save(update_fields=['synced_at', 'fixture'])
     cache.cleanup()
     return Response({'posts': len(data['posts']), 'media': list(Media.objects.filter(active=True, post__active=True).values('id', 'instagram_id', 'kind'))})
 

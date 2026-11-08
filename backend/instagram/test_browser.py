@@ -42,6 +42,13 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                                 headers={'Authorization': 'Bearer fixture-test-token'}, timeout=10)
                             self.assertEqual(response.status_code, 200, response.text)
                             return response.json()
+                        links = [
+                            {key: post[key] for key in ('permalink', 'author', 'caption')}
+                            for post in data['posts']
+                        ]
+                        links.extend({'permalink': f'https://www.instagram.com/p/saved{n}/',
+                                      'author': f'saved{n}'} for n in range(25))
+                        livepost('connector/links/', {'posts': links})
                         def db_call(fn):
                             # Playwright's sync API runs an event loop on this thread.
                             def run():
@@ -61,8 +68,17 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             page.get_by_role('button', name='Grid', exact=True).click()
                             grid = page.get_by_role('navigation', name='Saved posts')
                             cards = grid.get_by_role('button')
+                            expect(page.get_by_text('30 saved posts')).to_be_visible()
                             expect(cards).to_have_count(5)
+                            expect(grid.get_by_role('link')).to_have_count(19)
                             expect(grid.locator('video')).to_have_count(5)
+                            page.get_by_role('button', name='Next page', exact=True).click()
+                            expect(page.get_by_text('25–30 of 30')).to_be_visible()
+                            expect(grid.get_by_role('link')).to_have_count(6)
+                            expect(grid.get_by_role('link').last).to_have_attribute(
+                                'href', 'https://www.instagram.com/p/saved24/')
+                            expect(page.locator('.ig-player video')).to_have_count(0)
+                            page.get_by_role('button', name='Previous page', exact=True).click()
                             cards.nth(1).click()
                             expect(cards.nth(1)).to_have_attribute('aria-current', 'true')
                             expect(page.locator('.ig-player video')).to_have_attribute('aria-label', 'Post 2, video 1')
@@ -70,6 +86,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             page.get_by_role('button', name='List', exact=True).click()
                             expect(cards.first).to_have_attribute('aria-current', 'true')
                             player = page.locator('video'); first_src = player.get_attribute('src')
+                            self.assertLessEqual(player.bounding_box()['height'], 256)
                             player.evaluate('(v) => v.play()')
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
                             player.evaluate('(v) => { v.pause(); v.currentTime = 1.5 }')

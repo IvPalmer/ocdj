@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import api from '../../api/client'
 import './InstagramPanel.css'
 
+const POSTS_PER_PAGE = 24
 const filters = ['all', 'pending', 'identified', 'reviewed', 'wishlist', 'error']
 const matches = (m, filter) => filter === 'all' || (filter === 'reviewed' ? m.reviewed : filter === 'wishlist' ? m.wanted_matches_current : filter === 'pending' ? ['pending', 'running'].includes(m.status) && !m.reviewed : m.status === filter)
 
@@ -76,17 +77,34 @@ export default function InstagramPanel() {
   const [selectedPost, setSelectedPost] = useState(null)
   const [selectedMedia, setSelectedMedia] = useState(null)
   const [filter, setFilter] = useState('all')
-  const [postView, setPostView] = useState('list')
+  const [postView, setPostView] = useState('grid')
+  const [page, setPage] = useState(0)
   const videoRef = useRef(null)
   const audioRef = useRef(null)
   const postDetailRef = useRef(null)
   const [playbackError, setPlaybackError] = useState(false)
   const [playbackAttempt, setPlaybackAttempt] = useState(0)
   const query = useQuery({ queryKey: ['instagram'], queryFn: () => api.get('/instagram/'), refetchInterval: 5000 })
+  const linkIndex = useQuery({
+    queryKey: ['instagram-links'],
+    queryFn: () => api.get('/instagram/links/'),
+    staleTime: 60_000,
+  })
   const mutation = useMutation({ mutationFn: ({ id, action, data }) => action ? api.post(`/instagram/media/${id}/${action}/`, {}) : api.patch(`/instagram/media/${id}/`, data), onSuccess: () => client.invalidateQueries({ queryKey: ['instagram'] }) })
   const posts = query.data?.posts || []
-  const visiblePosts = posts.filter(p => p.media.some(m => matches(m, filter)))
-  const post = visiblePosts.find(p => p.id === selectedPost) || visiblePosts[0]
+  const links = linkIndex.data?.posts || []
+  const indexed = new Set(links.map(link => link.permalink))
+  const playable = new Map(posts.map(post => [post.permalink, post]))
+  const entries = [
+    ...posts.filter(post => !indexed.has(post.permalink)),
+    ...links.map(link => playable.get(link.permalink) || { ...link, media: [] }),
+  ]
+  const visiblePosts = entries.filter(post => filter === 'all' || post.media.some(m => matches(m, filter)))
+  const pageCount = Math.max(1, Math.ceil(visiblePosts.length / POSTS_PER_PAGE))
+  const currentPage = Math.min(page, pageCount - 1)
+  const start = currentPage * POSTS_PER_PAGE
+  const pagePosts = visiblePosts.slice(start, start + POSTS_PER_PAGE)
+  const post = pagePosts.find(p => p.id === selectedPost) || pagePosts.find(p => p.media.length)
   const media = post?.media.find(m => m.id === selectedMedia) || post?.media.find(m => matches(m, filter))
   const videos = posts.flatMap(p => p.media).filter(m => m.kind === 'video')
   const reviewed = videos.filter(m => m.reviewed).length
@@ -107,51 +125,73 @@ export default function InstagramPanel() {
   }
 
   return <section className="ig-workspace">
-    <header className="ig-heading"><div><p className="ig-eyebrow">Capture / Instagram</p><h1>Track Downloads</h1><p>Five newest saved posts. Every carousel video, one at a time.</p></div><button onClick={() => query.refetch()} disabled={query.isFetching}>Refresh status</button></header>
+    <header className="ig-heading"><div><p className="ig-eyebrow">Capture / Instagram</p><h1>Track Downloads</h1><p>Browse saved posts, newest first.</p></div><button onClick={() => { query.refetch(); linkIndex.refetch() }} disabled={query.isFetching || linkIndex.isFetching}>Refresh status</button></header>
     {query.isPending ? <p role="status">Loading collection…</p> : query.isError ? <div role="alert">Could not load Instagram workspace. <button onClick={() => query.refetch()}>Retry</button></div> : <>
       {query.data.fixture && <p className="ig-banner">Offline fixture · synthetic video and recognition results · this is not live Instagram QA.</p>}
-      <div className="ig-summary"><span>Mac connector: <strong>{query.data.connector_status}</strong></span><span>{identified} / {videos.length} videos identified</span><span>{reviewed} / {videos.length} reviewed</span></div>
+      <div className="ig-summary"><span>{entries.length} saved posts</span><span>Mac connector: <strong>{query.data.connector_status}</strong></span><span>{identified} / {videos.length} videos identified</span><span>{reviewed} / {videos.length} reviewed</span></div>
       {query.data.connector_status !== 'ready' && <p className="ig-banner" role="status">{({ offline: 'Mac is offline. Cached videos remain available until expiry; recognition waits for the connector.', 'session-expired': 'Instagram session expired. Reopen the existing Chrome session on Mac and rerun the connector.', restricted: 'Instagram restricted collection access. Check the existing Mac session before retrying.', 'rate-limited': 'Instagram rate limit reached. Wait before the next connector run.', error: 'Mac connector reported an error. Check its preflight and retry.' })[query.data.connector_status]}</p>}
       <progress className="ig-progress" aria-label="Videos reviewed" value={reviewed} max={videos.length || 1} />
-      {!posts.length ? <div className="ig-empty"><h2>Your collection is ready to connect</h2><p>Run the Instagram connector on your Mac with its existing Chrome session. The first sync brings the five newest saved posts and all their carousel children.</p></div> : <>
+      {linkIndex.isError && <p role="status">Could not load the saved post links. Select Refresh status to retry.</p>}
+      {!entries.length ? <div className="ig-empty"><h2>Your collection is ready to connect</h2><p>Run the Instagram connector on your Mac to sync your saved posts.</p></div> : <>
         <div className="ig-controls">
-        <div className="ig-filters" role="group" aria-label="Filter media">
-          {filters.map(f => <button key={f} aria-pressed={filter === f} onClick={() => { setFilter(f); setSelectedMedia(null) }}>{f[0].toUpperCase()+f.slice(1)}</button>)}
+          <div className="ig-filters" role="group" aria-label="Filter media">
+            {filters.map(f => <button key={f} aria-pressed={filter === f} onClick={() => {
+              setFilter(f)
+              setPage(0)
+              setSelectedMedia(null)
+            }}>{f[0].toUpperCase()+f.slice(1)}</button>)}
+          </div>
+          <div className="ig-view-switch" role="group" aria-label="Post layout">
+            <button aria-pressed={postView === 'list'} onClick={() => setPostView('list')}>List</button>
+            <button aria-pressed={postView === 'grid'} onClick={() => setPostView('grid')}>Grid</button>
+          </div>
         </div>
-        <div className="ig-view-switch" role="group" aria-label="Post layout">
-          <button aria-pressed={postView === 'list'} onClick={() => setPostView('list')}>List</button>
-          <button aria-pressed={postView === 'grid'} onClick={() => setPostView('grid')}>Grid</button>
-        </div>
-      </div>
-        {!post ? <p>No media match this filter.</p> : <div className={postView === 'grid' ? 'ig-grid-layout' : 'ig-columns'}>
-          <nav className={postView === 'grid' ? 'ig-queue ig-grid' : 'ig-queue'} aria-label="Saved posts">
-            {visiblePosts.map(p => {
-              const postVideos = p.media.filter(m => m.kind === 'video')
-              const cover = postView === 'grid' && postVideos.find(m => m.playback_url)
-              return <button key={p.id} aria-current={post.id === p.id ? 'true' : undefined} onClick={() => choosePost(p.id)}>
-                {postView === 'grid' && <span className="ig-cover" aria-hidden="true">
-                  {cover ? <video preload="metadata" muted playsInline src={`${cover.playback_url}#t=0.1`} /> : <span>Instagram</span>}
-                </span>}
-                <span className="ig-post-info">
-                  <span className="ig-post-number">{String(posts.indexOf(p)+1).padStart(2, '0')}</span>
+        {pageCount > 1 && <nav className="ig-pager" aria-label="Saved post pages">
+          <button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous page</button>
+          <span aria-live="polite">{start + 1}–{start + pagePosts.length} of {visiblePosts.length}</span>
+          <button disabled={currentPage + 1 === pageCount} onClick={() => setPage(currentPage + 1)}>Next page</button>
+        </nav>}
+        {!pagePosts.length ? <p>No media match this filter.</p> :
+          <div className={postView === 'grid' || !post ? 'ig-grid-layout' : 'ig-columns'}>
+            <nav className={postView === 'grid' ? 'ig-queue ig-grid' : 'ig-queue'} aria-label="Saved posts">
+              {pagePosts.map(p => {
+                const postVideos = p.media.filter(m => m.kind === 'video')
+                const cover = postView === 'grid' && postVideos.find(m => m.playback_url)
+                const info = <span className="ig-post-info">
+                  <span className="ig-post-number">{String(entries.indexOf(p) + 1).padStart(2, '0')}</span>
                   <span>
                     <strong>@{p.author || 'Instagram'}</strong>
                     <span className="ig-caption">{p.caption || 'Saved post'}</span>
-                    <small>{postVideos.length} videos · {postVideos.filter(m => m.reviewed).length} reviewed</small>
+                    <small>{p.media.length
+                      ? `${postVideos.length} videos · ${postVideos.filter(m => m.reviewed).length} reviewed`
+                      : 'Open on Instagram ↗'}</small>
                   </span>
                 </span>
-              </button>
-            })}
-          </nav>
-          <article className="ig-focus" ref={postDetailRef}><div className="ig-source"><strong>@{post.author}</strong><a href={post.permalink} target="_blank" rel="noopener noreferrer">Open Instagram</a></div>
-            {media && <>
+                if (!p.media.length) {
+                  return <a className="ig-link-card" key={p.permalink} href={p.permalink}
+                    target="_blank" rel="noopener noreferrer">{info}</a>
+                }
+                return <button key={p.permalink} aria-current={post?.id === p.id ? 'true' : undefined} onClick={() => choosePost(p.id)}>
+                  {cover && <span className="ig-cover" aria-hidden="true">
+                    <video preload="metadata" muted playsInline src={`${cover.playback_url}#t=0.1`} />
+                  </span>}
+                  {info}
+                </button>
+              })}
+            </nav>
+            {post && <article className="ig-focus" ref={postDetailRef}><div className="ig-source"><strong>@{post.author}</strong><a href={post.permalink} target="_blank" rel="noopener noreferrer">Open Instagram</a></div>
+            {media && <div className="ig-review-layout">
+              <div className="ig-video-pane">
               <div className="ig-player">{media.kind === 'image' ? <p>Image {media.position+1} · open the original post to view.</p> : media.playback_url && !playbackError ? <video key={`${media.id}:${playbackAttempt}`} ref={videoRef} controls preload="metadata" playsInline src={media.playback_url} onPlay={() => audioRef.current?.pause()} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setPlaybackError(true)} /> : <div><p role="status">{playbackError ? 'Playback unavailable or cache expired.' : 'Video waiting for Mac upload or cache refresh.'} Rerun the connector to refresh this media.</p><button disabled={query.isFetching} onClick={retryPlayback}>Retry playback</button></div>}</div>
               <div className="ig-child-heading">Carousel · {media.position+1} of {post.media.length}</div>
               <div className="ig-children" aria-label="Carousel children">{post.media.map(m => <button key={m.id} aria-label={`${m.kind} ${m.position+1}, ${m.status}${m.reviewed ? ', reviewed' : ''}`} aria-pressed={m.id === media.id} onClick={() => setSelectedMedia(m.id)}><span>{m.kind === 'video' ? 'Video' : 'Image'} {m.position+1}</span><small>{m.reviewed ? 'Reviewed' : m.kind === 'image' ? 'Image' : m.status}</small></button>)}</div>
-              {mutation.isError && <p role="alert">{mutation.error.data ? JSON.stringify(mutation.error.data) : 'Could not save. Try again.'}</p>}
-              <Editor key={media.id} media={media} act={act} busy={mutation.isPending} audioRef={audioRef} pauseVideo={() => videoRef.current?.pause()} />
-            </>}
-          </article>
+              </div>
+              <div className="ig-review-controls">
+                {mutation.isError && <p role="alert">{mutation.error.data ? JSON.stringify(mutation.error.data) : 'Could not save. Try again.'}</p>}
+                <Editor key={media.id} media={media} act={act} busy={mutation.isPending} audioRef={audioRef} pauseVideo={() => videoRef.current?.pause()} />
+              </div>
+            </div>}
+          </article>}
         </div>}
       </>}
       {query.data.synced_at && <p className="ig-note">Last sync: {new Date(query.data.synced_at).toLocaleString()} · newest saved first</p>}

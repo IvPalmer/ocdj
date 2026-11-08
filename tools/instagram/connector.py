@@ -16,6 +16,7 @@ import requests
 
 COLLECTION = '18117783274346248'
 MAX_BYTES = 64 * 1024 * 1024
+MAX_LINKS = 1000
 IG = 'https://www.instagram.com'
 STOP_STATUSES = frozenset(['session-expired', 'restricted', 'rate-limited'])
 
@@ -36,6 +37,14 @@ def cdn_url(url):
     return url
 
 
+def post_details(post, caption_limit):
+    return {
+        'permalink': f"{IG}/p/{post['code']}/",
+        'author': post.get('user', {}).get('username', ''),
+        'caption': ((post.get('caption') or {}).get('text') or '')[:caption_limit],
+    }
+
+
 def parse_posts(items):
     posts, urls = [], {}
     for wrapper in items[:5]:
@@ -54,9 +63,7 @@ def parse_posts(items):
                     raise ConnectorError('error')
                 # Prefer the smallest provided rendition for the bounded pilot.
                 urls[ident] = min(versions, key=lambda v: v.get('width', 10000))['url']
-        posts.append({'id': str(p['pk']), 'permalink': f"{IG}/p/{p['code']}/",
-                      'author': p.get('user', {}).get('username', ''),
-                      'caption': (p.get('caption') or {}).get('text', '')[:10000], 'children': parsed})
+        posts.append({'id': str(p['pk']), **post_details(p, 10000), 'children': parsed})
     return {'collection_id': COLLECTION, 'posts': posts}, urls
 
 
@@ -75,24 +82,50 @@ def instagram_session(profile):
     return session
 
 
+def collection_page(session, count, cursor):
+    params = {'count': count}
+    if cursor:
+        params['max_id'] = cursor
+    response = session.get(f'{IG}/api/v1/feed/collection/{COLLECTION}/posts/',
+                           params=params, timeout=30, allow_redirects=False)
+    if response.status_code in (301, 302, 401): raise ConnectorError('session-expired')
+    if response.status_code == 429: raise ConnectorError('rate-limited')
+    if response.status_code == 403: raise ConnectorError('restricted')
+    if response.status_code != 200: raise ConnectorError('error')
+    data = response.json()
+    if data.get('message') == 'login_required': raise ConnectorError('session-expired')
+    if data.get('status') != 'ok': raise ConnectorError('restricted')
+    return data
+
+
 def read_collection(session):
     items, cursor = [], None
     for _ in range(5):
-        params = {'count': 5}
-        if cursor: params['max_id'] = cursor
-        r = session.get(f'{IG}/api/v1/feed/collection/{COLLECTION}/posts/',
-                        params=params, timeout=30, allow_redirects=False)
-        if r.status_code in (301, 302, 401): raise ConnectorError('session-expired')
-        if r.status_code == 429: raise ConnectorError('rate-limited')
-        if r.status_code == 403: raise ConnectorError('restricted')
-        if r.status_code != 200: raise ConnectorError('error')
-        d = r.json()
-        if d.get('message') == 'login_required': raise ConnectorError('session-expired')
-        if d.get('status') != 'ok': raise ConnectorError('restricted')
-        items.extend(d.get('items', []))
-        cursor = d.get('next_max_id')
-        if len(items) >= 5 or not d.get('more_available') or not cursor: break
+        data = collection_page(session, 5, cursor)
+        items.extend(data.get('items', []))
+        cursor = data.get('next_max_id')
+        if len(items) >= 5 or not data.get('more_available') or not cursor:
+            break
     return parse_posts(items)
+
+
+def read_collection_links(session):
+    links, seen_cursors = {}, set()
+    cursor = None
+    for _ in range(120):
+        data = collection_page(session, 20, cursor)
+        for item in data['items']:
+            details = post_details(item.get('media', item), 160)
+            links.setdefault(details['permalink'], details)
+        if len(links) > MAX_LINKS:
+            break
+        if data.get('more_available') is False:
+            return list(links.values())
+        cursor = data.get('next_max_id')
+        if not cursor or cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
+    raise ConnectorError('incomplete collection index')
 
 
 def download(url, dest):
@@ -163,6 +196,15 @@ def run(args):
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token: raise ConnectorError('DRAIN_TOKEN missing')
     api = API(args.api, token)
+    if args.links_only:
+        with instagram_session(args.profile) as session:
+            posts = read_collection_links(session)
+        result = api.post('links/', {'posts': posts})
+        if result is None or result['posts'] != len(posts):
+            raise ConnectorError('link index was not saved')
+        print(f'Indexed {len(posts)} Instagram post links.')
+        return
+
     ffmpeg = ffmpeg_path()
     try:
         if args.fixture:
@@ -224,7 +266,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--api', required=True, help='OCDJ origin; bearer comes from existing DRAIN_TOKEN env')
     parser.add_argument('--profile', default='Profile 1')
-    parser.add_argument('--fixture', help='Offline synthetic fixture, never live Instagram data')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--fixture', help='Offline synthetic fixture, never live Instagram data')
+    mode.add_argument('--links-only', action='store_true', help='Index all saved post links without downloading media')
     parser.add_argument('--work-seconds', type=int, default=0, choices=range(0, 3601))
     try:
         run(parser.parse_args())

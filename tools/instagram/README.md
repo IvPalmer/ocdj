@@ -34,6 +34,12 @@ claims live Shazam QA. `fixture.json` has 5 posts, 18 videos and one image.
 
 ## Explicit Mac run
 
+To refresh the full saved-post grid, run the connector with `--links-only`
+using the same private SSH origin and existing bearer described below. It walks
+the collection in saved order and publishes links, usernames and short captions
+after the final page. The grid opens these links on Instagram. This mode does
+not download video or change the existing pilot and recognition state.
+
 Install `tools/instagram/requirements.txt` into a Mac-owned virtual environment.
 Use the **existing** `DRAIN_TOKEN` injection used by the drain connector; never
 paste a token on the command line, into the repo, or into a task comment.

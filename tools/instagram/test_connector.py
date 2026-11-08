@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
-from tools.instagram.connector import parse_posts, cdn_url, ConnectorError, read_collection, API, run
+from tools.instagram.connector import parse_posts, cdn_url, ConnectorError, read_collection, read_collection_links, API, run
 
 
 class ConnectorTests(unittest.TestCase):
@@ -46,7 +46,7 @@ class ConnectorTests(unittest.TestCase):
                     job if endpoint == 'claim/' and api.post.call_args_list.count(call('claim/')) == 1
                     else None)
                 args = SimpleNamespace(api='https://example.test', profile='Profile 1',
-                                       fixture=None, work_seconds=0)
+                                       fixture=None, links_only=False, work_seconds=0)
                 with patch.dict('os.environ', {'DRAIN_TOKEN': 'test-only'}), \
                      patch('tools.instagram.connector.API', return_value=api), \
                      patch('tools.instagram.connector.ffmpeg_path', return_value='fixture-ffmpeg'), \
@@ -66,6 +66,25 @@ class ConnectorTests(unittest.TestCase):
                     call('media/7/complete/', {'token': 'lease-token', 'status': 'error', 'candidates': []}),
                     call('heartbeat/', {'status': status}),
                 ])
+
+    def test_link_index_follows_saved_order_and_deduplicates_page_overlap(self):
+        def page(codes, more, cursor=None):
+            response = Mock(status_code=200)
+            response.json.return_value = {
+                'status': 'ok', 'items': [{'media': {'code': code}} for code in codes],
+                'more_available': more, 'next_max_id': cursor,
+            }
+            return response
+
+        session = Mock()
+        session.get.side_effect = [page(['new', 'older'], True, 'next'), page(['older', 'oldest'], False)]
+        links = read_collection_links(session)
+        self.assertEqual([link['permalink'].split('/')[-2] for link in links], ['new', 'older', 'oldest'])
+        self.assertEqual(session.get.call_args.kwargs['params']['max_id'], 'next')
+
+        session.get.side_effect = [page(['new'], True, 'repeated'), page(['older'], True, 'repeated')]
+        with self.assertRaisesRegex(ConnectorError, 'incomplete collection index'):
+            read_collection_links(session)
 
     def test_read_stops_at_five_and_ignores_publication_order(self):
         session = Mock(); session.get.return_value.status_code = 200

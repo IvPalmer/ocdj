@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 COLLECTION_ID = '18117783274346248'
+MAX_LINKS = 1000
 
 
 class StrictInput(serializers.Serializer):
@@ -15,10 +16,23 @@ class ChildInput(StrictInput):
     kind = serializers.ChoiceField(choices=['video', 'image'])
 
 
-class PostInput(StrictInput):
-    id = serializers.RegexField(r'^\d{1,40}$')
+class PostLinkInput(StrictInput):
     permalink = serializers.RegexField(r'^https://www\.instagram\.com/(?:p|reel)/[A-Za-z0-9_-]{1,64}/$')
     author = serializers.CharField(max_length=150, allow_blank=True, default='')
+    caption = serializers.CharField(max_length=160, allow_blank=True, default='')
+
+
+class LinkIndexInput(StrictInput):
+    posts = PostLinkInput(many=True, max_length=MAX_LINKS)
+
+    def validate_posts(self, posts):
+        if len({post['permalink'] for post in posts}) != len(posts):
+            raise serializers.ValidationError('Duplicate Instagram links')
+        return posts
+
+
+class PostInput(PostLinkInput):
+    id = serializers.RegexField(r'^\d{1,40}$')
     caption = serializers.CharField(max_length=10000, allow_blank=True, default='')
     children = ChildInput(many=True, min_length=1, max_length=20)
 
