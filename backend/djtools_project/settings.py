@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'drain',
     'cratemate',
     'ytfetch',
+    'instagram',
 ]
 
 MIDDLEWARE = [

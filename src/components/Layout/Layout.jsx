@@ -18,6 +18,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/recognize', label: 'Recognize' },
       { to: '/shazam', label: 'Shazam' },
+      { to: '/instagram', label: 'Instagram' },
       { to: '/cratemate', label: 'Crate-Mate' },
       { to: '/traxdb', label: 'TraxDB' },
     ],
