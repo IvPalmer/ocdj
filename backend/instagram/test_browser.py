@@ -124,7 +124,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             }))
                             player.evaluate('(v) => { v.loop = true; return v.play() }')
                             page.get_by_role('button', name='Listen to preview of Fixture artist — Synthetic preview tone').click()
-                            audition = page.get_by_label('Recognized track preview')
+                            audition = page.get_by_label('Shared track audio')
                             expect(audition).to_be_visible()
                             audition.evaluate('(a) => a.play()')
                             page.wait_for_function('document.querySelector("audio").currentTime > 0')
@@ -138,7 +138,8 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             }))
                             page.get_by_role('button', name='Listen to preview of Fixture artist — Synthetic preview tone').click()
                             expect(page.get_by_text('No catalog preview is available for this match.')).to_be_visible()
-                            expect(audition).to_have_count(0)
+                            # A lookup without a preview must not discard the persistent queue/source.
+                            expect(audition).to_have_count(1)
                             page.get_by_label('Artist', exact=True).fill('Corrected fixture artist')
                             page.get_by_label('Track title', exact=True).fill('Corrected fixture title')
                             page.get_by_role('button', name='Save correction').click()

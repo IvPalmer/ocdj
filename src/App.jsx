@@ -11,26 +11,31 @@ import LibraryPanel from './components/LibrarySection/LibraryPanel'
 import SettingsPanel from './components/SettingsSection/SettingsPanel'
 import AgentPanel from './components/AgentSection/AgentPanel'
 import InstagramPanel from './components/InstagramSection/InstagramPanel'
+import { PlayerProvider } from './components/Player/PlayerContext'
+import BottomPlayer from './components/Player/BottomPlayer'
 import './App.css'
 
 function App() {
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/wanted" element={<WantedList />} />
-        <Route path="/soulseek" element={<SoulseekPanel />} />
-        <Route path="/traxdb" element={<TraxDBPanel />} />
-        <Route path="/instagram" element={<InstagramPanel />} />
-        <Route path="/recognize" element={<RecognizePanel />} />
-        <Route path="/cratemate" element={<CratematePanel />} />
-        <Route path="/organize" element={<OrganizePanel />} />
-        <Route path="/library" element={<LibraryPanel />} />
-        <Route path="/agent" element={<AgentPanel />} />
-        <Route path="/settings" element={<SettingsPanel />} />
-      </Routes>
-    </Layout>
+    <PlayerProvider>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/wanted" element={<WantedList />} />
+          <Route path="/soulseek" element={<SoulseekPanel />} />
+          <Route path="/traxdb" element={<TraxDBPanel />} />
+          <Route path="/instagram" element={<InstagramPanel />} />
+          <Route path="/recognize" element={<RecognizePanel />} />
+          <Route path="/cratemate" element={<CratematePanel />} />
+          <Route path="/organize" element={<OrganizePanel />} />
+          <Route path="/library" element={<LibraryPanel />} />
+          <Route path="/agent" element={<AgentPanel />} />
+          <Route path="/settings" element={<SettingsPanel />} />
+        </Routes>
+      </Layout>
+      <BottomPlayer />
+    </PlayerProvider>
   )
 }
 
