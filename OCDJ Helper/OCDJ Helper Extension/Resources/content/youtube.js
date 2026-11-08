@@ -6,10 +6,7 @@
   'use strict';
 
   function init() {
-    inject();
-    document.addEventListener('yt-navigate-finish', () => {
-      setTimeout(inject, 500);
-    });
+    OCDJ.observePage(inject);
   }
 
   function inject() {

@@ -29,6 +29,11 @@ const OCDJ = (() => {
           showToast('Already in Wantlist', 'duplicate');
         } else if (result && result.created) {
           markAsAdded(btn);
+          if (result.offline) {
+            btn.title = 'Saved locally — not in OCDJ Wanted List';
+            showToast('Saved locally — app unreachable, not in Wanted List', 'duplicate');
+            return;
+          }
           const artist = result.item?.artist || '';
           const title = result.item?.title || result.item?.release_name || '';
           showToast(`Saved: ${artist}${artist && title ? ' - ' : ''}${title}`, 'success');
@@ -36,6 +41,10 @@ const OCDJ = (() => {
           btn.classList.remove('ocdj-dig-btn--loading');
           btn.textContent = label;
           showToast(result.error, 'error');
+        } else {
+          btn.classList.remove('ocdj-dig-btn--loading');
+          btn.textContent = label;
+          showToast('No answer from the extension — try again', 'error');
         }
       } catch (err) {
         btn.classList.remove('ocdj-dig-btn--loading');
@@ -155,6 +164,8 @@ const OCDJ = (() => {
             reject(new Error(chrome.runtime.lastError.message || 'Extension error'));
           } else if (response && response.error) {
             reject(new Error(response.error));
+          } else if (response === undefined) {
+            reject(new Error('No answer from the extension — try again'));
           } else {
             resolve(response);
           }
@@ -168,20 +179,63 @@ const OCDJ = (() => {
 
   // ── DOM Observer ─────────────────────────────────────────
 
+  function isOwnNode(node) {
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    return !!el?.closest(`[${INJECTED_ATTR}]`);
+  }
+
   function observeDOM(callback, rootSelector = 'body') {
     const root = document.querySelector(rootSelector) || document.body;
     const observer = new MutationObserver((mutations) => {
-      if (observer._debounceTimer) clearTimeout(observer._debounceTimer);
-      observer._debounceTimer = setTimeout(() => callback(mutations), 250);
+      const relevant = mutations.filter(m => !isOwnNode(m.target) &&
+        !(m.type === 'childList' && m.addedNodes.length && !m.removedNodes.length &&
+          [...m.addedNodes].every(isOwnNode)));
+      if (!relevant.length || observer._debounceTimer) return;
+      // Throttle rather than debounce: continuous player mutations must not
+      // postpone injection forever. Ignore our own buttons and toast updates.
+      observer._debounceTimer = setTimeout(() => {
+        observer._debounceTimer = null;
+        callback(relevant);
+      }, 250);
     });
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, { childList: true, subtree: true, characterData: true,
+      attributes: true, attributeFilter: ['href', 'content', 'data-tralbum'] });
+    return observer;
+  }
+
+  function observePage(inject) {
+    let page = '';
+    const refresh = () => {
+      const identity = window.location.pathname + window.location.search + '|' +
+        (document.querySelector('h1')?.textContent || '') + '|' +
+        (document.querySelector('meta[property="og:title"]')?.content || '');
+      if (identity !== page) {
+        document.querySelectorAll('.ocdj-btn-group').forEach(group => group.remove());
+        page = identity;
+      }
+      inject();
+    };
+    const observer = observeDOM(refresh, 'html');
+    document.addEventListener('yt-navigate-finish', refresh);
+    window.addEventListener('popstate', refresh);
+    refresh();
     return observer;
   }
 
   // ── Already Injected Check ───────────────────────────────
 
+  const injectionContexts = new WeakMap();
   function isInjected(el) {
     if (!el) return true;
+    const copy = el.cloneNode(true);
+    copy.querySelectorAll(`[${INJECTED_ATTR}]`).forEach(node => node.remove());
+    const context = copy.textContent + [...copy.querySelectorAll('a[href]')]
+      .map(link => link.getAttribute('href')).join('|');
+    const previous = injectionContexts.get(el);
+    injectionContexts.set(el, context);
+    if (previous !== undefined && previous !== context) {
+      el.querySelectorAll('.ocdj-btn-group').forEach(group => group.remove());
+    }
     return !!el.querySelector(`[${INJECTED_ATTR}]`);
   }
 
@@ -232,6 +286,7 @@ const OCDJ = (() => {
     showToast,
     sendToBackground,
     observeDOM,
+    observePage,
     isInjected,
     parseVideoTitle,
   };
