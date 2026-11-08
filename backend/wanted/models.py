@@ -143,3 +143,15 @@ class ImportOperation(models.Model):
 
     def __str__(self):
         return f"{self.get_import_type_display()} import ({self.status})"
+
+
+class WantedCleanupIntent(models.Model):
+    """Private, inactive intake receipt; never authority to apply metadata."""
+
+    event_id = models.UUIDField(primary_key=True, editable=False)
+    wanted = models.ForeignKey(
+        WantedItem, null=True, on_delete=models.SET_NULL,
+        related_name='cleanup_intents',
+    )
+    snapshot = models.JSONField(editable=False)
+    created = models.DateTimeField(auto_now_add=True)
