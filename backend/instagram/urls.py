@@ -3,6 +3,7 @@ from . import views
 urlpatterns = [
     path('', views.workspace),
     path('media/<int:pk>/', views.media_action),
+    path('media/<int:pk>/candidate-preview/', views.candidate_preview),
     path('media/<int:pk>/<str:action>/', views.media_action),
     path('connector/heartbeat/', views.heartbeat),
     path('connector/sync/', views.sync),
