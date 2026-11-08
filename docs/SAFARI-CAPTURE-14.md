@@ -1,5 +1,9 @@
 # Safari capture investigation and release handoff (#14)
 
+> Follow-up: [Beatport manifest wiring](BEATPORT-CAPTURE-14.md) is stacked on
+> `419dbd9` and supersedes the historical unwired/unchanged-manifest statements
+> below for that slice only. Installed Safari and live QA remain separate gates.
+
 Observed 2026-11-08. This release port is based on `vps-deploy` at `f390d13`,
 porting draft [#21](https://github.com/IvPalmer/ocdj/pull/21) at `1eb2dfa` plus
 single-item Beatport source acceptance for [#20](https://github.com/IvPalmer/ocdj/issues/20).

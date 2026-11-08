@@ -1,5 +1,9 @@
 # Release-port review and remaining operator QA (#14 / #20)
 
+> Follow-up: [Beatport manifest wiring](BEATPORT-CAPTURE-14.md) is stacked on
+> `419dbd9` and supersedes the historical unwired/unchanged-manifest statements
+> below for that slice only. Installed Safari and live QA remain separate gates.
+
 This is source preparation for `vps-deploy`, not a shipped Safari fix. Read
 [the capture handoff](SAFARI-CAPTURE-14.md) for fixtures, frame behavior and site
 observations, and [the release runbook](EDGE-AND-LOCAL.md) for the existing signing

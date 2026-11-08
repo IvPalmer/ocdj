@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const saveBtn = document.getElementById('save-btn');
   const savedMsg = document.getElementById('saved-msg');
 
-  const sites = ['discogs', 'bandcamp', 'youtube', 'soundcloud', 'spotify'];
+  const sites = ['discogs', 'bandcamp', 'youtube', 'soundcloud', 'spotify', 'beatport'];
   const siteToggles = {};
   sites.forEach(s => { siteToggles[s] = document.getElementById(`site-${s}`); });
   const toastToggle = document.getElementById('show-toasts');

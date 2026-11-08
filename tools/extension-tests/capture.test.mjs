@@ -14,7 +14,7 @@ function fixture(root, site, url, body, head = '') {
   });
   const w = dom.window;
   const messages = [];
-  w.chrome = { runtime: { sendMessage(message, done) {
+  w.chrome = { storage: { local: { get: (keys, done) => done({}) }, onChanged: { addListener() {} } }, runtime: { sendMessage(message, done) {
     messages.push(message);
     done({ created: true, queued: true, item: message.data });
   } } };
