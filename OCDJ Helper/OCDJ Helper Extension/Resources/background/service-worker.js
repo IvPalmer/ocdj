@@ -414,6 +414,28 @@ const messageHandlers = {
     return { queued: true, item: queueItem };
   },
 
+  'dig:queue-search': async (data) => {
+    const { artist, title, thumb, source_url, platform } = data;
+    const query = `${artist || ''} ${title || ''}`.trim();
+    if (!query) return { error: 'No search query' };
+    const result = await apiCall(`/api/dig/yt-search/?q=${encodeURIComponent(query)}`);
+    if (!result.videoId) return { error: 'No results found' };
+    const queueItem = {
+      releaseId: `yt-${result.videoId}`, platform: platform || 'discogs',
+      artist: artist || '', title: title || result.title || '',
+      thumb: thumb || `https://i.ytimg.com/vi/${result.videoId}/hqdefault.jpg`,
+      year: '', source_url: source_url || '',
+      videos: [{ videoId: result.videoId, title: result.title || title || '', duration: result.duration || 0 }],
+    };
+    const { playerQueue = [] } = await chrome.storage.local.get('playerQueue');
+    if (playerQueue.some(item => item.videos?.some(v => v.videoId === result.videoId))) {
+      return { queued: true, duplicate: true };
+    }
+    playerQueue.push(queueItem);
+    await chrome.storage.local.set({ playerQueue });
+    return { queued: true, item: queueItem };
+  },
+
   'dig:queue-embed': async (data, sender) => {
     let { platform, artist, title, embedUrl, thumb, source_url, tracks } = data;
     if (!embedUrl) return { error: 'No embed URL' };

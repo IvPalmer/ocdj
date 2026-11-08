@@ -5,16 +5,8 @@
 (() => {
   'use strict';
 
-  let lastUrl = '';
-
   function init() {
-    inject();
-    OCDJ.observeDOM(() => {
-      if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        setTimeout(inject, 500);
-      }
-    });
+    OCDJ.observePage(inject);
   }
 
   function inject() {
@@ -85,7 +77,8 @@
   function injectTrackPage() {
     const actionsBar =
       document.querySelector('.soundActions .sc-button-group') ||
-      document.querySelector('.listenEngagement .soundActions');
+      document.querySelector('.listenEngagement .soundActions') ||
+      document.querySelector('.soundTitle');
 
     if (!actionsBar || OCDJ.isInjected(actionsBar)) return;
 
@@ -175,7 +168,8 @@
   function injectSetPage() {
     const header =
       document.querySelector('.soundActions .sc-button-group') ||
-      document.querySelector('.listenEngagement .soundActions');
+      document.querySelector('.listenEngagement .soundActions') ||
+      document.querySelector('.soundTitle');
 
     if (header && !OCDJ.isInjected(header)) {
       const { artist, title, uploaderName } = extractMeta();

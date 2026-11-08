@@ -73,7 +73,7 @@
 
     // Main buttons near buy/download — Queue + Dig
     const buyArea = document.querySelector('.buyButtons, .tralbumCommands, .inline_player');
-    if (buyArea && !OCDJ.isInjected(buyArea)) {
+    if (buyArea && !buyArea.parentElement.querySelector(':scope > .ocdj-btn-group')) {
       const group = document.createElement('div');
       group.className = 'ocdj-btn-group';
       group.setAttribute(OCDJ.INJECTED_ATTR, 'true');
@@ -249,5 +249,5 @@
 
   // ── Run ───────────────────────────────────────────────────
 
-  init();
+  OCDJ.observePage(init);
 })();

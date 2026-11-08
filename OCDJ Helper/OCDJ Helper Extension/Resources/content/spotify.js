@@ -4,16 +4,8 @@
 (() => {
   'use strict';
 
-  let lastUrl = '';
-
   function init() {
-    inject();
-    OCDJ.observeDOM(() => {
-      if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        setTimeout(inject, 600);
-      }
-    });
+    OCDJ.observePage(inject);
   }
 
   function inject() {
@@ -47,7 +39,8 @@
   function injectTrackPage() {
     const actionBar =
       document.querySelector('[data-testid="action-bar-row"]') ||
-      document.querySelector('.contentSpacing header');
+      document.querySelector('.contentSpacing header') ||
+      document.querySelector('h1')?.parentElement;
 
     if (!actionBar || OCDJ.isInjected(actionBar)) return;
 
@@ -126,7 +119,8 @@
   function injectAlbumPage() {
     const actionBar =
       document.querySelector('[data-testid="action-bar-row"]') ||
-      document.querySelector('.contentSpacing header');
+      document.querySelector('.contentSpacing header') ||
+      document.querySelector('h1')?.parentElement;
 
     if (actionBar && !OCDJ.isInjected(actionBar)) {
       const { artist, title } = extractSpotifyMeta();
@@ -171,7 +165,8 @@
   function injectPlaylistPage() {
     const actionBar =
       document.querySelector('[data-testid="action-bar-row"]') ||
-      document.querySelector('.contentSpacing header');
+      document.querySelector('.contentSpacing header') ||
+      document.querySelector('h1')?.parentElement;
 
     if (actionBar && !OCDJ.isInjected(actionBar)) {
       const { artist, title } = extractSpotifyMeta();
@@ -274,7 +269,7 @@
         onClick: () => OCDJ.sendToBackground('dig:add', {
           artist: trackArtist,
           title: trackName,
-          source_url: window.location.href,
+          source_url: trackHref ? new URL(trackHref, window.location.origin).href : window.location.href,
           source_site: 'spotify',
         }),
       }));
@@ -337,6 +332,12 @@
                         document.querySelector('a[href*="/artist/"]');
       artist = artistEl?.textContent.trim() || '';
     }
+
+    const visibleTitle = document.querySelector('[data-testid="entityTitle"] h1') || document.querySelector('h1');
+    if (visibleTitle?.textContent.trim()) title = visibleTitle.textContent.trim();
+    const visibleArtist = document.querySelector('[data-testid="creator-link"]') ||
+      document.querySelector('main a[href*="/artist/"]');
+    if (visibleArtist?.textContent.trim()) artist = visibleArtist.textContent.trim();
 
     return { artist, title };
   }
