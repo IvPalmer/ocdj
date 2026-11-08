@@ -62,7 +62,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             grid = page.get_by_role('navigation', name='Saved posts')
                             cards = grid.get_by_role('button')
                             expect(cards).to_have_count(5)
-                            expect(grid.locator('video')).to_have_count(5)
+                            expect(grid.locator('video')).to_have_count(1)
                             cards.nth(1).click()
                             expect(cards.nth(1)).to_have_attribute('aria-current', 'true')
                             expect(page.locator('.ig-player video')).to_have_attribute('aria-label', 'Post 2, video 1')
@@ -102,7 +102,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             page.locator('video').evaluate('(v) => v.play()')
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
                             page.locator('video').evaluate('(v) => { v.pause(); v.currentTime = 1.5 }')
-                            page.get_by_role('button', name='Recognize with Shazam').click()
+                            page.get_by_role('button', name='Recognize').click()
                             expect(page.get_by_text('Recognition queued', exact=False)).to_be_visible()
                             job = livepost('connector/claim/', {})
                             livepost(f"connector/media/{job['id']}/complete/", {

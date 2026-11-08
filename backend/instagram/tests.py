@@ -223,3 +223,93 @@ class WorkspaceTests(TestCase):
     def test_images_cannot_queue(self):
         image = Media.objects.get(kind='image')
         self.assertEqual(self.action('recognize', image.pk).status_code, 400)
+
+    def test_complete_collection_uses_native_models_and_keeps_order(self):
+        data = copy.deepcopy(self.data)
+        for i in range(251):
+            data['posts'].append(dict(id=str(900000+i), permalink=f'https://www.instagram.com/p/fixture{i}/',
+                author='fixture', caption='', children=[dict(id=str(800000+i), kind='video')]))
+        self.sync(data)
+        workspace = self.client.get('/api/instagram/').data
+        self.assertEqual(len(workspace['posts']), 256)
+        self.assertEqual(workspace['posts'][-1]['permalink'], data['posts'][-1]['permalink'])
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.pk, workspace['posts'][0]['media'][0]['id'])
+
+    def test_caption_id_recognizes_without_mac_or_playback(self):
+        self.media.post.caption = '1. Fixture Artist - Track (Dub Mix)\n2. Other - Another'
+        self.media.post.save()
+        response = self.action('recognize')
+        self.assertEqual(response.data['status'], 'identified')
+        self.assertEqual(response.data['title'], 'Track (Dub Mix)')
+        self.assertEqual(response.data['recognition']['source'], 'caption')
+        self.assertEqual(response.data['recognition']['certainty'], 'explicit')
+        self.assertFalse(response.data['reviewed'])
+        self.assertEqual(self.claim().status_code, 204)
+
+    def test_selected_playback_claim_does_not_overwrite_recognition(self):
+        self.media.artist = 'Human'; self.media.title = 'Correction'; self.media.reviewed = True
+        self.media.status = 'identified'; self.media.save()
+        self.action('playback')
+        job = self.claim().data
+        self.assertEqual(job['action'], 'playback')
+        self.assertEqual(job['post_instagram_id'], self.media.post.instagram_id)
+        self.assertEqual(self.complete(job, 'no-match', []).status_code, 200)
+        self.media.refresh_from_db()
+        self.assertFalse(self.media.playback_requested)
+        self.assertEqual((self.media.artist, self.media.title, self.media.status), ('Human', 'Correction', 'identified'))
+
+    def test_recognize_during_playback_lease_stays_queued(self):
+        self.action('playback'); job = self.claim().data
+        self.action('recognize')
+        self.complete(job, 'no-match', [])
+        self.media.refresh_from_db()
+        self.assertTrue(self.media.queued)
+        self.assertEqual(self.media.status, 'pending')
+        self.assertEqual(self.claim().data['action'], 'recognize')
+
+    def test_cached_recognition_runs_on_server_and_fences_manual_edits(self):
+        from .tasks import recognize_cached
+        async def match(*args): return [{'artist': 'Fixture', 'title': 'Source audio'}]
+        self.upload()
+        with patch('instagram.tasks.recognize_cached') as enqueue:
+            with self.captureOnCommitCallbacks(execute=True): self.action('recognize')
+            enqueue.assert_called_once_with(self.media.pk)
+        with patch('instagram.recognition.recognize', side_effect=match):
+            recognize_cached.call_local(self.media.pk)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.status, 'identified')
+        self.assertEqual(self.media.recognition['source'], 'shazam')
+        self.assertFalse(self.media.queued)
+        self.action('recognize')
+        # A sync callback avoids Django ORM inside asyncio in the real task test.
+        def concurrent(*args):
+            Media.objects.filter(pk=self.media.pk).update(lease_token='', queued=False, artist='Human', title='Edited')
+            return match()
+        with patch('instagram.recognition.recognize', side_effect=concurrent):
+            recognize_cached.call_local(self.media.pk)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.artist, 'Human')
+
+    def test_cached_failure_is_error_not_no_match(self):
+        from .tasks import recognize_cached
+        self.upload(); self.action('recognize')
+        with patch('instagram.recognition.recognize', side_effect=RuntimeError('fixture error')):
+            recognize_cached.call_local(self.media.pk)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.status, 'error')
+        self.assertEqual(self.media.recognition['outcome'], 'error')
+
+    def test_images_load_in_native_private_view_and_cannot_recognize(self):
+        image = Media.objects.get(kind='image')
+        self.assertEqual(self.action('playback', image.pk).status_code, 200)
+        job = self.claim().data
+        self.assertEqual(job['id'], image.pk)
+        response = self.worker.post(f'/api/instagram/connector/media/{image.pk}/upload/',
+            {'file': SimpleUploadedFile('source.jpg', b'\xff\xd8\xff' + b'x'*100, content_type='image/jpeg')})
+        self.assertEqual(response.status_code, 200)
+        self.complete(job, 'no-match', [])
+        response = self.client.get(f'/api/instagram/media/{image.pk}/stream/')
+        self.assertEqual(response['Content-Type'], 'image/jpeg')
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertEqual(b''.join(response.streaming_content)[:3], b'\xff\xd8\xff')

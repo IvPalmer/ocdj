@@ -40,7 +40,7 @@ class ConnectorTests(unittest.TestCase):
                 session = Mock()
                 session.get.side_effect = [initial, Mock(status_code=code)]
                 api = Mock()
-                job = {'id': 7, 'instagram_id': '202', 'token': 'lease-token'}
+                job = {'id': 7, 'instagram_id': '202', 'post_instagram_id': '20', 'position': 0, 'token': 'lease-token'}
                 api.post.side_effect = lambda endpoint, *a, **kw: (
                     {'media': []} if endpoint == 'sync/' else
                     job if endpoint == 'claim/' and api.post.call_args_list.count(call('claim/')) == 1
@@ -63,16 +63,40 @@ class ConnectorTests(unittest.TestCase):
                     call('heartbeat/', {'status': 'ready'}),
                     call('heartbeat/', {'status': 'ready'}),
                     call('claim/'),
-                    call('media/7/complete/', {'token': 'lease-token', 'status': 'error', 'candidates': []}),
+                    call('media/7/complete/', {'token': 'lease-token', 'status': 'error', 'candidates': [], 'recognition': {'source': 'shazam', 'certainty': 'tentative', 'comments': 'not-read', 'outcome': 'error'}}),
                     call('heartbeat/', {'status': status}),
                 ])
 
-    def test_read_stops_at_five_and_ignores_publication_order(self):
-        session = Mock(); session.get.return_value.status_code = 200
-        session.get.return_value.json.return_value = {'status': 'ok', 'items': [
-            {'pk': i, 'code': f'post{i}', 'media_type': 1} for i in range(8)], 'more_available': True, 'next_max_id': 'next'}
+    def test_full_cursor_walk_deduplicates_in_saved_order(self):
+        def page(ids, more, cursor=None):
+            response = Mock(status_code=200)
+            response.json.return_value = {'status': 'ok', 'items': [
+                {'pk': i, 'code': f'post{i}', 'media_type': 1} for i in ids],
+                'more_available': more, 'next_max_id': cursor}
+            return response
+        session = Mock()
+        session.get.side_effect = [page(range(10, 0, -1), True, 'next'), page([1, 20, 21], False)]
         data, _ = read_collection(session)
-        self.assertEqual(len(data['posts']), 5); self.assertEqual(session.get.call_count, 1)
+        self.assertEqual([p['id'] for p in data['posts']], [str(i) for i in range(10, 0, -1)] + ['20', '21'])
+        self.assertEqual(session.get.call_args.kwargs['params']['max_id'], 'next')
+
+    def test_incomplete_or_cyclic_snapshot_fails_before_sync(self):
+        for cursor in [None, 'loop']:
+            session = Mock()
+            session.get.return_value.status_code = 200
+            session.get.return_value.json.return_value = {'status': 'ok', 'items': [],
+                'more_available': True, 'next_max_id': cursor}
+            with self.assertRaisesRegex(ConnectorError, 'incomplete'): read_collection(session)
+            self.assertLessEqual(session.get.call_count, 2)
+
+    def test_explicit_ids_preserve_versions_and_numbered_carousel_position(self):
+        from backend.instagram.recognition import explicit_candidates
+        candidates, evidence = explicit_candidates('Tracklist:\n1. Artist - Title (Dub Mix)\n2. Other - Track', 0)
+        self.assertEqual(candidates, [{'artist': 'Artist', 'title': 'Title (Dub Mix)'}])
+        self.assertEqual(evidence[0]['source'], 'caption')
+        candidates, evidence = explicit_candidates('Great night - thank you!', 0, [{'id': '12', 'text': 'ID: DJ - Track'}])
+        self.assertEqual(candidates, [{'artist': 'DJ', 'title': 'Track'}])
+        self.assertEqual(evidence[0]['comment_id'], '12')
 
 
 if __name__ == '__main__': unittest.main()
