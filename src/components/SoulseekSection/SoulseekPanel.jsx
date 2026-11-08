@@ -313,6 +313,12 @@ function SoulseekPanel() {
         )}
       </div>
 
+      {clearDlMutation.isError && (
+        <p role="alert">
+          {clearDlMutation.error?.data?.error || 'Could not clear downloads. Refresh and try again.'}
+        </p>
+      )}
+
       {/* ── Downloads Section ── */}
       {allDownloads.length > 0 && (
         <div className="downloads-section">
