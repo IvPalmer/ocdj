@@ -83,13 +83,17 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             player.evaluate("(v) => { v.src += '?failure=1'; v.load() }")
                             expect(page.get_by_text('Playback unavailable or cache expired.', exact=False)).to_be_visible()
                             page.screenshot(path=str(scratch/'instagram-playback-failure.png'), full_page=True)
+                            page.get_by_role('button', name='Retry playback').click()
+                            refresh_job = livepost('connector/claim/', {})
+                            self.assertEqual(refresh_job['action'], 'playback')
+                            self.assertEqual(refresh_job['id'], first.pk)
                             response = requests.post(self.live_server_url+f'/api/instagram/connector/media/{first.pk}/upload/',
                                 files={'file': ('fixture.mp4', payload, 'video/mp4')},
                                 headers={'Authorization': 'Bearer fixture-test-token'}, timeout=10)
                             self.assertEqual(response.status_code, 200, response.text)
+                            livepost(f"connector/media/{first.pk}/complete/", {
+                                'token': refresh_job['token'], 'status': 'no-match', 'candidates': []})
                             page.get_by_role('button', name='Refresh status').click()
-                            expect(page.get_by_role('button', name='Retry playback')).to_be_enabled()
-                            page.get_by_role('button', name='Retry playback').click()
                             expect(page.locator('video')).to_have_attribute('src', first_src)
                             page.locator('video').evaluate('(v) => v.play()')
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
