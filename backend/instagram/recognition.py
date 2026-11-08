@@ -11,21 +11,22 @@ class RecognitionError(Exception):
 async def recognize(video, directory, ffmpeg):
     from shazamio import Shazam
     candidates = []
-    for offset in (0, 30, 60):
-        sample = Path(directory) / 'sample.wav'
-        result = subprocess.run([ffmpeg, '-v', 'error', '-y', '-ss', str(offset), '-protocol_whitelist', 'file,pipe', '-i', str(video),
-                                '-t', '20', '-vn', '-ac', '1', '-ar', '44100', str(sample)],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45)
-        if result.returncode != 0:
-            raise RecognitionError('error')
-        if not sample.exists() or sample.stat().st_size < 1000:
-            if offset == 0: raise RecognitionError('error')
-            break
-        response = await asyncio.wait_for(Shazam().recognize(str(sample)), timeout=40)
-        track = response.get('track')
-        if track:
-            candidate = {'artist': track.get('subtitle', '')[:500], 'title': track.get('title', '')[:500]}
-            if all(candidate.values()) and candidate not in candidates: candidates.append(candidate)
+    async with Shazam() as shazam:
+        for offset in (0, 30, 60):
+            sample = Path(directory) / 'sample.wav'
+            result = subprocess.run([ffmpeg, '-v', 'error', '-y', '-ss', str(offset), '-protocol_whitelist', 'file,pipe', '-i', str(video),
+                                    '-t', '20', '-vn', '-ac', '1', '-ar', '44100', str(sample)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45)
+            if result.returncode != 0:
+                raise RecognitionError('error')
+            if not sample.exists() or sample.stat().st_size < 1000:
+                if offset == 0: raise RecognitionError('error')
+                break
+            response = await asyncio.wait_for(shazam.recognize(str(sample)), timeout=40)
+            track = response.get('track')
+            if track:
+                candidate = {'artist': track.get('subtitle', '')[:500], 'title': track.get('title', '')[:500]}
+                if all(candidate.values()) and candidate not in candidates: candidates.append(candidate)
     return candidates
 
 

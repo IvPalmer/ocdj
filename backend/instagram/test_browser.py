@@ -92,7 +92,8 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             self.assertEqual(refresh_job['id'], first.pk)
                             response = requests.post(self.live_server_url+f'/api/instagram/connector/media/{first.pk}/upload/',
                                 files={'file': ('fixture.mp4', payload, 'video/mp4')},
-                                headers={'Authorization': 'Bearer fixture-test-token'}, timeout=10)
+                                headers={'Authorization': 'Bearer fixture-test-token',
+                                         'X-Instagram-Lease': refresh_job['token']}, timeout=10)
                             self.assertEqual(response.status_code, 200, response.text)
                             livepost(f"connector/media/{first.pk}/complete/", {
                                 'token': refresh_job['token'], 'status': 'no-match', 'candidates': []})

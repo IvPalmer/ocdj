@@ -152,9 +152,10 @@ class API:
         self.session = requests.Session()
         self.session.headers['Authorization'] = 'Bearer '+token
 
-    def post(self, endpoint, data=None, files=None):
+    def post(self, endpoint, data=None, files=None, lease=None):
+        headers = {'X-Instagram-Lease': lease} if lease else None
         r = self.session.post(self.base+endpoint, json=data if not files else None,
-                              files=files, timeout=90, allow_redirects=False)
+                              files=files, headers=headers, timeout=90, allow_redirects=False)
         if r.status_code == 204: return None
         if r.status_code == 409: return None  # expired result; server owns fencing
         if r.status_code != 200: raise ConnectorError('API request failed')
@@ -228,7 +229,10 @@ def run(args):
                             if not matches:
                                 source_mime = download(read_source(session, job), video)
                                 with video.open('rb') as f:
-                                    api.post(f"media/{job['id']}/upload/", files={'file': ('source', f, source_mime)})
+                                    uploaded = api.post(f"media/{job['id']}/upload/",
+                                                        files={'file': ('source', f, source_mime)}, lease=job['token'])
+                                if uploaded is None:  # Stale job, including a correction during download.
+                                    continue
                                 if job.get('action', 'recognize') == 'recognize':
                                     ffmpeg = ffmpeg or ffmpeg_path()
                                     matches = asyncio.run(recognize(video, directory, ffmpeg))

@@ -99,8 +99,10 @@ class ConnectorTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         from backend.instagram.recognition import recognize
-        from unittest.mock import AsyncMock
-        shazam = SimpleNamespace(recognize=AsyncMock(return_value={}))
+        from unittest.mock import AsyncMock, MagicMock
+        shazam = MagicMock()
+        shazam.__aenter__.return_value = shazam
+        shazam.recognize = AsyncMock(return_value={})
         def extract(command, **kwargs):
             Path(command[-1]).write_bytes(b'x'*1001)
             return SimpleNamespace(returncode=0)
@@ -109,10 +111,14 @@ class ConnectorTests(unittest.TestCase):
              patch('backend.instagram.recognition.subprocess.run', side_effect=extract) as ffmpeg:
             self.assertEqual(asyncio.run(recognize(Path(directory)/'source.mp4', directory, 'ffmpeg')), [])
             self.assertEqual(shazam.recognize.await_count, 3)
+            shazam.__aenter__.assert_awaited_once()
+            shazam.__aexit__.assert_awaited_once_with(None, None, None)
             self.assertTrue(all('-vn' in c.args[0] for c in ffmpeg.call_args_list))
             shazam.recognize.side_effect = TimeoutError('fixture service timeout')
             with self.assertRaises(TimeoutError):
                 asyncio.run(recognize(Path(directory)/'source.mp4', directory, 'ffmpeg'))
+            self.assertEqual(shazam.__aexit__.await_count, 2)
+            self.assertIs(shazam.__aexit__.await_args.args[0], TimeoutError)
 
     def test_twenty_two_pages_full_collection_metadata_without_download(self):
         items = [{'pk': i, 'code': f'post{i}', 'carousel_media': [
