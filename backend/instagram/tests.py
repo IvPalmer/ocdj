@@ -44,9 +44,43 @@ class WorkspaceTests(TestCase):
             'token': job['token'], 'status': status,
             'candidates': candidates if candidates is not None else [{'artist': 'A', 'title': 'B'}]}, format='json')
 
-    def upload(self, body=b'\x00\x00\x00\x18ftypisom' + b'x'*100, filename='../../escape.mp4', mime='video/mp4'):
+    def upload(self, body=b'\x00\x00\x00\x18ftypisom' + b'x'*100, filename='../../escape.mp4', mime='video/mp4', token=''):
         return self.worker.post(f'/api/instagram/connector/media/{self.media.pk}/upload/',
-                                {'file': SimpleUploadedFile(filename, body, content_type=mime)})
+                                {'file': SimpleUploadedFile(filename, body, content_type=mime)},
+                                HTTP_X_INSTAGRAM_LEASE=token)
+
+    def test_stale_upload_cannot_replace_live_cache(self):
+        self.sync(dict(self.data, fixture=False))
+        self.assertEqual(self.upload().status_code, 409)
+        self.action('playback')
+        stale = self.claim().data
+        Media.objects.filter(pk=self.media.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
+        current = self.claim().data
+        self.assertEqual(self.upload(token=current['token']).status_code, 200)
+        self.media.refresh_from_db()
+        original = self.media.cache_key
+        self.assertEqual(self.upload(token=stale['token']).status_code, 409)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.cache_key, original)
+        self.assertTrue(cache.path(original).is_file())
+        self.assertEqual(self.complete(current, 'no-match', []).status_code, 200)
+        self.assertEqual(self.upload(token=current['token']).status_code, 409)
+
+    def test_upload_rechecks_lease_after_writing_file(self):
+        self.sync(dict(self.data, fixture=False))
+        self.action('recognize')
+        job = self.claim().data
+        store = cache.store
+        def expire_after_store(upload):
+            key = store(upload)
+            Media.objects.filter(pk=self.media.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
+            return key
+        before = set(cache.root().iterdir())
+        with patch.object(cache, 'store', side_effect=expire_after_store):
+            self.assertEqual(self.upload(token=job['token']).status_code, 409)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.cache_key, '')
+        self.assertEqual(set(cache.root().iterdir()) - before - {cache.root()/'.upload-lock'}, set())
 
     def test_preview_rejects_unrecognized_track(self):
         url = f'/api/instagram/media/{self.media.pk}/candidate-preview/'
@@ -309,7 +343,8 @@ class WorkspaceTests(TestCase):
         job = self.claim().data
         self.assertEqual(job['id'], image.pk)
         response = self.worker.post(f'/api/instagram/connector/media/{image.pk}/upload/',
-            {'file': SimpleUploadedFile('source.jpg', b'\xff\xd8\xff' + b'x'*100, content_type='image/jpeg')})
+            {'file': SimpleUploadedFile('source.jpg', b'\xff\xd8\xff' + b'x'*100, content_type='image/jpeg')},
+            HTTP_X_INSTAGRAM_LEASE=job['token'])
         self.assertEqual(response.status_code, 200)
         self.complete(job, 'no-match', [])
         response = self.client.get(f'/api/instagram/media/{image.pk}/stream/')
@@ -322,8 +357,9 @@ class WorkspaceTests(TestCase):
         original_url = self.client.get('/api/instagram/').data['posts'][0]['media'][0]['playback_url']
         cache.path(self.media.cache_key).unlink()
         self.assertEqual(self.action('playback').status_code, 200)
-        self.assertEqual(self.claim().data['action'], 'playback')
-        self.upload()
+        job = self.claim().data
+        self.assertEqual(job['action'], 'playback')
+        self.assertEqual(self.upload(token=job['token']).status_code, 200)
         refreshed_url = self.client.get('/api/instagram/').data['posts'][0]['media'][0]['playback_url']
         self.assertNotEqual(original_url, refreshed_url)
 

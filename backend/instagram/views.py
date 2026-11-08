@@ -167,6 +167,12 @@ def claim(request):
                              action=m.lease_action, mime='video/mp4' if m.kind == 'video' else 'image/jpeg', lease_until=m.lease_until))
 
 
+def current_lease(m, token):
+    return (m.active and m.post.active and (m.queued or m.playback_requested)
+            and m.lease_token and m.lease_until and m.lease_until > timezone.now()
+            and secrets.compare_digest(m.lease_token.encode(), token.encode()))
+
+
 @api_view(['POST'])
 @require_drain_token
 def complete(request, pk):
@@ -174,7 +180,7 @@ def complete(request, pk):
     d = s.validated_data
     with transaction.atomic():
         m = get_object_or_404(Media.objects.select_for_update(), pk=pk)
-        if not (m.queued or m.playback_requested) or not m.lease_token or not secrets.compare_digest(m.lease_token, d['token']) or m.lease_until <= timezone.now():
+        if not current_lease(m, d['token']):
             return Response({'error': 'stale lease'}, status=409)
         if m.lease_action != 'playback' and m.queued:
             m.status = d['status']; m.candidates = d['candidates']; m.queued = False
@@ -203,10 +209,20 @@ class BoundedUpload(FileUploadHandler):
         return None
 
 
+def may_upload(m, token):
+    # Only the synthetic fixture seeds cache objects without claiming jobs.
+    if not token and not m.lease_token and m.post.collection.fixture:
+        return m.active and m.post.active
+    return current_lease(m, token)
+
+
 @api_view(['POST'])
 @require_drain_token
 def upload(request, pk):
-    m = get_object_or_404(Media, pk=pk, active=True, post__active=True)
+    token = request.headers.get('X-Instagram-Lease', '')
+    m = get_object_or_404(Media.objects.select_related('post__collection'), pk=pk, active=True, post__active=True)
+    if not may_upload(m, token):
+        return Response({'error': 'stale lease'}, status=409)
     if int(request.META.get('CONTENT_LENGTH') or 0) > cache.MAX_BYTES + 1024 * 1024:
         return Response({'error': 'Upload exceeds limit'}, status=413)
     request._request.upload_handlers.insert(0, BoundedUpload(request._request))
@@ -216,16 +232,22 @@ def upload(request, pk):
     if (m.kind == 'video') != (f.content_type == 'video/mp4'):
         raise ValidationError('Media type does not match source')
     key = cache.store(f)
+    installed = False
     try:
         with transaction.atomic():
-            m = Media.objects.select_for_update().get(pk=m.pk)
+            m = Media.objects.select_related('post__collection').select_for_update(of=('self',)).get(pk=pk)
+            if not may_upload(m, token):
+                return Response({'error': 'stale lease'}, status=409)
             previous = m.cache_key
-            m.cache_key = key; m.cache_until = timezone.now() + cache.TTL; m.save()
-        if previous:
-            cache.path(previous).unlink(missing_ok=True)
-    except Exception:
-        cache.path(key).unlink(missing_ok=True)
-        raise
+            m.cache_key = key
+            m.cache_until = timezone.now() + cache.TTL
+            m.save(update_fields=['cache_key', 'cache_until'])
+        installed = True
+    finally:
+        if not installed:
+            cache.path(key).unlink(missing_ok=True)
+    if previous:
+        cache.path(previous).unlink(missing_ok=True)
     cache.cleanup()
     return Response({'ok': True})
 
