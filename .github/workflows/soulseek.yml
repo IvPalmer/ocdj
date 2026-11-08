@@ -1,0 +1,44 @@
+name: Soulseek clearing fixture
+on:
+  pull_request:
+    paths:
+      - 'backend/soulseek/**'
+      - 'src/components/SoulseekSection/**'
+      - 'src/api/**'
+      - 'tools/soulseek/**'
+      - '.github/workflows/soulseek.yml'
+jobs:
+  clearing:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SECRET_KEY: fixture-only
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fixture
+      POSTGRES_DB: postgres
+      SLSKD_BASE_URL: http://fixture.invalid
+      SLSKD_API_KEY: fixture
+      HUEY_DB_PATH: /tmp/soulseek-qa/huey.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: pip install -r backend/requirements.txt -r tools/instagram/qa-requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: npm ci && npm run build
+      - run: python backend/manage.py test soulseek --noinput
+      - run: python -m unittest tools.soulseek.test_clear_browser -v

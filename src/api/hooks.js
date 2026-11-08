@@ -253,7 +253,7 @@ export function useClearDownloads() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (mode = 'completed') => api.post('/soulseek/downloads/clear/', { mode }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['downloads'] }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['downloads'] }),
   })
 }
 
