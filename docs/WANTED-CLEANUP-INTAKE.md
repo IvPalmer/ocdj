@@ -18,7 +18,7 @@ A pure evaluator still needs unresolved evidence/protection contracts. Adding
 revision tracking to every writer would expand this slice into other owners'
 work. Explicit durable capture is independently useful without either change.
 
-## Implementation plan
+## Original receipt foundation plan (#23)
 
 1. Add synthetic PostgreSQL tests for duplicate and concurrent delivery, replay
    after a correction, capture versus a concurrent edit, transaction rollback,
@@ -37,8 +37,8 @@ work. Explicit durable capture is independently useful without either change.
 
 ## Safety and remaining contract
 
-Only explicit callers persist receipts. The scoped producers below capture creation. Capture
-never saves/updates a Wanted row, infers human confirmation from `identified_via`,
+Only explicit callers persist receipts. The scoped producers below capture
+creation. Snapshot capture never saves/updates a Wanted row, infers human confirmation from `identified_via`,
 selects a candidate, calls a provider, sends a task or writes files. Concurrent
 edits serialize with capture's PostgreSQL row lock and are retained; replay never
 replaces the original receipt with newer metadata. This is snapshot consistency,
@@ -48,7 +48,7 @@ not database-enforced append-only storage against arbitrary SQL/ORM updates.
 Deleting Wanted retains the snapshot and clears its live FK; event replay still
 returns the same receipt, never recreating a deleted Wanted row.
 
-The event UUID must be retained across retries by a future producer. It is an
+Explicit event callers must retain their UUID across delivery retries. It is an
 intake-delivery identity, not a recording, occurrence or metadata revision. There
 is no universal creation coverage, dispatch/recovery mechanism, evidence research,
 proposal evaluator or apply path. Future integration must define remaining producer
@@ -90,7 +90,7 @@ No raw Wanted `bulk_create` caller exists in the inspected source.
 | `POST /api/dig/batch/` (backend only) | Each insertion; skipped duplicates create none; allowed duplicates get distinct receipts |
 | Wanted PATCH/PUT, bulk status updates, pipeline/status saves | No capture; original snapshots survive manual edits unchanged |
 | Admin add; direct ORM create/save/get_or_create/update_or_create; raw bulk_create; fixtures/raw SQL; historical migration models | Uncovered; no global hooks, manager override or backfill |
-| Instagram wishlist / accepted recognition and recognize-to-Wanted | Uncovered and unchanged; require separately reviewed producer boundaries |
+| `POST /api/instagram/media/<pk>/wishlist/` and `POST /api/recognize/jobs/<pk>/add-to-wanted/` | Uncovered and unchanged; recognition acceptance/cached-worker/connector hooks also remain outside this slice |
 | Import trigger/preview/provider fetchers | No Wanted insertion at this stage; capture only at confirmation |
 
 Extension files are unchanged. No provider, worker, recurring job, candidate
