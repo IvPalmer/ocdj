@@ -1,3 +1,4 @@
+import TrackPlayback, { directSource } from '../Player/TrackPlayback'
 import { useState } from 'react'
 
 function ImportPreview({ tracks, onConfirm, isConfirming }) {
@@ -74,6 +75,7 @@ function ImportPreview({ tracks, onConfirm, isConfirming }) {
               onChange={() => toggle(idx)}
             />
             <div className="import-preview__track-info">
+              <TrackPlayback track={{ ...track, source: directSource(track), description: 'Import preview' }} unavailable="Imported metadata; no audio preview URL supplied." />
               <div className="import-preview__track-main">
                 {track.artist && (
                   <span className="import-preview__artist">{track.artist}</span>

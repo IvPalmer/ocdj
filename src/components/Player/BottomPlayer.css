@@ -1,0 +1,21 @@
+.bottom-player { position: fixed; bottom: 0; left: 0; right: 0; z-index: 60; padding: 12px 20px max(12px, env(safe-area-inset-bottom)); background: var(--bg-raised); color: var(--text); border-top: 1px solid var(--border); box-shadow: 0 -3px 18px #0003; max-height: 45vh; overflow-y: auto; }
+.bottom-player__main { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.bottom-player__track { flex: 1; min-width: 180px; overflow-wrap: anywhere; }
+.bottom-player small { display: block; color: var(--text-muted, #aaa); }
+.bottom-player__controls, .bottom-player__actions, .track-playback { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.bottom-player button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+.bottom-player button:disabled { opacity: .45; cursor: default; }
+.bottom-player__queue summary { cursor: pointer; }
+.bottom-player__queue ol { max-height: 100px; overflow: auto; padding-left: 24px; }
+.bottom-player__queue li[aria-current] { color: var(--accent, #b6ed7e); }
+.bottom-player audio { height: 32px; width: min(100%, 450px); margin-top: 8px; }
+.bottom-player__embed { width: min(100%, 350px); height: 150px; border: 0; margin-top: 8px; }
+.bottom-player__embed iframe { width: 100%; height: 100%; }
+.bottom-player p { margin: 5px 0 0; font-size: 12px; }
+.track-no-source { display: block; font-size: 11px; color: var(--text-muted, #aaa); max-width: 230px; }
+/* Reserve the measured footprint so the final track row stays reachable. */
+.layout .main-content { padding-bottom: calc(var(--player-height, 100px) + 24px); }
+@media (max-width: 767px) { .bottom-player { padding: 10px 12px; } .bottom-player__main { gap: 8px; } .bottom-player__track { flex-basis: 100%; } .bottom-player button { min-height: 36px; } }
+@media (min-width: 768px) {
+  .layout .sidebar { position: sticky; top: 0; align-self: flex-start; height: calc(100dvh - var(--player-height, 100px)); }
+}
