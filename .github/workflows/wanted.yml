@@ -1,0 +1,36 @@
+name: Wanted intake fixture
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/wanted.yml'
+jobs:
+  wanted:
+    defaults:
+      run:
+        working-directory: backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SECRET_KEY: synthetic-ci-only
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fixture
+      POSTGRES_DB: postgres
+      HUEY_DB_PATH: /tmp/wanted-qa/huey.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt
+      - run: python manage.py makemigrations wanted --check --dry-run
+      - run: python manage.py test --noinput
