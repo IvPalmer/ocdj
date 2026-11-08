@@ -40,6 +40,8 @@ class WantedSourceViewSet(viewsets.ModelViewSet):
 
 class WantedItemViewSet(viewsets.ModelViewSet):
     serializer_class = WantedItemSerializer
+    # Aggregation removes model ordering; keep recent extension saves on page one.
+    ordering = ['-added', '-id']
 
     def get_queryset(self):
         return WantedItem.objects.select_related('source').annotate(
