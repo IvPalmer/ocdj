@@ -10,6 +10,7 @@ import OrganizePanel from './components/OrganizeSection/OrganizePanel'
 import LibraryPanel from './components/LibrarySection/LibraryPanel'
 import SettingsPanel from './components/SettingsSection/SettingsPanel'
 import AgentPanel from './components/AgentSection/AgentPanel'
+import InstagramPanel from './components/InstagramSection/InstagramPanel'
 import './App.css'
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
         <Route path="/wanted" element={<WantedList />} />
         <Route path="/soulseek" element={<SoulseekPanel />} />
         <Route path="/traxdb" element={<TraxDBPanel />} />
+        <Route path="/instagram" element={<InstagramPanel />} />
         <Route path="/recognize" element={<RecognizePanel />} />
         <Route path="/cratemate" element={<CratematePanel />} />
         <Route path="/organize" element={<OrganizePanel />} />

@@ -1,0 +1,122 @@
+{
+  "collection_id": "18117783274346248",
+  "fixture": true,
+  "posts": [
+    {
+      "id": "100",
+      "permalink": "https://www.instagram.com/p/fixture0/",
+      "author": "fixture_selector_1",
+      "caption": "Offline fixture \u2022 synthetic media. Saved order is independent of publication date.",
+      "children": [
+        {
+          "id": "1000",
+          "kind": "video"
+        },
+        {
+          "id": "1001",
+          "kind": "video"
+        },
+        {
+          "id": "1002",
+          "kind": "video"
+        },
+        {
+          "id": "1003",
+          "kind": "video"
+        },
+        {
+          "id": "1004",
+          "kind": "video"
+        },
+        {
+          "id": "1900",
+          "kind": "image"
+        }
+      ]
+    },
+    {
+      "id": "101",
+      "permalink": "https://www.instagram.com/p/fixture1/",
+      "author": "fixture_selector_2",
+      "caption": "Offline fixture \u2022 synthetic media. Saved order is independent of publication date.",
+      "children": [
+        {
+          "id": "1020",
+          "kind": "video"
+        },
+        {
+          "id": "1021",
+          "kind": "video"
+        },
+        {
+          "id": "1022",
+          "kind": "video"
+        },
+        {
+          "id": "1023",
+          "kind": "video"
+        }
+      ]
+    },
+    {
+      "id": "102",
+      "permalink": "https://www.instagram.com/p/fixture2/",
+      "author": "fixture_selector_3",
+      "caption": "Offline fixture \u2022 synthetic media. Saved order is independent of publication date.",
+      "children": [
+        {
+          "id": "1040",
+          "kind": "video"
+        },
+        {
+          "id": "1041",
+          "kind": "video"
+        },
+        {
+          "id": "1042",
+          "kind": "video"
+        },
+        {
+          "id": "1043",
+          "kind": "video"
+        }
+      ]
+    },
+    {
+      "id": "103",
+      "permalink": "https://www.instagram.com/p/fixture3/",
+      "author": "fixture_selector_4",
+      "caption": "Offline fixture \u2022 synthetic media. Saved order is independent of publication date.",
+      "children": [
+        {
+          "id": "1060",
+          "kind": "video"
+        },
+        {
+          "id": "1061",
+          "kind": "video"
+        },
+        {
+          "id": "1062",
+          "kind": "video"
+        }
+      ]
+    },
+    {
+      "id": "104",
+      "permalink": "https://www.instagram.com/p/fixture4/",
+      "author": "fixture_selector_5",
+      "caption": "Offline fixture \u2022 synthetic media. Saved order is independent of publication date.",
+      "children": [
+        {
+          "id": "1080",
+          "kind": "video"
+        },
+        {
+          "id": "1081",
+          "kind": "video"
+        }
+      ]
+    }
+  ]
+}

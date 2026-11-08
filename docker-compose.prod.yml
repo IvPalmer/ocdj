@@ -138,6 +138,7 @@ services:
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
+      - instagram_cache:/app/.cache/instagram
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8002/api/core/health/ || exit 1"]
       interval: 30s
@@ -203,6 +204,7 @@ services:
       - /srv/ocdj/traxdb:/srv/ocdj/traxdb
       - /srv/ocdj/secrets/traxdb_cookies.txt:/srv/ocdj/secrets/traxdb_cookies.txt:ro
       - huey_volume:/app/huey
+      - instagram_cache:/app/.cache/instagram
     logging:
       driver: json-file
       options:
@@ -247,6 +249,7 @@ volumes:
   slskd_app:
   static_volume:
   huey_volume:
+  instagram_cache:
 
 networks:
   internal:
