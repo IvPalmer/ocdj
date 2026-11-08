@@ -17,6 +17,7 @@ from core.views import get_config
 from wanted.models import WantedSource, WantedItem
 from wanted.serializers import WantedItemSerializer
 from wanted.services.dedup import check_duplicates
+from wanted.services.cleanup_intake import create_wanted_with_cleanup_intent
 from .serializers import DigAddSerializer, DigBatchSerializer, DigCheckSerializer
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def add_item(request):
     if data.get('source_url'):
         notes_parts.append(data['source_url'])
 
-    item = WantedItem.objects.create(
+    item = create_wanted_with_cleanup_intent(
         artist=data.get('artist', ''),
         title=data.get('title', ''),
         release_name=data.get('release_name', ''),
@@ -113,7 +114,7 @@ def batch_add(request):
         if data.get('source_url'):
             notes_parts.append(data['source_url'])
 
-        item = WantedItem.objects.create(
+        item = create_wanted_with_cleanup_intent(
             artist=item_data.get('artist', ''),
             title=item_data.get('title', ''),
             release_name=item_data.get('release_name', ''),

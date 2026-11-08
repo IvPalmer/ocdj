@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import WantedSource, WantedItem, ImportOperation
+from .services.cleanup_intake import create_wanted_with_cleanup_intent
 
 
 class WantedSourceSerializer(serializers.ModelSerializer):
@@ -17,6 +18,9 @@ class WantedSourceSerializer(serializers.ModelSerializer):
 class WantedItemSerializer(serializers.ModelSerializer):
     source_name = serializers.CharField(source='source.name', read_only=True, default=None)
     search_results_count = serializers.IntegerField(read_only=True, default=0)
+
+    def create(self, validated_data):
+        return create_wanted_with_cleanup_intent(**validated_data)
 
     class Meta:
         model = WantedItem

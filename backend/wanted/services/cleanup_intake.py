@@ -1,5 +1,5 @@
-"""Explicit Wanted intake only: no producer hooks, research, queue or apply path."""
-from uuid import UUID
+"""Inactive Wanted receipts: explicit capture and scoped atomic creation."""
+from uuid import UUID, uuid4
 
 from django.db import transaction
 
@@ -16,8 +16,8 @@ def capture_wanted_cleanup_intent(wanted_id, event_id):
     The caller must persist/reuse its event UUID across retries. Row locking makes
     the first snapshot coherent with concurrent edits; no Wanted row is written.
     Unknown protection and null revisions prohibit later automatic application.
-    This joins an outer producer transaction, if supplied. Without a producer
-    hook this does not establish creation coverage or queue dispatch guarantees.
+    This joins an outer producer transaction, if supplied. Capture alone does
+    not establish creation coverage or queue dispatch guarantees.
     """
     if not isinstance(event_id, (str, UUID)):
         raise ValueError('event_id must be a UUID')
@@ -52,3 +52,16 @@ def capture_wanted_cleanup_intent(wanted_id, event_id):
         if receipt.snapshot['wanted_id'] != wanted_id:
             raise IntakeEventConflict('event_id belongs to another Wanted subject')
         return receipt
+
+
+def create_wanted_with_cleanup_intent(**fields):
+    """Insert one Wanted item and its inactive receipt, or roll back both.
+
+    Use only at explicit creation boundaries, never updates. A fresh event key
+    belongs to this insertion and is retained by the receipt in the same commit.
+    This adds no request idempotency, research dispatch or metadata authority.
+    """
+    with transaction.atomic():
+        item = WantedItem.objects.create(**fields)
+        capture_wanted_cleanup_intent(item.pk, uuid4())
+        return item
