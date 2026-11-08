@@ -38,7 +38,7 @@ def child_json(m):
                 reviewed=m.reviewed, wanted_id=m.wanted_id,
                 wanted_matches_current=wanted_matches_current(m), queued=m.queued,
                 playback_version=m.cache_until.isoformat() if ready else None,
-                playback_url=f'/api/instagram/media/{m.pk}/stream/' if ready else None)
+                playback_url=f'/api/instagram/media/{m.pk}/stream/?v={int(m.cache_until.timestamp()*1000000)}' if ready else None)
 
 
 @api_view(['GET'])

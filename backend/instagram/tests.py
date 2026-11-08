@@ -319,9 +319,13 @@ class WorkspaceTests(TestCase):
 
     def test_explicit_playback_retry_refreshes_missing_fresh_cache(self):
         self.upload(); self.media.refresh_from_db()
+        original_url = self.client.get('/api/instagram/').data['posts'][0]['media'][0]['playback_url']
         cache.path(self.media.cache_key).unlink()
         self.assertEqual(self.action('playback').status_code, 200)
         self.assertEqual(self.claim().data['action'], 'playback')
+        self.upload()
+        refreshed_url = self.client.get('/api/instagram/').data['posts'][0]['media'][0]['playback_url']
+        self.assertNotEqual(original_url, refreshed_url)
 
     def test_recognition_candidates_do_not_replace_unreviewed_correction(self):
         self.client.patch(f'/api/instagram/media/{self.media.pk}/',

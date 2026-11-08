@@ -98,7 +98,7 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                                 'token': refresh_job['token'], 'status': 'no-match', 'candidates': []})
                             page.get_by_role('button', name='Refresh status').click()
                             expect(page.locator('video')).not_to_have_attribute('data-playback-version', first_version)
-                            expect(page.locator('video')).to_have_attribute('src', first_src)
+                            expect(page.locator('video')).not_to_have_attribute('src', first_src)
                             page.locator('video').evaluate('(v) => v.play()')
                             page.wait_for_function('document.querySelector("video").currentTime > 0.2')
                             page.locator('video').evaluate('(v) => { v.pause(); v.currentTime = 1.5 }')
