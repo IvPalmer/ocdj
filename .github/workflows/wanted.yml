@@ -32,5 +32,5 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -r requirements.txt
-      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py makemigrations wanted --check --dry-run
       - run: python manage.py test --noinput
