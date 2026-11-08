@@ -73,9 +73,7 @@ with sync_playwright() as p:
     assert page.get_by_role('button', name='Play Fixture artist — Measured tone', exact=True).count() == 0
     assert lookups.count('Measured tone') == 1, lookups  # shared cache across surfaces
     page.set_viewport_size(dict(width=390, height=844))
-    close_nav = page.get_by_role('button', name='Close navigation', exact=True)
-    if close_nav.is_visible():
-        close_nav.click()
+    expect(page.get_by_role('button', name='Open navigation', exact=True)).to_have_attribute('aria-expanded', 'false')
     page.wait_for_function("document.querySelector('.sidebar').getBoundingClientRect().right <= 0")
     expect(page.get_by_text('Indexed match · FLAC · 44.1 kHz', exact=True)).to_be_visible()
     page.screenshot(path='/tmp/ocdj-library-match-mobile.png', full_page=True)
