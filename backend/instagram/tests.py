@@ -48,6 +48,39 @@ class WorkspaceTests(TestCase):
         return self.worker.post(f'/api/instagram/connector/media/{self.media.pk}/upload/',
                                 {'file': SimpleUploadedFile(filename, body, content_type=mime)})
 
+    def test_preview_rejects_unrecognized_track(self):
+        url = f'/api/instagram/media/{self.media.pk}/candidate-preview/'
+        response = self.client.post(url, {'artist': 'Unknown', 'title': 'Track'}, format='json')
+        self.assertEqual(response.status_code, 404)
+
+    @patch('wanted.services.preview.requests.get')
+    def test_preview_uses_exact_catalog_match_without_editing_candidate(self, get):
+        candidate = {'artist': 'Luna', 'title': 'Track (Dub Mix)'}
+        self.action('recognize')
+        self.assertEqual(self.complete(self.claim().data, candidates=[candidate]).status_code, 200)
+        url = f'/api/instagram/media/{self.media.pk}/candidate-preview/'
+        preview_url = 'https://audio-ssl.itunes.apple.com/exact.m4a'
+        track_url = 'https://music.apple.com/us/song/123'
+        exact = {'artistName': 'LUNA', 'trackName': 'Track (Dub Mix)', 'previewUrl': preview_url,
+                 'trackViewUrl': track_url}
+        similar = [
+            {'artistName': 'Another artist', 'trackName': candidate['title'], 'previewUrl': preview_url},
+            {'artistName': 'Luna', 'trackName': 'Track (Radio Edit)', 'previewUrl': preview_url},
+        ]
+        get.return_value.json.return_value = {'results': [*similar, exact]}
+        response = self.client.post(url, candidate, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'url': preview_url, 'provider': 'itunes', 'track_url': track_url})
+        self.assertIn('no-store', response['Cache-Control'])
+        get.assert_called_once()
+
+        get.return_value.json.return_value = {'results': similar}
+        self.assertEqual(self.client.post(url, candidate, format='json').data['url'], '')
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.candidates, [candidate])
+        self.assertFalse(self.media.reviewed)
+        self.assertIsNone(self.media.wanted_id)
+
     def test_five_posts_all_eighteen_videos_in_saved_order(self):
         data = self.client.get('/api/instagram/').data
         self.assertEqual(len(data['posts']), 5)
