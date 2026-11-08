@@ -80,6 +80,23 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual([p['id'] for p in data['posts']], [str(i) for i in range(10, 0, -1)] + ['20', '21'])
         self.assertEqual(session.get.call_args.kwargs['params']['max_id'], 'next')
 
+    def test_twenty_two_pages_full_collection_metadata_without_download(self):
+        items = [{'pk': i, 'code': f'post{i}', 'carousel_media': [
+            {'pk': 100000+i*20+j, 'media_type': 2} for j in range(5 if i < 208 else 4)]}
+            for i in range(256)]
+        responses = []
+        for offset in range(0, 256, 12):
+            response = Mock(status_code=200)
+            response.json.return_value = dict(status='ok', items=items[offset:offset+12],
+                more_available=offset+12 < 256, next_max_id=str(offset+12))
+            responses.append(response)
+        session = Mock(); session.get.side_effect = responses
+        data, urls = read_collection(session)
+        self.assertEqual(len(data['posts']), 256)
+        self.assertEqual(sum(len(p['children']) for p in data['posts']), 1232)
+        self.assertEqual(session.get.call_count, 22)
+        self.assertEqual(urls, {})
+
     def test_incomplete_or_cyclic_snapshot_fails_before_sync(self):
         for cursor in [None, 'loop']:
             session = Mock()

@@ -49,6 +49,9 @@ all producers, with guarded writes and crash recovery. No cleanup hook is active
 
 ## Follow-on slices still owned by #13
 
+- Bounded Mac checks found readable iTunes and Rekordbox binary databases, but
+  no XML export at the standard location. Neither is plain SQLite. No full scan,
+  credential recovery or active TraxDB access was attempted.
 - Verify complete/fresh operator-owned Mac library inventory before implementing
   present/absent/unknown matching. Backend LibraryTrack covers only ready pipeline
   files and cannot prove DJ/Music-library absence. Return unknown until verified;

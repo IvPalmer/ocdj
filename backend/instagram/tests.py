@@ -228,10 +228,11 @@ class WorkspaceTests(TestCase):
         data = copy.deepcopy(self.data)
         for i in range(251):
             data['posts'].append(dict(id=str(900000+i), permalink=f'https://www.instagram.com/p/fixture{i}/',
-                author='fixture', caption='', children=[dict(id=str(800000+i), kind='video')]))
+                author='fixture', caption='', children=[dict(id=str(800000+i*10+j), kind='video') for j in range(5 if i < 210 else 4)]))
         self.sync(data)
         workspace = self.client.get('/api/instagram/').data
         self.assertEqual(len(workspace['posts']), 256)
+        self.assertEqual(sum(m['kind'] == 'video' for p in workspace['posts'] for m in p['media']), 1232)
         self.assertEqual(workspace['posts'][-1]['permalink'], data['posts'][-1]['permalink'])
         self.media.refresh_from_db()
         self.assertEqual(self.media.pk, workspace['posts'][0]['media'][0]['id'])
