@@ -11,8 +11,9 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from drain.auth import require_drain_token
 from wanted.models import WantedItem
+from wanted.services.preview import find_exact_preview
 from .models import Collection, Post, Media
-from .serializers import COLLECTION_ID, SyncInput, EditInput, Completion
+from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion
 from . import cache
 
 
@@ -45,6 +46,19 @@ def workspace(request):
                          connector_status=c.connector_status if online else 'offline',
                          posts=[dict(id=p.pk, author=p.author, caption=p.caption, permalink=p.permalink,
                                      media=[child_json(m) for m in p.media.all() if m.active]) for p in posts]))
+
+
+@api_view(['POST'])
+def candidate_preview(request, pk):
+    media = get_object_or_404(Media, pk=pk, active=True, post__active=True, kind='video')
+    candidate = Candidate(data=request.data)
+    candidate.is_valid(raise_exception=True)
+    if candidate.validated_data not in media.candidates:
+        return Response(status=404)
+
+    url, provider, track_url = find_exact_preview(**candidate.validated_data)
+    return Response({'url': url, 'provider': provider, 'track_url': track_url},
+                    headers={'Cache-Control': 'private, no-store'})
 
 
 @api_view(['PATCH', 'POST'])
