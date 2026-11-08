@@ -5,6 +5,7 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/instagram/', include('instagram.urls')),
     path('api/wanted/', include('wanted.urls')),
     path('api/soulseek/', include('soulseek.urls')),
     path('api/traxdb/', include('traxdb.urls')),
