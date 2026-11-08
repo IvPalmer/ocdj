@@ -90,7 +90,10 @@ These queues are extension storage, not a VPS download/organize job.
    actual signed wrapper. Resolve shared.js by retaining its release-only missing
    response/error handling and offline feedback; retain its existing Bandcamp
    sibling guard. Apply the new lifecycle helpers and the site changes around
-   those fixes. Keep the release manifest, backend URL, token handling and options.
+   those fixes. A patch-application check against the release snapshot confirmed
+   conflicts in Safari shared.js and both Bandcamp copies; the other changes
+   pass the application check. Keep the release manifest, backend URL, token
+   handling and options.
    Do not copy main's entire resource directory over the release tree.
 4. Build/sign/notarize/replace the app only in a separately authorized release,
    following EDGE-AND-LOCAL.md. Recheck registration and resource hashes afterward.
