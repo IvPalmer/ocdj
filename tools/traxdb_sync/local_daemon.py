@@ -31,6 +31,14 @@ Config: ~/.config/ocdj/traxdb-local.env
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date as calendar_date
+import tempfile
+import unicodedata
+
+import ctypes
+import errno
+
 import argparse
 import json
 import os
@@ -130,7 +138,7 @@ def safe_name(filename: str) -> str:
     escape staging and write straight into a folder we promised never to touch.
     """
     name = os.path.basename(str(filename or '').strip().replace('\\', '/'))
-    if not name or name in ('.', '..') or name.startswith('/'):
+    if not name or name in ('.', '..') or name.startswith('/') or '\x00' in name:
         raise ValueError(f'unsafe filename from Pixeldrain: {filename!r}')
     return name
 
@@ -232,65 +240,99 @@ def flush_receipts(api: "API", root: str) -> int:
     return flushed
 
 
-def download_one(client: PixeldrainClient, item: dict, root: str) -> List[dict]:
-    """Fetch one list into <root>/<date>/. Returns the per-file records to report.
+def publish_folder(staging: str, dest: str) -> None:
+    """Atomically publish without replacing even a concurrently created empty dir."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        rename = libc.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        args = (os.fsencode(staging), os.fsencode(dest), 0x00000004)  # RENAME_EXCL
+    elif sys.platform.startswith("linux"):
+        rename = libc.renameat2
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                           ctypes.c_char_p, ctypes.c_uint]
+        args = (-100, os.fsencode(staging), -100, os.fsencode(dest), 1)  # RENAME_NOREPLACE
+    else:
+        raise RuntimeError("atomic no-replace folder rename unavailable on this platform")
+    rename.restype = ctypes.c_int
+    if rename(*args) != 0:
+        code = ctypes.get_errno()
+        if code == errno.EEXIST:
+            raise FileExistsError(code, "refusing to replace existing folder", dest)
+        raise OSError(code, os.strerror(code), dest)
 
-    Raises on any failure — the caller marks the list failed. Partial output is
-    cleaned up so a retry starts from a clean slate rather than half a folder.
+
+def download_one(client: PixeldrainClient, item: dict, root: str,
+                 *, max_workers: int = 4) -> List[dict]:
+    """Download one atomic folder; workers never consume folder leases.
+
+    All names are validated before filesystem/network activity. Each file uses
+    its own client/session. The executor joins even on failure before staging
+    cleanup, so no worker can recreate a partially removed folder.
     """
+    if not isinstance(max_workers, int) or not 1 <= max_workers <= 16:
+        raise ValueError("file concurrency must be between 1 and 16")
     date = (item.get("inferred_date") or "").strip()
-    dest = os.path.join(root, date) if DATE_DIR_RE.match(date) else \
-        os.path.join(root, "_inbox", item["folder_id"])
-
-    # ANY existing destination is off limits, empty included — see
-    # local_date_dirs. The server filters these out too; this is the backstop
-    # that makes the rule hold even if the inventory is stale.
-    if os.path.exists(dest):
+    if not DATE_DIR_RE.fullmatch(date):
+        raise ValueError("refusing undated folder")
+    if calendar_date.fromisoformat(date) <= calendar_date(2026, 8, 12):
+        raise ValueError("refusing folder at or before cutoff 2026-08-12")
+    dest = os.path.join(root, date)
+    if os.path.lexists(dest):
         raise RuntimeError(f"refusing to write into existing folder: {dest}")
 
-    staging = dest + ".part"
-    shutil.rmtree(staging, ignore_errors=True)
-    os.makedirs(staging, exist_ok=True)
+    planned = []
+    seen_names = set()
+    for track in item.get("tracks", []):
+        name = safe_name(track.get("filename"))
+        # Default macOS volumes equate case and Unicode normalization variants.
+        key = unicodedata.normalize("NFD", name).casefold()
+        if key in seen_names:
+            raise RuntimeError(f"duplicate filename in list: {name!r}")
+        seen_names.add(key)
+        if track.get("pixeldrain_file_id"):
+            planned.append((track, name))
+    if not planned:
+        raise RuntimeError("list had no downloadable files")
+
+    # Own only this staging directory; never delete a prior daemon's partials.
+    staging = tempfile.mkdtemp(prefix=date + ".", suffix=".part", dir=root)
     staging_real = os.path.realpath(staging)
 
-    records = []
-    seen_names = set()
+    def fetch(plan):
+        track, name = plan
+        tmp_path = os.path.join(staging, name)
+        if os.path.commonpath([staging_real, os.path.realpath(tmp_path)]) != staging_real:
+            raise RuntimeError(f"path escapes staging: {name!r}")
+        worker_client = client.clone()
+        try:
+            worker_client.download_file(track["pixeldrain_file_id"], tmp_path,
+                                        expected_size=track.get("size"))
+            actual = os.path.getsize(tmp_path)
+            if track.get("size") is not None and actual != track["size"]:
+                raise RuntimeError(f"downloaded size mismatch: {name!r}")
+            return {"pixeldrain_file_id": track["pixeldrain_file_id"],
+                    "local_path": os.path.join(dest, name), "bytes": actual}
+        finally:
+            worker_client.close()
+
     try:
-        for track in item.get("tracks", []):
-            file_id = track.get("pixeldrain_file_id")
-            if not file_id:
-                continue
-            name = safe_name(track.get("filename"))
-            if name in seen_names:
-                raise RuntimeError(f"duplicate filename in list: {name!r}")
-            seen_names.add(name)
-
-            tmp_path = os.path.join(staging, name)
-            # Belt and braces after safe_name: the written path must resolve
-            # inside staging.
-            if os.path.commonpath([staging_real, os.path.realpath(os.path.dirname(tmp_path))]) \
-                    != staging_real:
-                raise RuntimeError(f"path escapes staging: {name!r}")
-
-            client.download_file(file_id, tmp_path, expected_size=track.get("size"))
-            records.append({
-                "pixeldrain_file_id": file_id,
-                "local_path": os.path.join(dest, name),
-                "bytes": os.path.getsize(tmp_path),
-            })
-
-        if not records:
-            raise RuntimeError("list had no downloadable files")
-
-        os.makedirs(os.path.dirname(dest) or root, exist_ok=True)
-        # os.rename onto an existing empty dir would succeed and silently
-        # replace it, so the existence check above is what protects us.
-        os.rename(staging, dest)
-    except Exception:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(fetch, plan) for plan in planned]
+            try:
+                records = [future.result() for future in futures]
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
+        # A destination created during transfer remains off limits too.
+        if os.path.lexists(dest):
+            raise RuntimeError(f"refusing to write into existing folder: {dest}")
+        publish_folder(staging, dest)
+        return records
+    except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-
-    return records
 
 
 def poll_interval_seconds() -> int:
@@ -314,6 +356,9 @@ def poll_interval_seconds() -> int:
 
 
 def run_cycle(cfg: Dict[str, str], limit: int, max_seconds: float = 3600.0) -> int:
+    max_workers = int(cfg.get("TRAXDB_FILE_CONCURRENCY", "4"))
+    if not 1 <= max_workers <= 16:
+        raise ValueError("TRAXDB_FILE_CONCURRENCY must be between 1 and 16")
     root = cfg["TRAXDB_LOCAL_ROOT"]
     if not os.path.isdir(root):
         raise SystemExit(f"TRAXDB_LOCAL_ROOT does not exist: {root}")
@@ -360,8 +405,9 @@ def run_cycle(cfg: Dict[str, str], limit: int, max_seconds: float = 3600.0) -> i
         for item in items:
             label = f"{item['folder_id']} ({item.get('inferred_date') or 'no date'})"
             token = item.get("claim_token", "")
+            started = time.monotonic()
             try:
-                records = download_one(client, item, root)
+                records = download_one(client, item, root, max_workers=max_workers)
             except Exception as e:
                 log(f"FAILED {label}: {e!r}")
                 api.fail(item["id"], token, repr(e)[:400])
@@ -389,7 +435,11 @@ def run_cycle(cfg: Dict[str, str], limit: int, max_seconds: float = 3600.0) -> i
                 os.remove(os.path.join(receipts_dir(root), f"{item['id']}.json"))
             except OSError:
                 pass
-            log(f"OK {label}: {len(records)} files")
+            elapsed = time.monotonic() - started
+            total_bytes = sum(record["bytes"] for record in records)
+            log(f"OK {label}: {len(records)} files, {total_bytes} bytes in "
+                f"{elapsed:.1f}s ({total_bytes / max(elapsed, 0.001) / 1e6:.2f} MB/s), "
+                f"file concurrency {max_workers}")
             done += 1
 
     return done
