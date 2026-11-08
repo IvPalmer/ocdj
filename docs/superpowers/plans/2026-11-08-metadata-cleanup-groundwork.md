@@ -1,0 +1,132 @@
+# Metadata cleanup groundwork and integration plan
+
+**Status:** design only; integration queued behind [#13](https://github.com/IvPalmer/ocdj/issues/13) and coordinator review. Implements no runtime behavior. Tracks [#16](https://github.com/IvPalmer/ocdj/issues/16); does not close it.
+
+**Goal:** every newly created Wanted item and successfully identified recording receives the same asynchronous, evidence-backed cleanup evaluation, without losing the original values, recording version, or confirmed human edits.
+
+**Architecture:** producer adapters record an immutable input snapshot and durable cleanup intent; one existing Huey worker flow gathers evidence, evaluates a proposal, and conditionally applies it. Research never writes directly to the subject. Matching, review, and application are separate steps.
+
+**Stack:** existing Django/PostgreSQL, Huey/SqliteHuey, provider clients, rapidfuzz, and Python standard library. No new dependency, credentials, configuration, worker activation, schema, UI, or existing write-path changes in this groundwork.
+
+**Source baseline:** `fdeaa6e106dde408adad8a6b73cab5b2142f3380` (remote `main`, checked 2026-11-08). Both issues were open with no comments at initial inspection. This is a source inventory, not verification of deployed code, provider access, or real missing-artist data. Examples below are synthetic.
+
+## Producers and named future hook locations
+
+All hooks below are proposed, **not installed**. Emit after the authoritative save commits; never from a UI render, preview search, or every segment hit. Creation and recognition are distinct events and both must be covered even when the user never adds a recognized recording to Wanted.
+
+| Producer | Current authority / write | Future hook and event |
+| --- | --- | --- |
+| Direct Wanted API, including ordinary form/API clients | inherited `WantedItemViewSet.create` / `WantedItemSerializer.create` in `backend/wanted/{views,serializers}.py` | `wanted_created`, once per new item |
+| Bulk Wanted | `WantedItemViewSet.bulk_add`, `backend/wanted/views.py` | `wanted_created`, per committed item |
+| YouTube, SoundCloud, Spotify, Discogs, Bandcamp import | `trigger_import` runs provider preview; `confirm_import` creates selected Wanted rows | hook `confirm_import`, not preview workers; per successful creation, including partial imports |
+| Browser Dig single/batch capture (Chrome/Safari/helper variants converge here) | `add_item` / `batch_add`, `backend/dig/views.py` | `wanted_created` for actual creates; duplicate response does not manufacture another item |
+| Mix recognition: Shazam, ACRCloud, TrackID, hybrid, description-assisted clustering | `_recognize_worker`, `backend/recognize/services/pipeline.py`, saves final `RecognizeJob.tracklist`; `recluster_job` can replace/reorder it | `recording_identified` per stable identified-track revision after final persistence; rerun/recluster use the same adapter |
+| Mix to Wanted | `add_to_wanted`, `backend/recognize/views.py` | `wanted_created` with origin recording/evidence reference; currently only copies names/album/label and a mix note |
+| Instagram Shazam | `tools/instagram/connector.py:recognize` returns candidate names; authenticated `backend/instagram/views.py:complete` accepts an active lease and saves candidates/selection | `recording_identified` after accepted completion; preserve lease/review fences; never hook an unaccepted connector result |
+| Instagram caption/comment IDs and future source-audio recognition | required by #13, not yet a shared identified-track contract on baseline | #13 adapter emits the same event after a track-level identity is persisted, with explicit source evidence |
+| Instagram to Wanted | `media_action(..., action='wishlist')`, `backend/instagram/views.py` | `wanted_created` only when creating; reuse/relink retains subject relationship without rewriting the previous shared Wanted item |
+| Cratemate image/manual identification | `identify` / `lookup`, `backend/cratemate/views.py`, create `AlbumIdentification` / `IdentifiedRelease` containing tracklists | release identification alone is not a recording match; emit per resolved recording only after #13 supplies track identity/position mapping; any subsequent Wanted create still covered |
+| Organize enrichment of downloaded files | `process_pipeline_item`, `backend/organize/services/pipeline.py`; `tag_file` and `enrich_pipeline_item` modify PipelineItem/file metadata | future adapter may emit when a recording is identified; do not invoke these mutating functions from cleanup |
+| Django admin / future programmatic Wanted create | `WantedItemAdmin`, `backend/wanted/admin.py` | ensure creation coverage in a central creation boundary; audited `post_save(created=True)` is an option, not a decision in this PR |
+
+`identified_via='shazam'` and `'acoustid'` exist on Wanted, but no standalone Shazam-feed or AcoustID recognition producer was found in the checked-in backend/tools. A preview module comment mentions a Shazam feed; it does not establish an ingress implementation. Inventory external integrations with the coordinator before claiming universal coverage. Sidecar `_update_wanted` PATCHes the ordinary Wanted API; it is an edit/protection boundary, not a separate creation producer. Existing source types such as blog/telegram are labels, not proof of implemented producers.
+
+Before integration, choose **one** Wanted creation capture mechanism covering API, imports, Dig, Instagram, recognize, admin and internal saves. Do not install both per-caller and signal capture without the unique intent key. Signals do not cover `bulk_create` or raw SQL; future callers must use the selected service or explicitly emit intents. Do not make cleanup a prerequisite for existing creation success.
+
+## Existing code to reuse, with limits
+
+| Existing code | Reuse / limitation |
+| --- | --- |
+| `backend/recognize/tasks.py:recognize_job`, `backend/djtools_project/settings.py:HUEY` | use existing `db_task` dispatch and per-subject `lock_task` pattern; no new queue or settings. Existing task has `retries=0`; cleanup requires its own persisted attempt state. Do not assume queue claims or locks alone recover interrupted work. |
+| `wanted/services/dedup.py:check_duplicates`, `soulseek/services.py:generate_queries`, `score_result` | candidate discovery/ranking only. Dedup uses normalized/fuzzy names; Soulseek intentionally removes version words. Neither proves recording identity or permits merging items. |
+| `recognize/services/clustering.py:_normalize_key`, `_extract_title_core`, `dedup_tracklist`; `pipeline.py:_merge_trackid_results` | reuse existing recognition evidence as observations, not cleanup authority. Clustering intentionally removes mix/remix suffixes and can group covers/samples. Machine `verified` does not mean human-confirmed. |
+| `wanted/services/parsers.py:parse_video_title` | already preserves `raw_title`, but strips `(original mix)`, `(extended mix)`, `(remix)`. Recover version evidence from raw text/source, never the parsed title alone. |
+| `organize/services/tagger.py:_parse_title_from_filename`, `_NOISE_PARENS` | existing example of retaining musical suffixes while removing narrow presentation noise. Do not import mutating tagger functionality into a pure evaluator. |
+| `wanted/services/spotify.py:_get_sp`, Discogs/Bandcamp import clients; `cratemate/services/discogs.py:DiscogsCollector` | reuse authorized clients/configuration. Query release/recording details using source IDs first. Discogs `get_release_details` returns release artists and track position/title/duration but omits per-track artists; release artist is insufficient for compilations. Adapt read-only detail collection later. |
+| `organize/services/tagger.py:enrich_metadata` | not safe as an acceptance gate: Discogs branch can return the release title as track title and first qualifying result, with weak artist filtering and no evidence bundle. Reuse client plumbing rather than that decision. |
+| `wanted/services/preview.py` iTunes/Deezer lookups | existing keyless transport and conservative name comparison; preview availability is not identity proof and tuple output loses recording evidence. Keep preview behavior unchanged. |
+| `organize/services/agent_enrich.py` | existing subscription-backed parser may suggest search terms if already authorized/available; `enrich_pipeline_item` writes DB and files and labels machine output `metadata_source='manual'`. Never call it for cleanup or treat that label as human confirmation. An LLM assertion/self-confidence is not external evidence. |
+| `library/services.py`, future #13 library-match contract | reuse #13's result, including actual format/quality and inventory freshness. Unknown inventory is not verified absence. Cleanup must not add its own library matcher or change playback/queue behavior. |
+
+## Proposed boundary, owned jointly with #13
+
+Proposed names below describe semantics; they do not freeze #13's wire format or storage. Coordinator must reconcile them with #13 before implementation.
+
+* `record_cleanup_intent(subject_ref, subject_revision, origin_ref, snapshot, evidence_refs)` runs inside the producer's transaction; `enqueue_cleanup(intent_id)` dispatches after commit.
+* `cleanup_metadata(intent_id)` is the single Huey task, using `collect_cleanup_evidence(snapshot)` then pure `evaluate_cleanup(snapshot, evidence) -> proposal` and `apply_cleanup(proposal_id, expected_revision)`.
+* `subject_ref` needs a stable kind/ID for Wanted and for an identified recording, plus separate occurrence refs for mix job/segment and Instagram media/candidate. **Never address a track by JSON list index or normalized artist/title.** A repeated recording at two mix timestamps retains two occurrences. A recording/provider ID is namespaced and must not be confused with a release ID.
+* `subject_revision` is a monotonic metadata/protection revision (distinct from musical version), incremented on human edits/confirmations, selection changes, rerun/recluster replacement and cleanup application. Existing `updated` is not sufficient: unrelated saves change it, and name equality cannot detect an edit reverted to its old value.
+* Snapshot exact original artist/title, raw source title, release/catalog/label, track position, duration if known, recording/version IDs, selected-candidate identity, origin refs, and explicit field protection provenance. Include adapter/policy versions. Unknown protection must be represented explicitly.
+* #13 must define stable IDs and revision lifecycle, selection vs candidate semantics, evidence provenance and transport outcomes, manual confirmation markers, and links between Wanted/recording/occurrences. Its reusable library-match result remains separate evidence about inventory, not authority to rewrite identity.
+
+## One asynchronous flow and persistent states
+
+1. **Capture:** atomically create immutable input snapshot plus cleanup intent with unique `(subject_ref, subject_revision, evidence_revision, policy_version)`; initial evidence revision is zero, advanced only for an explicit new evidence/review event. Store origin links separately so repeated events can attach another origin without overwriting originals. Dispatch only the opaque intent ID; do not put captions, tokens, media URLs or raw provider bodies on the queue.
+2. **Queue:** after commit enqueue the intent. `on_commit` alone has a crash gap between DB commit and Huey enqueue: retain a durable outbox intent. A later authorized dispatcher/recovery mechanism must redispatch unsent/expired intents. No recurring process is enabled here.
+3. **Claim:** move `queued`/eligible `retry_wait` to `researching` with expiring lease plus fencing generation. Duplicate tasks return the recorded terminal result or leave an active lease alone. On recovery only the current generation can commit a proposal. Provider calls happen outside a DB transaction.
+4. **Research:** read existing evidence before issuing bounded provider requests. Prefer explicit recording IDs, release ID + track position, or linked source-track URL; then title/version/catalog searches. Record each provider outcome as `matched`, `no_match`, `unavailable`, `transport_error`, or `invalid_response`. Persist evidence before evaluation.
+5. **Decide:** persist a deterministic proposal with exact before/after fields, supporting evidence refs, rejected alternatives and reasons. Outcomes: `proposed`, `unchanged`, `protected`, or `uncertain`. A missing candidate, unknown version, conflict, insufficient evidence, or exhausted provider failures is reviewable `uncertain`, with separate reason codes. `no_match` is an observation, not proof the recording does not exist.
+6. **Apply (future):** for `proposed`, lock the authoritative subject and intent, re-read identity/revision/protection, and perform a conditional metadata-only write with its audit receipt in the same PostgreSQL transaction. Identity/protection/revision change yields `superseded`, never a stale write. Successful application becomes `applied`; no delta becomes `unchanged`. Crash after commit must return the same receipt on redelivery. Huey success is not the application receipt.
+
+Operational state transitions:
+
+```text
+queued -> researching -> proposed -> applied | superseded | protected
+                     -> unchanged | protected | uncertain
+                     -> retry_wait -> researching
+                     -> failed
+```
+
+`failed` means an internal invariant/programming/input failure requiring operator diagnosis; it must not disguise a provider outage as a metadata verdict. Lease expiry permits recovery using a new fencing generation. Deleted/unresolvable subjects are `superseded`. `uncertain` is terminal for automatic processing and awaits explicit review or a new evidence revision; it is not auto-retried indefinitely. Review acceptance must recheck current revision and protection; rejection is recorded and must not reappear on duplicate events. A new evidence-triggered evaluation needs an explicit new subject/evidence revision, not a timestamp in the idempotency key.
+
+Proposed bounded retry policy for later review: one initial research attempt plus at most two retries, after 60s and 300s, with bounded jitter and provider `Retry-After` respected. Do not issue a request before `Retry-After`; persist the later due time. Retry only transient timeouts, connection errors, 429 and 5xx; authentication/configuration absence is `unavailable`, not an invitation to obtain credentials or loop. Persist successful observations and retry only failed lookups. After exhaustion, evaluate adequate independent evidence or record `uncertain/provider_unavailable`; never silently convert transport errors into `no_match`. Test recovery explicitly against installed Huey rather than relying on comments about visibility timeout.
+
+All persistent snapshot/intent/lease/evidence/proposal/receipt storage described here requires a later reviewed schema change. No existing table currently supplies that full contract. Do not repurpose Wanted pipeline `status`, `notes`, recognition confidence flags, or import preview JSON as the cleanup ledger.
+
+## Evidence, version matching, and safe application
+
+An evidence observation needs provider + namespaced ID, track position where applicable, canonical public citation URL or private internal reference, retrieval time, source kind, exact claimed fields, musical version/remixer/edition claims, recording ID/ISRC when present, duration with units, outcome, and bounded error category. Store the minimum authorized material needed to explain a decision. Private captions/comments/media remain private, cited by opaque refs; provider text is untrusted data, never executable instructions. Do not log tokens, signed URLs, private payloads or external identifiers in public GitHub artifacts.
+
+Version-aware comparison keeps the raw display strings intact and uses a separate comparison form (Unicode NFC, casefold, whitespace collapse). Candidate ranking may use the installed fuzzy scorer. Acceptance cannot use a fuzzy threshold alone. Preserve featured-artist/remixer credits; parentheses and dash suffixes can contain identity, not noise.
+
+Initial conservative acceptance rules:
+
+* Exact source recording ID resolved to a track detail with compatible explicit version claims can support a correction; a release ID alone cannot. ISRC is supporting evidence, not a bypass for a conflicting remix/edit claim.
+* Release ID + track position + exact compatible track title/version + track-level artist credit can fill a missing artist. Do not substitute the release artist, label, uploader, or compiler. Missing track credit means `uncertain`.
+* Without a direct identity anchor, require independent corroborating track-level observations agreeing on artist, full title and version plus origin evidence linking them to this occurrence. Two search hits with the same title or two services mirroring the same upstream source are insufficient. TrackID/ACRCloud should not automatically count as independent corroboration.
+* Explicit conflicting mix, named remixer, dub/vocal/instrumental, radio/extended/edit, live/studio, cover/original, remaster/edition, medley or featured credit prevents automatic acceptance. Missing version information means unknown, not Original Mix. Compatible duration helps but does not overrule conflicting identity or DJ transition/crossfade evidence.
+* Replace a wrong nonempty artist/title only with anchored track-level evidence establishing the same recording and compatible version. No automatic blanking. Propose only supported field changes; leave release/catalog/file metadata untouched in the initial integration.
+* No candidate or multiple plausible recordings -> `uncertain` with ranked alternatives and reason. A confidence number, preview URL, matching filename, or machine `verified=True` cannot alone authorize application.
+
+Human protection is separate from provider certainty. Mix `manual=True` protects the row; `verified=True` alone can be set by engines. Instagram `reviewed=True` protects the selection, and manual artist/title edits must also count even when not reviewed; today they invalidate a recognition lease but leave no persistent author/protection revision. Wanted `identified_via='manual'` can be set by machine-origin flows and is not a reliable confirmation flag. Until explicit provenance exists, legacy Wanted/Instagram edits with unknown authorship are proposal-only. Confirmed fields are locked even if blank or apparently wrong. A protected field's conflict also blocks coupled changes that would alter the recording identity. Do not clear protection via retries, reruns, policy changes or a purportedly better provider match.
+
+Keep an immutable first-observed snapshot and every evaluation's input and field-level delta, policy version, evidence refs, decision reason, application revision and receipt. Never overwrite originals on retry. A preexisting row's first-observed values are not proof of its creation-time values; unavailable raw source values remain unknown rather than reconstructed. Undo is a later guarded compensating proposal, not an unqualified overwrite: subsequent human edits must survive it. Existing shared Wanted relations are not merged, relinked, or propagated by cleanup; related subjects need their own revision/protection checks and evaluations. Do not write embedded file tags or trigger search/download/organize as a side effect of this flow.
+
+## Concrete synthetic cases and required proof
+
+| Input / event | Required result |
+| --- | --- |
+| Wanted `artist=''`, `title='Night Signal (Lena Remix)'`, explicit release ref + position B2; authorized detail identifies B2 as artist `Mira`, exact title/version | proposal `{artist: 'Mira'}` only, preserving original empty artist and full title, citing track credit; auto-apply later only with known unprotected provenance and unchanged revision |
+| Same title with no recording/release/position anchor, top result says `Mira`; another artist has a track of that name | `uncertain/insufficient_identity`, artist stays empty |
+| Same release is a compilation credited `Various`; B2 has no track artist | `uncertain/missing_track_credit`; never artist `Various` |
+| Recognized title is incomplete/wrong; selected provider recording ref resolves full compatible title and artist | proposal records both observed values and only supported corrections; raw recognition evidence preserved |
+| Shazam matches original while source explicitly says Lena Remix, or version absent in provider detail | `uncertain/version_conflict` or `uncertain/version_unknown`, no rewrite |
+| Human confirms a blank artist, or edits while research runs (including edit then revert) | `protected` or revision fence -> `superseded`, zero metadata writes |
+| Same create event twice; Wanted and recognition events refer to linked subjects | one intent/receipt per subject revision; links may share evidence, never create another Wanted item or overwrite another subject |
+| Mix recluster reorders JSON / same recording occurs twice | stable occurrence/revision targeting; stale proposal cannot affect another index or erase the second play |
+| Timeout vs successful empty search; missing credentials | distinct `transport_error`, `no_match`, `unavailable`; bounded retry only for transient failure |
+| Crash before enqueue, during research, or after apply commit; stale lease worker returns late | outbox recovery, lease fencing, single atomic receipt, no duplicate delta |
+| Private caption includes instructions or signed media URL | treated as data, private evidence ref only, no prompt execution or public payload |
+| #13 library inventory unknown or provider preview missing | no inferred absence or identity mutation |
+
+## Next increments (queued; no execution authorization implied)
+
+1. **#13 contract + coordinator gate.** Agree stable recording/occurrence refs, monotonic revisions, protected-field provenance, structured evidence/outcomes and linkage. Confirm external Shazam/other ingresses. Decide whether central Wanted creation capture is a service or signal and audit every producer above. Acceptance: mappings for mix rerun/recluster, Instagram candidate/edit, and direct/imported Wanted creation, with unknown provenance represented.
+2. **Pure evaluator after contract stabilizes.** Proposed new files `backend/core/services/metadata_cleanup.py` and `backend/core/tests/test_metadata_cleanup.py`. Implement `evaluate_cleanup(snapshot, evidence) -> proposal` without ORM/network/settings/task imports. First failing table tests use the cases above: missing artist, wrong recognized tag, compilation, conflicting/unknown version, protected blank, multiple candidates, deterministic repeat and input immutability. Run using standard-library unittest with synthetic fixtures; no local DB/API boot. Only then implement the smallest evaluator and self-review its diff. No helper implementation now: stable input/protection semantics are the dependency, and existing normalization helpers are not safe drop-in acceptance rules.
+3. **Persistent intent/evidence and task orchestration.** Later reviewed files under `backend/core/{models.py,migrations/,tasks.py}` and focused task tests. Prove unique intent/receipt constraints, transaction/outbox behavior, selective bounded retry, duplicate delivery, worker death and lease fencing in an authorized isolated CI fixture. Reuse Huey; do not activate a new production worker or scheduler as part of implementation verification.
+4. **Producer/application integration.** Separate PR after coordinator review, modifying only the named producer boundaries and approved manual-edit/protection adapters. Test each creation path and each successful recognition path, including no Wanted action, preserving ingress auth, recognition/review state and existing shared-item linkage. Require conditional application and atomic audit tests before enabling writes. Keep #16 open until all acceptance criteria and end-to-end synthetic cases pass.
+5. **Rollout decision remains separate.** Validate installed dependencies/access and recovery behavior without publishing raw data. Coordinator/operator owns activation, any migration rollout, live writes, merge and deployment. None performed by this groundwork.
+
+## Groundwork verification
+
+Only this document is changed. Source locations and producer call sites were inspected against the baseline. `git diff --check` and a local Markdown relative-code-path check validate this artifact; they do not test the proposed cleanup runtime. No local stack, provider research request, production data query, metadata edit, worker, merge or deployment is required or performed. Documentation-only PR does not match the current Instagram workflow's path filters, so no runtime CI result is implied.
