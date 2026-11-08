@@ -49,17 +49,22 @@ for this check. New code has not been installed, so all patched behavior remains
 fixture-verified rather than live Safari verified.
 
 Follow-up native inspection confirmed SoundCloud's new track layout is a nested
-HTML document, rather than the legacy `.soundTitle` / `.soundActions` layout used
-by the fixtures. Both the accessibility tree and screenshot showed the track
-heading and native actions in that frame, without OCDJ controls. The installed
-content-script declaration has no `all_frames`, and the current adapter does not
-handle `/n/` track routes. Retrying the outer document cannot repair that boundary.
-The existing SoundCloud fixture passing is therefore **not** acceptance evidence
-for this observed layout. A follow-up must choose and verify a frame-aware
-integration under the no-permission-change constraint, or obtain separate
-authorization if its solution changes the manifest/access scope. Do not simply
-enable frame injection: route handling and metadata/action ownership also need
-verification. No manifest or Safari setting was changed during this inspection.
+HTML document, rather than the legacy `.soundTitle` / `.soundActions` layout.
+The installed declaration has no `all_frames`; the legacy fixture does not cover
+this layout. The adapter now reads only accessible same-origin `/n/` documents
+whose recording path exactly matches the outer page. It uses the frame's heading
+and adjacent matching profile link for title/artist and places one button group
+immediately before the frame in the outer page, retaining the declared styles and
+runtime. It observes delayed metadata and replacement, preserves controls through
+unrelated frame mutations, and removes stale controls after navigation/removal.
+No scripts are injected into the frame and no manifest/grant changes are needed.
+
+This is fixture-verified only. Native Safari inspection in this follow-up again
+showed the installed layout without controls. Safari's isolated content-script
+access to this frame, actual heading/profile DOM relationship, outer control
+placement and action persistence still require the authorized release QA below.
+Inaccessible or mismatched frames deliberately produce no controls; do not claim
+that fixture success establishes live SoundCloud acceptance.
 
 ## Changes and workflow ownership
 
@@ -117,14 +122,14 @@ These queues are extension storage, not a VPS download/organize job.
    following EDGE-AND-LOCAL.md. Recheck registration and resource hashes afterward.
    `ocdj-helper` and the Xcode Resources changes are deliberate; the legacy Safari
    and standalone snapshots are not release inputs for this registered app.
-5. **SoundCloud layout:** resolve the nested-document integration described above
-   before claiming #14 is fully repaired. The existing DOM retry patch alone does
-   not provide controls inside the observed new track layout.
+5. **SoundCloud layout:** port the frame adapter and verify the nested-document
+   access, controls and metadata live before claiming #14 is fully repaired.
+   The integration needs no manifest changes but remains unverified in Safari.
 
 ## Focused local checks
 
 DOM fixtures use Node's test runner and jsdom, with no new repository dependency
-or package-lock changes. The latest run passed **20 tests** with jsdom 26.1.0 in
+or package-lock changes. The latest run passed **24 tests** with jsdom 26.1.0 in
 an isolated temporary directory (installed with `--ignore-scripts`). The earlier
 18-test run reused a preinstalled package. If jsdom is available to this repo,
 run `node --test tools/extension-tests/capture.test.mjs`. Otherwise point
@@ -145,6 +150,8 @@ The latest read-only inspection again matched all 22 installed Resources to
 Fixtures cover both active source trees, asynchronous injection, SPA remounts,
 recycled Spotify rows, correct source payloads, Bandcamp idempotence, Discogs
 regression, Beatport track/release metadata and honest offline acknowledgment.
+SoundCloud frame fixtures cover canonical payloads, repeated metadata updates,
+unrelated mutations, outer navigation/back, mismatched paths and frame removal.
 Worker fixtures mock fetch/storage to verify Queue search, dedup and empty results.
 These do not establish that today's site markup matches every selector.
 
@@ -160,17 +167,22 @@ After an authorized release and #20:
    Beatport track and release, Bandcamp track and album, and Discogs release.
    Choose public recordings the operator wants to save. Require one OCDJ
    Wantlist/Queue pair at each eligible header and the expected per-track pairs.
-3. On each SPA, follow an internal link to a second recording, then Back/Forward.
+3. For the new SoundCloud layout, require the pair immediately above the nested
+   track frame. Confirm heading and artist match its visible recording. Test late
+   load, internal navigation and Back, and confirm unrelated waveform updates do
+   not reset the buttons. If absent, record inaccessible frame versus unavailable
+   metadata as unresolved; do not change grants or enable all_frames silently.
+4. On each SPA, follow an internal link to a second recording, then Back/Forward.
    Scroll to lazily loaded rows. Require no duplicate groups and controls after
    delayed rendering. Click each action once and verify it identifies the second
    recording, including its artist, mix and source URL.
-4. Check the extension Player queue for the added item, source link, artwork and
+5. Check the extension Player queue for the added item, source link, artwork and
    playable video/embed. Beatport Queue explicitly searches YouTube: check the
    selected result is the intended mix. An empty search must show an error and
    add nothing. Repeating a queued item must not duplicate it.
-5. Open OCDJ Wanted List and verify each Wantlist result's actual persisted
+6. Open OCDJ Wanted List and verify each Wantlist result's actual persisted
    artist/title or release_name and source URL. A local-only fallback, server
    validation error, auth error, or checkmark without persistence is not a pass.
-6. Record results per site and route, with only sanitized public metadata in
+7. Record results per site and route, with only sanitized public metadata in
    GitHub. Leave #14 open until activation, backend dependency and all live
    acceptance checks are complete.

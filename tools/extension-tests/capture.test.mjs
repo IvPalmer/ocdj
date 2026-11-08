@@ -203,3 +203,61 @@ for (const root of roots) {
     assert.equal(stored.playerQueue.length, 1);
   });
 }
+
+for (const root of roots) {
+  test(`${root}: same-origin SoundCloud frame uses canonical source and refreshes metadata`, async () => {
+    const f = fixture(root, 'soundcloud', 'https://soundcloud.com/artist/song', '<iframe src="/n/artist/song?embedded=crossfade"></iframe>');
+    try {
+      const frame = f.w.document.querySelector('iframe');
+      const doc = frame.contentDocument;
+      doc.open();
+      doc.write('<html><body><section><h1>First</h1><a href="/artist">Artist</a></section></body></html>');
+      doc.close();
+      frame.dispatchEvent(new f.w.Event('load'));
+      await pause();
+      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 0);
+      click(f.w, '.ocdj-play-btn'); click(f.w, '.ocdj-dig-btn');
+      assert.equal(f.messages[0].data.platform, 'soundcloud');
+      assert.equal(f.messages[0].data.source_url, 'https://soundcloud.com/artist/song');
+      assert.match(f.messages[0].data.embedUrl, /artist%2Fsong/);
+      assert.equal(f.messages[1].data.title, 'First');
+      assert.equal(f.messages[1].data.artist, 'Artist');
+      assert.equal(f.messages[1].data.source_site, 'soundcloud');
+      const originalGroup = f.w.document.querySelector('.ocdj-btn-group');
+      doc.body.appendChild(doc.createElement('p'));
+      await pause();
+      assert.equal(f.w.document.querySelector('.ocdj-btn-group'), originalGroup);
+      for (const title of ['Second', 'Third']) {
+        doc.querySelector('h1').textContent = title;
+        await pause();
+        assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
+        click(f.w, '.ocdj-dig-btn');
+        assert.equal(f.messages.at(-1).data.title, title);
+      }
+      // Outer navigation must never leave controls for the old frame recording.
+      f.w.history.pushState({}, '', '/artist/another-song');
+      f.w.document.body.appendChild(f.w.document.createElement('p'));
+      await pause();
+      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+      f.w.history.back();
+      await pause();
+      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
+      frame.remove();
+      await pause();
+      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+    } finally { await f.close(); }
+  });
+  test(`${root}: unrelated SoundCloud frame never acquires recording controls`, async () => {
+    const f = fixture(root, 'soundcloud', 'https://soundcloud.com/artist/song', '<iframe src="/n/artist/other"></iframe>');
+    try {
+      const frame = f.w.document.querySelector('iframe');
+      frame.contentDocument.open();
+      frame.contentDocument.write('<h1>Other</h1><a href="/artist">Artist</a>');
+      frame.contentDocument.close();
+      frame.dispatchEvent(new f.w.Event('load'));
+      await pause();
+      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+    } finally { await f.close(); }
+  });
+}
