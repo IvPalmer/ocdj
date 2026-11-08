@@ -94,8 +94,8 @@ def media_action(request, pk, action='edit'):
                         from .tasks import recognize_cached
                         transaction.on_commit(lambda: recognize_cached(m.pk))
         elif action == 'playback' and request.method == 'POST':
-            if not (m.cache_key and m.cache_until and m.cache_until > timezone.now()):
-                m.playback_requested = True; m.playback_error = False
+            # Explicit retries must also refresh a missing/corrupt cached object.
+            m.playback_requested = True; m.playback_error = False
         elif action == 'wishlist' and request.method == 'POST':
             if not m.artist or not m.title:
                 raise ValidationError('Choose or correct artist and title first')

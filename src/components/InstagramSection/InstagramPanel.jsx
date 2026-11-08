@@ -29,6 +29,7 @@ function Editor({ media, act, busy, audioRef, pauseVideo }) {
     {media.kind === 'video' && <>
       <button disabled={busy || media.queued} onClick={() => act('recognize')}>{media.queued ? 'Recognition queued' : ['error', 'no-match'].includes(media.status) ? 'Retry recognition' : 'Recognize'}</button>
       {media.recognition?.source && <p className="ig-note">Evidence: {media.recognition.source} · {media.recognition.certainty}. Comments: {media.recognition.comments}. {media.recognition.source === 'caption' ? 'Caption IDs refer to the post or numbered carousel position; verify against the audio.' : 'Review the candidate against the source before confirming.'}</p>}
+      {media.recognition?.records?.length > 0 && <details className="ig-note"><summary>Source evidence</summary>{media.recognition.records.map((record, index) => <p key={index}>{record.source}{record.comment_id ? ` · comment ${record.comment_id}` : ''}: {record.text}</p>)}</details>}
       {media.status === 'no-match' && <p>No match in the sampled audio. You can retry or enter a correction.</p>}
       {media.status === 'error' && <p role="status">Recognition failed during transport, decoding or service access. Retry when the source is available.</p>}
       {media.candidates.length > 0 && <section className="ig-candidates" aria-label="Identification candidates">
@@ -102,7 +103,7 @@ export default function InstagramPanel() {
   }
 
   const retryPlayback = async () => {
-    await api.post(`/instagram/media/${media.id}/playback/`, {})
+    if (!media.playback_url || playbackError) await api.post(`/instagram/media/${media.id}/playback/`, {})
     await query.refetch()
     setPlaybackAttempt(attempt => attempt + 1)
     setPlaybackError(false)

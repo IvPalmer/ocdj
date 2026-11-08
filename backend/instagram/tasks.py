@@ -1,6 +1,7 @@
 """Retention uses the existing Huey worker; no new Mac service or login."""
 from huey import crontab
 from huey.contrib.djhuey import db_periodic_task, db_task
+from . import cache
 from .cache import cleanup
 
 

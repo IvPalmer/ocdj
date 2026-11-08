@@ -314,3 +314,9 @@ class WorkspaceTests(TestCase):
         self.assertEqual(response['Content-Type'], 'image/jpeg')
         self.assertIn('no-store', response['Cache-Control'])
         self.assertEqual(b''.join(response.streaming_content)[:3], b'\xff\xd8\xff')
+
+    def test_explicit_playback_retry_refreshes_missing_fresh_cache(self):
+        self.upload(); self.media.refresh_from_db()
+        cache.path(self.media.cache_key).unlink()
+        self.assertEqual(self.action('playback').status_code, 200)
+        self.assertEqual(self.claim().data['action'], 'playback')
