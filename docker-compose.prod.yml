@@ -161,6 +161,7 @@ services:
       - /srv/ocdj/ytcookies:/srv/ocdj/ytcookies
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
+      - instagram_cache:/app/.cache/instagram
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8002/api/core/health/ || exit 1"]
       interval: 30s
@@ -232,6 +233,7 @@ services:
       - /srv/ocdj/secrets/youtube_cookies.txt:/srv/ocdj/secrets/youtube_cookies.txt:ro
       - /srv/ocdj/ytcookies:/srv/ocdj/ytcookies
       - huey_volume:/app/huey
+      - instagram_cache:/app/.cache/instagram
     logging:
       driver: json-file
       options:
@@ -276,6 +278,7 @@ volumes:
   slskd_app:
   static_volume:
   huey_volume:
+  instagram_cache:
 
 networks:
   internal:

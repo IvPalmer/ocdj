@@ -12,6 +12,7 @@ import YouTubePanel from './components/YouTubeSection/YouTubePanel'
 import LibraryPanel from './components/LibrarySection/LibraryPanel'
 import SettingsPanel from './components/SettingsSection/SettingsPanel'
 import AgentPanel from './components/AgentSection/AgentPanel'
+import InstagramPanel from './components/InstagramSection/InstagramPanel'
 import './App.css'
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
         <Route path="/soulseek" element={<SoulseekPanel />} />
         <Route path="/youtube" element={<YouTubePanel />} />
         <Route path="/traxdb" element={<TraxDBPanel />} />
+        <Route path="/instagram" element={<InstagramPanel />} />
         <Route path="/recognize" element={<RecognizePanel />} />
         <Route path="/shazam" element={<ShazamPanel />} />
         <Route path="/cratemate" element={<CratematePanel />} />
