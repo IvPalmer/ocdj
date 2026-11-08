@@ -9,6 +9,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import WantedSource, WantedItem, ImportOperation
+from .services.cleanup_intake import create_wanted_with_cleanup_intent
 from .serializers import (
     WantedSourceSerializer, WantedItemSerializer, BulkAddSerializer,
     ImportOperationSerializer, ImportOperationListSerializer,
@@ -56,7 +57,7 @@ class WantedItemViewSet(viewsets.ModelViewSet):
 
         created = []
         for item_data in items_data:
-            item = WantedItem.objects.create(
+            item = create_wanted_with_cleanup_intent(
                 artist=item_data.get('artist', ''),
                 title=item_data.get('title', ''),
                 release_name=item_data.get('release_name', ''),
@@ -213,7 +214,7 @@ def confirm_import(request, pk):
 
         track = op.preview_data[idx]
         try:
-            WantedItem.objects.create(
+            create_wanted_with_cleanup_intent(
                 artist=track.get('artist', ''),
                 title=track.get('title', ''),
                 release_name=track.get('release_name', ''),
