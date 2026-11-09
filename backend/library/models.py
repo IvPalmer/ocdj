@@ -67,3 +67,14 @@ class MacLibrarySnapshot(models.Model):
     captured_at = models.CharField(max_length=27, blank=True)
     digest = models.CharField(max_length=64, blank=True)
     imported_at = models.DateTimeField(auto_now=True)
+
+
+class MacPlayback(models.Model):
+    """One bounded on-demand request per indexed track; never stores Mac paths."""
+    track = models.OneToOneField(LibraryTrack, primary_key=True, on_delete=models.CASCADE)
+    requested_until = models.DateTimeField(null=True)
+    lease_token = models.CharField(max_length=64, blank=True)
+    lease_until = models.DateTimeField(null=True)
+    cache_key = models.CharField(max_length=32, blank=True)
+    cache_until = models.DateTimeField(null=True)
+    failed = models.BooleanField(default=False)

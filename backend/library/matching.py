@@ -28,4 +28,5 @@ def match_result(rows, missing=False):
         key = MAC_KEY.fullmatch(rows[0].get('file_path') or '')
         if key:
             result['matches'][0]['reveal_url'] = f'ocdj-reveal://track/{key[1]}/{key[2]}'
+            result['matches'][0]['playback_id'] = rows[0]['id']
     return result

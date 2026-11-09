@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAddToQueue, useCreateWantedItem } from '../../api/hooks'
 import { usePlayer } from './PlayerContext'
 import EmbedSource from './EmbedSource'
+import MacAudioSource from './MacAudioSource'
 import './BottomPlayer.css'
 
 function AudioSource({ track, playing, onPlaying, onEnded, onError }) {
@@ -40,7 +41,9 @@ export default function BottomPlayer() {
       if (!media.closest('.bottom-player')) media.pause()
     })
   }, [player.playing, track?.queueId])
-  const fail = () => { setError('Audio source unavailable or playback blocked. Press Play to retry.'); player.pause() }
+  const fail = () => { setError(track?.source.kind === 'mac'
+    ? 'Mac audio unavailable, expired, or playback blocked. Start the private Mac connector, then press Play to retry.'
+    : 'Audio source unavailable or playback blocked. Press Play to retry.'); player.pause() }
   const onPlaying = value => player.dispatch({ type: 'playing', value })
   const onEnded = () => {
     if (player.index === player.items.length - 1) setAttempt(value => value + 1)
@@ -85,7 +88,9 @@ export default function BottomPlayer() {
         </li>)}</ol>
       </details>
     </div>
-    {track && (track.source.kind === 'audio'
+    {track && (track.source.kind === 'mac'
+      ? <MacAudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail, AudioSource }} />
+      : track.source.kind === 'audio'
       ? <AudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail }} />
       : <EmbedSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail }} />)}
     {error && <p role="alert">{error}</p>}

@@ -67,7 +67,7 @@ class LibraryMatchTests(TestCase):
         track = self.record(source='mac_snapshot', file_path=self.key)
         response = self.match()
         self.assertEqual(response.data, dict(status='matched', coverage='indexed_only', matches=[
-            dict(id=track.id, format='flac', bitrate=900, sample_rate=44100, reveal_url=self.url)]))
+            dict(id=track.id, format='flac', bitrate=900, sample_rate=44100, reveal_url=self.url, playback_id=track.id)]))
         self.assertEqual(response['Cache-Control'], 'private, no-store')
 
     def test_missing_mac_match_does_not_reveal(self):

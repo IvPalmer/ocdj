@@ -4,7 +4,9 @@ import { usePlayer } from './PlayerContext'
 // Page links and local filesystem paths are deliberately not media sources.
 export function directSource(track) {
   const url = track.preview_url || track.playback_url
-  return url && /^(https?:\/\/|\/api\/)/.test(url) ? { kind: 'audio', url } : null
+  if (url && /^(https?:\/\/|\/api\/)/.test(url)) return { kind: 'audio', url }
+  return Number.isSafeInteger(track.playback_id) && track.playback_id > 0
+    ? { kind: 'mac', libraryId: track.playback_id } : null
 }
 
 function mixSource(value) {
@@ -43,7 +45,7 @@ export default function TrackPlayback({ track, unavailable = 'No browser-playabl
   const player = usePlayer()
   const label = [track.artist, track.title].filter(Boolean).join(' — ')
   return <span className="track-controls">
-    <LibraryMatch artist={track.artist} title={track.title} />
+    <LibraryMatch artist={track.artist} title={track.title} playbackControls={track.source?.kind !== 'mac'} />
     {!track.source ? <small className="track-no-source">{unavailable}</small> : <span className="track-playback">
       <button type="button" className="btn btn-xs" aria-label={`Play ${label}`} onClick={() => player.play(track)}>Play</button>
       <button type="button" className="btn btn-xs" aria-label={`Queue ${label}`} onClick={() => player.enqueue(track)}>Queue</button>
