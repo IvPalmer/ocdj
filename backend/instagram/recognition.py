@@ -63,7 +63,7 @@ def explicit_candidates(caption, position, comments=(), *, media_count=None):
             slot = slide.match(line)
             parsed = 'ID: ' + line[slot.end():] if slot else line
             match = pattern.fullmatch(parsed)
-            if not match or line.endswith('?'): continue
+            if not match or '?' in line: continue
             if slot and int(slot[1]) != position + 1: continue
             if match['number'] and (not mapped or int(match['number']) != position + 1): continue
             artist, title = match['artist'].strip(), match['title'].strip()
@@ -196,7 +196,10 @@ def release_candidates(caption, position, media_count):
         # Evidence fits the existing private record schema; no migration or hook.
         record = {'source': 'caption', 'comment_id': '', 'candidate': candidate,
                   'text': ('Catalog: ' + code + '; https://musicbrainz.org/release/' + release_id +
-                           '; track ' + str(track.get('number', '')) + '; recording ' + recording['id'])[:1100]}
+                           '; track ' + str(track.get('number', '')) + '; recording ' + recording['id'] +
+                           '; association: ' + ('explicit Track selector' if selector else
+                               'single-track video' if media_count == 1 else
+                               'declared carousel tracklist order; slide ' + str(position + 1)))[:1100]}
         return [candidate], [record]
     except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
         return [], []
