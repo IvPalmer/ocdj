@@ -458,7 +458,14 @@
 
 .er-file {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--text-secondary);
+  min-width: 0;
+}
+
+.er-file-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -486,18 +493,16 @@
 }
 
 .er-lock {
-  margin-right: 4px;
+  flex: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 4px;
   font-size: 10px;
-  opacity: 0.85;
 }
 
 .expand-result-item.er-item--locked {
   opacity: 0.65;
-}
-
-.expand-result-item.er-item--locked .er-file {
-  text-decoration: line-through;
-  text-decoration-color: rgba(0,0,0,0.2);
 }
 
 .expand-empty {

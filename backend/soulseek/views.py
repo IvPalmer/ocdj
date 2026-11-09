@@ -76,20 +76,13 @@ def _run_search_for_queue_item(queue_item_id):
                     upload_speed = response.get('uploadSpeed', 0)
                     free_slots = response.get('hasFreeUploadSlot', False)
                     queue_length = response.get('queueLength', 0)
-                    for file_data in response.get('files', []):
-                        file_data['_username'] = username
-                        file_data['_upload_speed'] = upload_speed
-                        file_data['_free_slots'] = free_slots
-                        file_data['_queue_length'] = queue_length
-                        file_data['_is_locked'] = False
-                        all_results.append(file_data)
-                    for file_data in response.get('lockedFiles', []):
-                        file_data['_username'] = username
-                        file_data['_upload_speed'] = upload_speed
-                        file_data['_free_slots'] = free_slots
-                        file_data['_queue_length'] = queue_length
-                        file_data['_is_locked'] = True
-                        all_results.append(file_data)
+                    for key in ('files', 'lockedFiles'):
+                        for file_data in response.get(key) or []:
+                            all_results.append({
+                                **file_data, '_username': username, '_upload_speed': upload_speed,
+                                '_free_slots': free_slots, '_queue_length': queue_length,
+                                '_is_locked': key == 'lockedFiles' or file_data.get('isLocked') is True,
+                            })
 
                 try:
                     client.delete_search(search_id)
@@ -826,23 +819,53 @@ def browse_user(request):
     })
 
 
+def _is_terminal_transfer(state):
+    flags = {flag.strip() for flag in (state or '').split(',')}
+    return 'Completed' in flags and not flags.intersection({'InProgress', 'Queued'})
+
+
 @api_view(['DELETE'])
-def delete_download(request, download_id):
-    """Remove a single download row from our DB. If still active in slskd,
-    cancel and remove it there too so the row really disappears."""
+def delete_download(request, download_id=None):
+    """Remove exactly one terminal entry, including rows owned only by slskd."""
+    dl = None
+    if download_id is None:
+        value = request.data.get('download_id')
+        if not isinstance(value, str) or not value.startswith('slskd:'):
+            return Response({'error': 'Invalid slskd transfer ID'}, status=400)
+        username, _, transfer_id = value[len('slskd:'):].rpartition(':')
+        if not username or not transfer_id:
+            return Response({'error': 'Invalid slskd transfer ID'}, status=400)
+    else:
+        dl = Download.objects.filter(pk=download_id).first()
+        if dl is None:
+            return Response({'error': 'Download not found'}, status=404)
+        if dl.status not in ('completed', 'failed', 'cancelled'):
+            return Response({'error': 'This transfer is still active. Cancel it first.'}, status=409)
+        username, transfer_id = dl.username, dl.slskd_id
+
+    client = SlskdClient()
     try:
-        dl = Download.objects.get(id=download_id)
-    except Download.DoesNotExist:
-        return Response({'error': 'Download not found'}, status=404)
+        users = client.get_downloads()
+        matches = [
+            (peer['username'], transfer)
+            for peer in users if peer.get('username', '').casefold() == username.casefold()
+            for directory in peer.get('directories', [])
+            for transfer in directory.get('files', [])
+            if (transfer.get('id') == transfer_id if transfer_id else
+                (transfer.get('filename') or '').casefold() == dl.filename.casefold())
+        ]
+        if len(matches) > 1 or any(not _is_terminal_transfer(t.get('state')) for _, t in matches):
+            return Response({'error': 'A matching transfer is active or ambiguous. Refresh and try again.'}, status=409)
+        if matches:
+            peer, transfer = matches[0]
+            if not transfer.get('id'):
+                return Response({'error': 'The slskd transfer has no ID'}, status=502)
+            client.remove_download_history(peer, transfer['id'])
+    except Exception:
+        return Response({'error': 'Could not remove the transfer from slskd. Refresh and try again.'}, status=502)
 
-    if dl.slskd_id and dl.status in ('queued', 'downloading'):
-        client = SlskdClient()
-        try:
-            client.cancel_download(dl.username, dl.slskd_id, remove=True)
-        except Exception as e:
-            logger.warning(f"slskd cancel during delete failed: {e}")
-
-    dl.delete()
+    if dl is not None:
+        dl.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -881,7 +904,7 @@ def clear_downloads(request):
                 file_key = (username.lower(), transfer.get('filename', '').lower())
                 transfers_by_file.setdefault(file_key, []).append(key)
                 state = {part.strip() for part in (transfer.get('state') or '').split(',')}
-                if 'Completed' not in state or 'InProgress' in state or 'Queued' in state:
+                if not _is_terminal_transfer(transfer.get('state')):
                     continue
                 succeeded = 'Succeeded' in state
                 if (mode == 'completed' and not succeeded) or (mode == 'failed' and succeeded):

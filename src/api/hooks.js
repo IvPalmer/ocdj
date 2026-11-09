@@ -277,12 +277,14 @@ export function useBrowseUser({ username, dirPrefix = '', audioOnly = true, limi
 export function useDeleteDownload() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (downloadId) => api.delete(`/soulseek/downloads/${downloadId}/`),
+    mutationFn: (downloadId) => typeof downloadId === 'string' && downloadId.startsWith('slskd:')
+      ? api.delete('/soulseek/downloads/remove/', { download_id: downloadId })
+      : api.delete(`/soulseek/downloads/${downloadId}/`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['downloads'] })
       qc.invalidateQueries({ queryKey: ['search-queue'] })
       qc.invalidateQueries({ queryKey: ['wanted-items'] })
     },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['downloads'] }),
   })
 }
 

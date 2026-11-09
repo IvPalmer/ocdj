@@ -9,7 +9,7 @@ from django.test import TestCase, SimpleTestCase
 from rest_framework.test import APIClient
 
 from organize.models import PipelineItem
-from .models import Download, SearchQueueItem
+from .models import Download, SearchQueueItem, SearchResult
 from .services import SlskdClient
 
 
@@ -149,6 +149,31 @@ class ClearDownloadsTests(TestCase):
         self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
         self.assertEqual(self.removed, [])
 
+    def test_remove_single_untracked_timeout_preserves_other_rows_and_audio(self):
+        _, timed_out = self.add('failed', 'Completed, TimedOut', tracked=False)
+        self.add('failed', 'Completed, TimedOut', tracked=False)
+        self.add('queued', 'Queued, Remotely', tracked=False)
+        payload = {'download_id': f'slskd:peer:{timed_out}'}
+        for _ in range(2):
+            self.assertEqual(self.client.delete('/api/soulseek/downloads/remove/', payload, format='json').status_code, 204)
+        self.assertEqual(self.removed, [timed_out])
+        self.assertEqual(len(self.transfers), 2)
+        self.assertEqual(self.audio.read_bytes(), b'fixture audio must survive clearing')
+
+    def test_remove_tracked_terminal_transfer_checks_live_state(self):
+        dl, tid = self.add('failed', 'InProgress')
+        url = f'/api/soulseek/downloads/{dl.pk}/'
+        self.assertEqual(self.client.delete(url).status_code, 409)
+        self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
+        self.transfers[0]['state'] = 'Completed, TimedOut'
+        self.fail_ids.add(tid)
+        self.assertEqual(self.client.delete(url).status_code, 502)
+        self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
+        self.fail_ids.clear()
+        self.assertEqual(self.client.delete(url).status_code, 204)
+        self.assertEqual(self.removed, [tid])
+        self.assertFalse(Download.objects.filter(pk=dl.pk).exists())
+
     def test_local_only_rows_and_invalid_mode(self):
         self.add('completed')
         self.add('failed')
@@ -178,4 +203,23 @@ class ClearDownloadsTests(TestCase):
     def test_non_string_mode_rejected_before_upstream_calls(self):
         for mode in [[], {}, None, 123]:
             self.assertEqual(self.clear(mode).status_code, 400)
+
+
+class SearchLockTests(TestCase):
+    def test_search_keeps_lock_per_file_in_both_response_shapes(self):
+        from .views import _run_search_for_queue_item
+        item = SearchQueueItem.objects.create(raw_query='fixture')
+        peer = Mock()
+        peer.search.return_value = {'id': 'fixture-search'}
+        peer.get_search.return_value = {'state': 'Completed', 'responses': [{
+            'username': 'fixture-peer',
+            'files': [{'filename': 'open.flac'}, {'filename': 'flagged.flac', 'isLocked': True}],
+            'lockedFiles': [{'filename': 'private.flac'}],
+        }]}
+        with patch('soulseek.views.SlskdClient', return_value=peer), \
+             patch('soulseek.views.time.sleep'), patch('soulseek.views.db.connections.close_all'), \
+             patch('soulseek.views.score_result', return_value=100):
+            _run_search_for_queue_item(item.pk)
+        self.assertEqual(dict(SearchResult.objects.filter(queue_item=item).values_list('filename', 'is_locked')),
+                         {'open.flac': False, 'flagged.flac': True, 'private.flac': True})
         self.peer.session.delete.assert_not_called()
