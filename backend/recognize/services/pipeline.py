@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 _active_jobs = set()
 _active_jobs_lock = threading.Lock()
 
+
+def _save_progress(job):
+    # Progress must not overwrite an accepted cleanup or manual track edit made
+    # since this long-running worker read the job. Final tracks publish under
+    # the shared row lock in publish_recognition().
+    job.save(update_fields=[field.name for field in RecognizeJob._meta.concrete_fields
+                            if field.name not in ('id', 'tracklist')])
+
 # Pipeline configuration — optimized based on testing (March 2026)
 #
 # Findings from max-coverage tests (10s ACR step, 5s Shazam step):
@@ -112,11 +120,11 @@ def _recognize_worker(job_id):
                 from pydub import AudioSegment
                 audio = AudioSegment.from_file(audio_path)
                 job.duration_seconds = int(len(audio) / 1000)
-                job.save()
+                _save_progress(job)
         else:
             # Step 0: Check TrackID.net first (instant if mix already processed)
             job.status = 'downloading'
-            job.save()
+            _save_progress(job)
 
             trackid_result = lookup_by_url(job.url)
             if trackid_result and trackid_result.get('trackid_status') == 'completed' and trackid_result['tracklist']:
@@ -131,14 +139,14 @@ def _recognize_worker(job_id):
 
             job.title = info.get('title', '')[:500]
             job.duration_seconds = int(info.get('duration') or 0)
-            job.save()
+            _save_progress(job)
 
         # Step 2: Parse description (skip on resume if already have them)
         trackid_result = None if is_resume else trackid_result
         if not is_resume:
             description_tracks = parse_tracklist_from_description(info)
             job.description_tracks = description_tracks
-            job.save()
+            _save_progress(job)
         else:
             description_tracks = job.description_tracks or []
             # Re-check TrackID on resume (pass title for keyword fallback)
@@ -177,7 +185,7 @@ def _recognize_worker(job_id):
             primary_step = tuning['acrcloud_step']
             job.segments_total = len(raw_results)
             job.segments_done = len(raw_results)
-            job.save()
+            _save_progress(job)
             logger.info(f'Job {job_id}: resuming with {len(raw_results)} existing results ({acrcloud_calls} ACRCloud calls)')
         elif use_acrcloud:
             # ACRCloud primary — wide step, fast (0.5s rate limit)
@@ -189,7 +197,7 @@ def _recognize_worker(job_id):
             )
             job.segments_total = len(segments)
             job.segments_done = 0
-            job.save()
+            _save_progress(job)
 
             def on_progress_acr(done, total):
                 job.segments_done = done
@@ -213,7 +221,7 @@ def _recognize_worker(job_id):
             )
             job.segments_total = len(segments)
             job.segments_done = 0
-            job.save()
+            _save_progress(job)
 
             def on_progress_shazam(done, total):
                 job.segments_done = done
@@ -239,7 +247,7 @@ def _recognize_worker(job_id):
 
             if gap_segs:
                 job.segments_total += len(gap_segs)
-                job.save()
+                _save_progress(job)
 
                 pass2_done = job.segments_done
 
@@ -282,7 +290,7 @@ def _recognize_worker(job_id):
 
             if verify_segs:
                 job.segments_total += len(verify_segs)
-                job.save()
+                _save_progress(job)
 
                 verify_base = job.segments_done
 
@@ -336,7 +344,8 @@ def _recognize_worker(job_id):
         job.tracks_found = len(tracklist)
         job.segments_done = job.segments_total
         job.status = 'completed'
-        job.save()
+        from wanted.services.cleanup import publish_recognition
+        publish_recognition(job, tracklist)
 
         # Step 8: Clean up temp audio files
         try:
@@ -352,7 +361,7 @@ def _recognize_worker(job_id):
             job = RecognizeJob.objects.get(pk=job_id)
             job.status = 'failed'
             job.error_message = str(e)
-            job.save()
+            _save_progress(job)
         except Exception:
             pass
     finally:

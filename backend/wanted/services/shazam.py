@@ -95,6 +95,7 @@ def ingest(items) -> dict:
             identified_via='shazam',
             notes=' · '.join(note_bits),
             status='identified',
+            cleanup_isrc=raw.get('isrc', ''),
         )
         created.append({'id': item.id, 'artist': artist, 'title': title})
 

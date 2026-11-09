@@ -1,5 +1,12 @@
 from rest_framework import serializers
-from .models import WantedSource, WantedItem, ImportOperation
+from .models import WantedSource, WantedItem, ImportOperation, MetadataCleanup
+
+
+class MetadataCleanupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MetadataCleanup
+        fields = ['id', 'subject_key', 'snapshot', 'evidence', 'result', 'status', 'attempts', 'created', 'updated']
+        read_only_fields = fields
 
 
 class WantedSourceSerializer(serializers.ModelSerializer):
@@ -17,6 +24,16 @@ class WantedSourceSerializer(serializers.ModelSerializer):
 class WantedItemSerializer(serializers.ModelSerializer):
     source_name = serializers.CharField(source='source.name', read_only=True, default=None)
     search_results_count = serializers.IntegerField(read_only=True, default=0)
+
+    def update(self, instance, validated_data):
+        # Confirming a blank or resubmitting the current value is still a human
+        # correction, and must fence a lookup already in flight.
+        if {'artist', 'title'} & validated_data.keys():
+            instance._protect_metadata = True
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save(update_fields=set(validated_data) | {'updated'})
+        return instance
 
     class Meta:
         model = WantedItem
