@@ -9,6 +9,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.models import Config
+from library.models import LibraryTrack
 from organize.models import PipelineItem
 
 
@@ -72,6 +73,33 @@ class PipelinePlaybackTests(PlaybackFixture, TestCase):
         self.assertEqual(self.path.read_bytes(), raw)
         self.assertEqual(self.client.post(self.url, {}).status_code, 405)
         self.assertEqual(self.client.get('/api/organize/pipeline/999999/audio/').status_code, 404)
+
+    def test_archive_identity_links_retagged_mac_audio_and_refuses_duplicates(self):
+        from library.snapshot_import import import_snapshot
+        from library.test_snapshot_import import fixture
+
+        archived = PipelineItem.objects.create(original_filename='old.aiff', stage='published',
+            artist='Old artist', title='Old title', archive_state='archived',
+            archived_at=timezone.now(), music_persistent_id='_REVIEW_LANDED', sha256='a' * 64)
+        payload = fixture()
+        payload['tracks'][0].update(artist='Retagged artist', title='Retagged title',
+                                    archive_item_id=archived.pk)
+        import_snapshot(payload, apply=True)
+        track = LibraryTrack.objects.get(source='mac_snapshot')
+        detail = f'/api/organize/pipeline/{archived.pk}/'
+        result = self.client.get(detail).json()
+        self.assertEqual(result['artist'], 'Old artist')
+        self.assertIsNone(result['playback_url'])
+        self.assertEqual(result['archive_library_match']['matches'][0]['playback_id'], track.pk)
+        self.assertIsNone(self.client.get(f'/api/organize/pipeline/{self.item.pk}/')
+                          .json()['archive_library_match'])
+        duplicate = LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=archived.pk,
+            file_path=track.file_path[:-64] + 'f' * 64, artist='Other copy', title='Other tags')
+        result = self.client.get(detail).json()['archive_library_match']
+        self.assertEqual(result['status'], 'multiple_matches')
+        self.assertTrue(all('playback_id' not in match for match in result['matches']))
+        LibraryTrack.objects.filter(pk__in=(track.pk, duplicate.pk)).update(missing=True)
+        self.assertIsNone(self.client.get(detail).json()['archive_library_match'])
 
     def unavailable(self):
         listing = self.client.get(f'/api/organize/pipeline/{self.item.pk}/').json()

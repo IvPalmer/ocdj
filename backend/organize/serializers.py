@@ -5,6 +5,17 @@ from .models import PipelineItem
 class PipelineItemSerializer(serializers.ModelSerializer):
     playback_url = serializers.SerializerMethodField()
     playback_unavailable = serializers.SerializerMethodField()
+    archive_library_match = serializers.SerializerMethodField()
+
+    def get_archive_library_match(self, item):
+        if item.archive_state != 'archived':
+            return None
+        from library.matching import match_result
+        from library.models import LibraryTrack
+
+        rows = list(LibraryTrack.objects.filter(source='mac_snapshot', missing=False, archive_item_id=item.pk)
+                    .order_by('pk').values('id', 'format', 'bitrate', 'sample_rate', 'source', 'file_path')[:4])
+        return match_result(rows) if rows else None
 
     def _playback(self, item):
         from django.urls import reverse
@@ -31,7 +42,7 @@ class PipelineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PipelineItem
         fields = [
-            'id', 'download', 'wanted_item', 'playback_url', 'playback_unavailable',
+            'id', 'download', 'wanted_item', 'playback_url', 'playback_unavailable', 'archive_library_match',
             'original_filename', 'current_path', 'final_filename',
             'artist', 'title', 'album', 'label', 'catalog_number',
             'genre', 'year', 'track_number', 'has_artwork',

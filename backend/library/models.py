@@ -36,6 +36,7 @@ class LibraryTrack(models.Model):
     sample_rate = models.IntegerField(null=True, blank=True, help_text='Sample rate in Hz')
     duration_seconds = models.FloatField(null=True, blank=True)
     file_size_bytes = models.BigIntegerField(default=0)
+    archive_item_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
     has_artwork = models.BooleanField(default=False)
 
     # Tracking

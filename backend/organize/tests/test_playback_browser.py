@@ -2,12 +2,13 @@
 import json
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from unittest import skipUnless
 
 from django.test import LiveServerTestCase
 from django.utils import timezone
 
+from library.models import LibraryTrack
 from organize.models import PipelineItem
 from .test_playback import PlaybackFixture
 
@@ -21,9 +22,12 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
             current_path=str(self.path), artist='Fixture artist', title='Second tone', stage='ready')
         PipelineItem.objects.create(original_filename='missing.wav',
             current_path=str(self.downloads / 'missing.wav'), title='Missing tone')
-        PipelineItem.objects.create(original_filename='archived.aiff', artist='Fixture artist',
+        archived_item = PipelineItem.objects.create(original_filename='archived.aiff', artist='Archived credit',
             title='Archived tone', stage='published', archive_state='archived',
             archived_at=timezone.now(), music_persistent_id='fixture', sha256='a' * 64)
+        LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=archived_item.pk,
+            artist='Retagged artist', title='Retagged title', format='aiff',
+            file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'b' * 64)
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
         with sync_playwright() as pw:
@@ -47,7 +51,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                         elif path.startswith('/api/'):
                             # An exact indexed match must not replace this row's bytes.
                             data = dict(results=[], count=0)
-                            if path == '/api/library/match/':
+                            if path == '/api/library/match/' and parse_qs(urlparse(request.request.url).query).get('artist') == ['Fixture artist']:
                                 data = dict(status='matched', matches=[dict(playback_id=999, format='mp3')])
                             request.fulfill(content_type='application/json', body=json.dumps(data))
                         else:
@@ -85,7 +89,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     self.assertEqual(result, [206, f'bytes 100-199/{self.path.stat().st_size}', 100])
                     page.get_by_role('link', name='Organize', exact=True).click()
                     page.get_by_role('button', name='Show archived (1)', exact=True).click()
-                    archived = page.get_by_role('button', name='Queue Fixture artist — Archived tone', exact=True)
+                    archived = page.get_by_role('button', name='Queue Archived credit — Archived tone', exact=True)
                     expect(archived).to_be_enabled()
                     archived.click()
                     expect(player.get_by_text('Queue (3)', exact=True)).to_be_visible()

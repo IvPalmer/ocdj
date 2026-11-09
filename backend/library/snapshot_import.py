@@ -29,7 +29,7 @@ def import_snapshot(payload, *, apply=False):
             result['updated' if identity in current else 'created'] += 1
             if apply:
                 defaults = {key: value for key, value in row.items() if key != 'id'}
-                defaults.update(source=SOURCE, missing=False)
+                defaults.update(source=SOURCE, missing=False, archive_item_id=row.get('archive_item_id'))
                 LibraryTrack.objects.update_or_create(file_path=identity, defaults=defaults)
         omitted = existing.filter(missing=False).exclude(file_path__in=seen)
         result['missing'] = omitted.count()

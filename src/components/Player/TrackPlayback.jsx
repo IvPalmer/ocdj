@@ -51,6 +51,6 @@ export default function TrackPlayback({ track, unavailable = 'No browser-playabl
       <button type="button" className="btn btn-xs" aria-label={`Play ${label}`} onClick={() => player.play(playable)}>Play</button>
       <button type="button" className="btn btn-xs" aria-label={`Queue ${label}`} onClick={() => player.enqueue(playable)}>Queue</button>
     </span>}
-    <LibraryMatch artist={track.artist} title={track.title} />
+    <LibraryMatch artist={track.artist} title={track.title} archiveMatch={track.archiveLibraryMatch} />
   </span>
 }

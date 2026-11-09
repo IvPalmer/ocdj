@@ -52,10 +52,18 @@ def read_metadata(handle, fmt):
 
     bitrate = positive(getattr(raw.info, 'bitrate', None))
     duration = getattr(raw.info, 'length', None)
-    return dict(artist=tag('artist', 'TPE1'), title=tag('title', 'TIT2'), format=fmt,
-                bitrate=positive(bitrate // 1000) if bitrate else None,
-                sample_rate=positive(getattr(raw.info, 'sample_rate', None)),
-                duration_seconds=duration if isinstance(duration, (int, float)) and math.isfinite(duration) and duration >= 0 else None)
+    row = dict(artist=tag('artist', 'TPE1'), title=tag('title', 'TIT2'), format=fmt,
+               bitrate=positive(bitrate // 1000) if bitrate else None,
+               sample_rate=positive(getattr(raw.info, 'sample_rate', None)),
+               duration_seconds=duration if isinstance(duration, (int, float)) and math.isfinite(duration) and duration >= 0 else None)
+    # Organize's publisher embeds a durable item ID in ID3 grouping. Export
+    # only that marker, never arbitrary grouping text or local filenames.
+    grouping = getattr(raw_tags.get('GRP1'), 'text', [])
+    if len(grouping) == 1:
+        marker = re.fullmatch(r'ocdj:([1-9][0-9]{0,18})', grouping[0])
+        if marker and int(marker[1]) <= 2**63 - 1:
+            row['archive_item_id'] = int(marker[1])
+    return row
 
 
 def read_audio(handle, fmt, size):
@@ -157,8 +165,12 @@ def scan(root, collection_id, key, *, local_paths=None):
 
 
 def validate_row(row):
-    if not isinstance(row, dict) or set(row) != ROW_FIELDS:
+    if not isinstance(row, dict) or set(row) not in (ROW_FIELDS, ROW_FIELDS | {'archive_item_id'}):
         raise SnapshotError('Invalid track fields.')
+    if 'archive_item_id' in row:
+        archive_id = row['archive_item_id']
+        if type(archive_id) is not int or not 0 < archive_id <= 2**63 - 1:
+            raise SnapshotError('Invalid archive item ID.')
     if not isinstance(row['id'], str) or not re.fullmatch('[0-9a-f]{64}', row['id']):
         raise SnapshotError('Invalid opaque track ID.')
     for field in ('artist', 'title'):

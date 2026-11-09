@@ -635,6 +635,7 @@ function OrganizePanel() {
                   <TrackPlayback sourceOnly track={{
                     artist: item.artist, title: item.title || currentName,
                     wantedId: item.wanted_item, source: directSource(item),
+                    archiveLibraryMatch: item.archive_library_match,
                     description: 'Organize · server file',
                   }} unavailable={item.playback_unavailable || 'File unavailable on server'} />
                   <button
