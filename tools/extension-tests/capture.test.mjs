@@ -93,10 +93,32 @@ for (const root of roots) {
         await pause();
       }
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
-      click(f.w, '.ocdj-play-btn'); click(f.w, '.ocdj-dig-btn');
+      click(f.w, '.ocdj-play-btn'); click(f.w, '[title="Add the whole Bandcamp release"]');
       assert.match(f.messages[0].data.embedUrl, /album=123/);
       assert.equal(f.messages[1].data.release_name, 'Release');
       assert.equal(f.messages[1].data.source_site, 'bandcamp');
+    } finally { await f.close(); }
+  });
+  test(`${root}: Bandcamp header captures the current track and explicit release fields`, async () => {
+    const data = { artist: 'Fixture Artist', current: { title: 'Fixture Artist - A Release', type: 'album', id: 42 },
+      trackinfo: [{ title: 'First', track_num: 1, title_link: '/track/first' },
+                  { title: 'Second', track_num: 2, title_link: '/track/second' }] };
+    const f = fixture(root, 'bandcamp', 'https://label.bandcamp.com/album/release',
+      `<section><div class="inline_player"><a class="title_link" href="#"> </a></div></section>
+       <div data-tralbum='${JSON.stringify(data)}'></div>
+       <ul><li class="buyItem package"><div class="bd">Catalog: [FD-003]<br>Release name: A Release<br>Label: Fixture Label<br>Country: Croatia</div></li></ul>`);
+    try {
+      const player = f.w.document.querySelector('.title_link');
+      player.href = '/track/second'; player.textContent = 'Second';
+      click(f.w, '.ocdj-dig-btn');
+      const payload = f.messages.at(-1).data;
+      assert.equal(payload.title, 'Second');
+      assert.equal(payload.artist, 'Fixture Artist');
+      assert.equal(payload.source_url, 'https://label.bandcamp.com/track/second');
+      assert.equal(payload.release_name, 'A Release');
+      assert.equal(payload.label, 'Fixture Label');
+      assert.equal(payload.catalog_number, 'FD-003');
+      assert.match(payload.notes, /Track number: 2/);
     } finally { await f.close(); }
   });
   test(`${root}: Beatport waits for matching metadata, preserves mix and source`, async () => {

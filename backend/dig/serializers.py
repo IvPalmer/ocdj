@@ -2,11 +2,13 @@ from rest_framework import serializers
 
 
 class DigAddSerializer(serializers.Serializer):
-    artist = serializers.CharField(required=False, allow_blank=True, default='')
-    title = serializers.CharField(required=False, allow_blank=True, default='')
-    release_name = serializers.CharField(required=False, allow_blank=True, default='')
-    catalog_number = serializers.CharField(required=False, allow_blank=True, default='')
-    label = serializers.CharField(required=False, allow_blank=True, default='')
+    artist = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
+    title = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
+    release_name = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
+    catalog_number = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+    label = serializers.CharField(max_length=255, required=False, allow_blank=True, default='')
+    isrc = serializers.RegexField(r'^[A-Za-z]{2}[A-Za-z0-9]{3}[0-9]{7}$',
+                                  required=False, allow_blank=True, default='')
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     source_url = serializers.CharField(required=False, allow_blank=True, default='')
     source_site = serializers.ChoiceField(
@@ -15,8 +17,8 @@ class DigAddSerializer(serializers.Serializer):
     )
 
     def validate(self, data):
-        if not data.get('artist') and not data.get('title'):
-            raise serializers.ValidationError('At least artist or title is required.')
+        if not any(data.get(field) for field in ('artist', 'title', 'release_name')):
+            raise serializers.ValidationError('An artist, track title, or release is required.')
         return data
 
 

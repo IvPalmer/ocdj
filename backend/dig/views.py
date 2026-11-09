@@ -41,10 +41,14 @@ def add_item(request):
     ser.is_valid(raise_exception=True)
     data = ser.validated_data
 
-    # Check for duplicates
-    tracks = [{'artist': data.get('artist', ''), 'title': data.get('title', '')}]
-    check_duplicates(tracks)
-    track = tracks[0]
+    artist, title, release = (data.get(field, '') for field in ('artist', 'title', 'release_name'))
+    track = {'artist': artist, 'title': title}
+    if title:
+        check_duplicates([track])
+    elif release:
+        duplicate = WantedItem.objects.filter(artist__iexact=artist, title='', release_name__iexact=release).first()
+        if duplicate:
+            track.update(is_duplicate=True, duplicate_of_id=duplicate.pk, fuzzy_score=100)
 
     if track.get('is_duplicate'):
         duplicate_item = WantedItem.objects.filter(id=track['duplicate_of_id']).first()
@@ -68,6 +72,7 @@ def add_item(request):
         title=data.get('title', ''),
         release_name=data.get('release_name', ''),
         catalog_number=data.get('catalog_number', ''),
+        cleanup_isrc=data.get('isrc', '').upper(),
         label=data.get('label', ''),
         notes='\n'.join(notes_parts),
         source=source,

@@ -34,7 +34,9 @@
 
     // Beatport's document title includes the primary artists and mix name;
     // global artist links also include charts/recommendations, so don't scrape them.
-    const raw = document.title.replace(/\s*\|.*$/, '').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+    const titleWithLabel = document.title.replace(/\s*\|.*$/, '').trim();
+    const label = titleWithLabel.match(/\s+\[([^\]]+)\]$/)?.[1] || '';
+    const raw = label ? titleWithLabel.slice(0, titleWithLabel.lastIndexOf(' [')).trim() : titleWithLabel;
     const split = raw.indexOf(' - ');
     const artist = split > 0 ? raw.slice(0, split).trim() : '';
     const title = split > 0 ? raw.slice(split + 3).trim() : '';
@@ -59,11 +61,16 @@
     });
     const wantlist = OCDJ.createDigButton({
       size: 'medium',
-      onClick: () => OCDJ.sendToBackground('dig:add', {
-        artist, title: match[1] === 'track' ? title : '',
-        release_name: match[1] === 'release' ? title : '',
-        source_site: 'beatport', source_url,
-      }),
+      onClick: () => {
+        if (window.location.origin + window.location.pathname !== source_url) {
+          return { error: 'Beatport source changed — wait for the current page' };
+        }
+        return OCDJ.sendToBackground('dig:add', {
+          artist, title: match[1] === 'track' ? title : '',
+          release_name: match[1] === 'release' ? title : '', label,
+          source_site: 'beatport', source_url,
+        });
+      },
     });
     group = OCDJ.createButtonGroup(queue, wantlist);
     heading.parentElement.appendChild(group);

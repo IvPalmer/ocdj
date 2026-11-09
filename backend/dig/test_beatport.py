@@ -42,6 +42,23 @@ class BeatportCaptureTests(APITestCase):
         self.assertEqual(item.release_name, 'Fixture EP')
         self.assertEqual(item.notes, payload['source_url'])
 
+    def test_bandcamp_metadata_is_stored_separately_from_track_identity(self):
+        payload = dict(self.payload, source_site='bandcamp', title='Fixture Recording',
+                       source_url='https://label.bandcamp.com/track/fixture',
+                       release_name='Fixture EP', label='Fixture Label', catalog_number='FD-003',
+                       isrc='GBABC2101234', notes='Track number: 2')
+        self.assertEqual(self.client.post('/add/', payload, format='json').status_code, 201)
+        item = WantedItem.objects.get()
+        self.assertEqual((item.title, item.release_name, item.label, item.catalog_number, item.cleanup_isrc),
+                         ('Fixture Recording', 'Fixture EP', 'Fixture Label', 'FD-003', 'GBABC2101234'))
+        self.assertEqual(item.notes, 'Track number: 2\n' + payload['source_url'])
+
+    def test_release_only_dedup_does_not_swallow_a_track_on_that_release(self):
+        payload = dict(self.payload, source_site='bandcamp', artist='', title='', release_name='Fixture EP')
+        self.assertEqual(self.client.post('/add/', payload, format='json').status_code, 201)
+        self.assertEqual(self.client.post('/add/', payload, format='json').status_code, 200)
+        self.assertEqual(self.client.post('/add/', dict(payload, title='A track'), format='json').status_code, 201)
+
     def test_existing_track_dedup_is_retained_across_sources(self):
         existing = WantedItem.objects.create(artist=self.payload['artist'], title=self.payload['title'])
         response = self.client.post('/add/', self.payload, format='json')
