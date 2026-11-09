@@ -253,6 +253,17 @@ for (const root of roots) {
       await pause();
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
       assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 0);
+      assert.ok(f.w.document.body.querySelector(':scope > .ocdj-sc-framed-controls'));
+      const duplicate = f.w.document.createElement('iframe');
+      duplicate.src = frame.src;
+      f.w.document.body.append(duplicate);
+      duplicate.contentDocument.open();
+      duplicate.contentDocument.write('<html><body><section><h1>First</h1><a href="/artist">Artist</a></section></body></html>');
+      duplicate.contentDocument.close();
+      duplicate.dispatchEvent(new f.w.Event('load'));
+      await pause();
+      assert.equal(f.w.document.querySelectorAll('.ocdj-sc-framed-controls').length, 1);
+      duplicate.remove();
       click(f.w, '.ocdj-play-btn'); click(f.w, '.ocdj-dig-btn');
       assert.equal(f.messages[0].data.platform, 'soundcloud');
       assert.equal(f.messages[0].data.source_url, 'https://soundcloud.com/artist/song');
