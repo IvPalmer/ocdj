@@ -23,10 +23,15 @@ native API embeds and playlist visibility/deduplication behavior are preserved.
 
 Versions: extension manifest `1.1.1`; wrapper and appex `1.0.1` (build `2`).
 Use the existing [signing recipe](EDGE-AND-LOCAL.md), with build-only
-`MACOSX_DEPLOYMENT_TARGET=26.2` and
-`REGISTER_APP_WITH_LAUNCH_SERVICES=NO`. Keep derived data and notarized artifacts
+`MACOSX_DEPLOYMENT_TARGET=26.2`. Keep derived data and notarized artifacts
 outside the repository in a private directory. No installation, launch,
-registration changes, merging, or deployment are part of this slice.
+Safari setting/grant changes, merging, or deployment are part of this slice.
+
+The build at `0fee201eb2ad5ddf2305d34040629c01efc2a463` succeeded, but Xcode
+27.2 ignored the attempted `REGISTER_APP_WITH_LAUNCH_SERVICES=NO` override
+and automatically registered the isolated build with LaunchServices. No manual
+registration/removal was performed. Parent must verify Safari-selected bundle
+identity before live QA. This documentation follow-up changes no built source.
 
 ## Offline proof
 
