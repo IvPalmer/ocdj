@@ -153,6 +153,20 @@ class PipelineServiceTestCase(TestCase):
         self.assertEqual(download.local_path, path)
         self.assertEqual(PipelineItem.objects.count(), 1)
 
+    def test_scan_reserves_active_transfer_and_links_when_slskd_succeeds(self):
+        path = self.write_file('01_downloaded', 'Release', 'audio.flac')
+        dl = Download.objects.create(username='fixture', filename=r'Share\Release\audio.flac',
+                                     status='queued', slskd_id='fixture-transfer')
+        file = {'id': dl.slskd_id, 'filename': dl.filename, 'size': 5, 'state': 'InProgress'}
+        with patch('soulseek.services.SlskdClient') as client:
+            client.return_value.get_downloads.return_value = [
+                {'username': dl.username, 'directories': [{'files': [file]}]}
+            ]
+            self.assertEqual(scan_completed_downloads()['created'], 0)
+            file['state'] = 'Completed, Succeeded'
+            self.assertEqual(scan_completed_downloads()['created_from_downloads'], 1)
+        self.assertEqual(PipelineItem.objects.get(download=dl).current_path, path)
+
     # process_pipeline_item's finally block closes DB connections — correct for its
     # real caller (a background thread after the HTTP response already returned),
     # but it kills the connection Django's TestCase reuses across the class, so it
