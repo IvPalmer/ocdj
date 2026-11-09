@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Private Mac connector: bounded run or explicit login-session residency."""
 import argparse
+from contextlib import contextmanager, ExitStack
 import fcntl
 import ipaddress
 import json
@@ -16,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 
+LOGIN_LOCK = Path.home() / '.ocdj-instagram-resident.lock'
 COOKIE_DB = Path.home() / 'Library/Application Support/Google/Chrome/Profile 1/Cookies'
 SSH = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
        '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
@@ -145,6 +147,7 @@ def stop(process):
 
 def supervise(tunnel, child, deadline, reconnect=None):
     reconnects = []
+    observed = time.monotonic() + 60
     while True:
         code = child.poll()
         if code is not None:
@@ -161,6 +164,9 @@ def supervise(tunnel, child, deadline, reconnect=None):
                 raise RunError('tunnel-unstable; explicit-restart-required')
             reconnects.append(now)
             reconnect()  # Transport only; never relaunch the worker.
+        if time.monotonic() >= observed:
+            print('connector-process-alive; session/sync health requires backend heartbeat', flush=True)
+            observed = time.monotonic() + 60
         if time.monotonic() >= deadline:
             print('stopped: deadline-expired; no restart', flush=True)
             return 124
@@ -178,6 +184,26 @@ def preflight():
     print('Profile-1-header-readable; Keychain/session not tested', flush=True)
 
 
+@contextmanager
+def singleton():
+    # Stable across TMPDIR/GUI/launchd contexts. Also hold the legacy lock so a
+    # still-running pre-upgrade foreground wrapper in this context wins.
+    legacy = Path(tempfile.gettempdir()) / f'ocdj-instagram-foreground-{os.getuid()}.lock'
+    with ExitStack() as stack:
+        for path in (LOGIN_LOCK, legacy):
+            fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+            lock = stack.enter_context(os.fdopen(fd, 'r+'))
+            info = os.fstat(lock.fileno())
+            if (info.st_uid != os.getuid() or not stat.S_ISREG(info.st_mode)
+                    or info.st_mode & 0o077 or info.st_nlink != 1):
+                raise RunError('unsafe-local-lock')
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RunError('another-foreground-wrapper-is-running') from None
+        yield
+
+
 def run(duration, resident=False, allow_keychain_prompt=False):
     if allow_keychain_prompt and not resident:
         raise RunError('keychain-prompt-requires-resident')
@@ -186,16 +212,7 @@ def run(duration, resident=False, allow_keychain_prompt=False):
     if not token:
         raise RunError('existing-DRAIN_TOKEN-required')
     preflight()
-    lock_path = Path(tempfile.gettempdir()) / f'ocdj-instagram-foreground-{os.getuid()}.lock'
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, 'w') as lock:
-        info = os.fstat(lock.fileno())
-        if info.st_uid != os.getuid() or not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
-            raise RunError('unsafe-local-lock')
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RunError('another-foreground-wrapper-is-running') from None
+    with singleton():
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]

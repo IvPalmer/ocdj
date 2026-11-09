@@ -262,6 +262,7 @@ class SupervisorTests(unittest.TestCase):
             with patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic'}), \
                  patch.object(fg, 'COOKIE_DB', cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
+                 patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
                  patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
@@ -306,6 +307,7 @@ class SupervisorTests(unittest.TestCase):
             with patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic'}), \
                  patch.object(fg, 'COOKIE_DB', cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
+                 patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
                  patch.object(fg, 'backend_address', side_effect=['172.22.0.5', OSError(), '172.22.0.6']), \
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe') as probe, \
                  patch.object(fg.time, 'sleep') as sleep, patch.object(fg, 'stop'), \
@@ -327,6 +329,7 @@ class SupervisorTests(unittest.TestCase):
             with patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic'}), \
                  patch.object(fg, 'COOKIE_DB', cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
+                 patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
                  patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), \
                  patch.object(fg, 'probe', side_effect=fg.RunError('private-auth-validation-failed')), \

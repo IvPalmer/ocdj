@@ -56,7 +56,8 @@ The raw connector's default work window is zero (sync and up to ten queued
 jobs). Its `--work-seconds` bounds idle waiting only and an active job may outlive
 it; use the wrapper for a hard deadline and cleanup. Do not run concurrent raw
 connectors alongside the wrapper. The wrapper prevents duplicate wrapper runs
-in the same user's temporary directory, but cannot detect independent raw runs.
+with a stable per-user home lock plus the legacy context lock, but cannot detect
+independent raw runs.
 
 `yt-dlp` reads Chrome cookies on Mac; only Instagram domains enter the
 Instagram requests session. Cookies and CDN URLs remain in memory. The CDN
@@ -197,3 +198,10 @@ See [the recognition contract](../../docs/instagram-recognition-contract.md) for
 source evidence, #16 integration gates, live verification blockers and remaining
 #13 library/player work. Neither this README nor a successful fixture run grants
 release authorization.
+
+## Optional login restoration
+
+The separate [per-user login installer](../mac_login/README.md) can stage both
+connectors for the next GUI login without touching active workers. Instagram
+login access remains an explicit release gate; foreground access is not proof
+of launchd TCC or no-UI Keychain access.
