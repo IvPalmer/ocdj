@@ -2,6 +2,8 @@
 """Explicit, bounded Mac run. Cookies and upstream URLs never leave this process."""
 import argparse
 import asyncio
+import base64
+from io import BytesIO
 import ipaddress
 import json
 import os
@@ -19,6 +21,11 @@ COLLECTION = '18117783274346248'
 MAX_BYTES = 64 * 1024 * 1024
 IG = 'https://www.instagram.com'
 STOP_STATUSES = frozenset(['session-expired', 'restricted', 'rate-limited'])
+IMAGE_BYTES = 2 * 1024 * 1024
+IMAGE_PIXELS = 4_000_000
+JPEG_BYTES = 128 * 1024
+IMAGE_SECONDS = 10
+THUMBNAIL_SECONDS = 300
 
 
 class ConnectorError(Exception):
@@ -37,10 +44,26 @@ def cdn_url(url):
     return url
 
 
-def parse_posts(items):
+def poster_url(post):
+    # Video image_versions2 are posters too. Never use video_versions here.
+    for source in [post] + (post.get('carousel_media') or []):
+        candidates = [v for v in (source.get('image_versions2') or {}).get('candidates') or []
+                      if isinstance(v, dict) and isinstance(v.get('width'), int) and isinstance(v.get('height'), int)
+                      and v['width'] > 0 and v['height'] > 0
+                      and v['width'] * v['height'] <= IMAGE_PIXELS
+                      and isinstance(v.get('url'), str)]
+        if candidates:
+            return min(candidates, key=lambda v: v['width'] * v['height'])['url']
+
+
+def parse_posts(items, thumbnail_urls=None):
     posts, urls = [], {}
     for wrapper in items:
         p = wrapper.get('media', wrapper)
+        if thumbnail_urls is not None:
+            poster = poster_url(p)
+            if poster:
+                thumbnail_urls[str(p['pk'])] = poster
         children = p.get('carousel_media') or [p]
         if len(children) > 20:
             raise ConnectorError('restricted')
@@ -90,7 +113,7 @@ def instagram_json(session, path, params=None):
     return data
 
 
-def read_collection(session):
+def read_collection(session, thumbnail_urls=None):
     """Commit only a complete snapshot, deduplicated in saved response order."""
     items, seen, cursors, cursor = [], set(), set(), None
     for _ in range(120):
@@ -103,7 +126,7 @@ def read_collection(session):
                 seen.add(ident); items.append(item)
         if len(items) > 2000: raise ConnectorError('collection exceeds bound')
         if not data.get('more_available'):
-            return parse_posts(items)
+            return parse_posts(items, thumbnail_urls=thumbnail_urls)
         cursor = data.get('next_max_id')
         if not cursor or cursor in cursors: break
         cursors.add(cursor)
@@ -125,20 +148,124 @@ def read_comments(session, post_id):
             for c in data.get('comments', [])[:20] if c.get('pk')]
 
 
-def download(url, dest):
+def download(url, dest, *, image_only=False):
     # Deliberately use a separate, cookie-free session for CDN bytes.
-    with requests.get(cdn_url(url), stream=True, timeout=(10, 45), allow_redirects=False) as r:
-        if r.status_code != 200 or r.headers.get('Content-Type', '').split(';')[0] not in ['video/mp4', 'image/jpeg', 'image/png']:
+    deadline = time.monotonic() + (IMAGE_SECONDS if image_only else 90)
+    limit = IMAGE_BYTES if image_only else MAX_BYTES
+    with requests.get(cdn_url(url), stream=True, timeout=(3, 3) if image_only else (10, 45),
+                      headers={'Accept-Encoding': 'identity'} if image_only else None,
+                      allow_redirects=False) as r:
+        if image_only and r.status_code in (301, 302, 303, 307, 308, 401, 403, 429):
+            raise ConnectorError({401: 'session-expired', 429: 'rate-limited'}.get(r.status_code, 'restricted'))
+        mime = r.headers.get('Content-Type', '').split(';')[0]
+        allowed = ['image/jpeg', 'image/png'] if image_only else ['video/mp4', 'image/jpeg', 'image/png']
+        if r.status_code != 200 or mime not in allowed:
+            raise ConnectorError('error')
+        if image_only and (r.headers.get('Content-Encoding', 'identity') != 'identity'
+                           or int(r.headers.get('Content-Length', 0)) > limit):
             raise ConnectorError('error')
         total = 0
-        deadline = time.monotonic() + 90
+        # read1 returns available bytes after one read, so a trickling peer
+        # cannot keep an iter_content chunk filling beyond the total deadline.
+        if image_only:
+            read1 = getattr(r.raw, 'read1', None)
+            # Older urllib3 lacks read1: single-byte chunks still check the
+            # deadline on trickling responses without adding a dependency.
+            chunks = iter(lambda: read1(65536), b'') if read1 else r.iter_content(1)
+        else:
+            chunks = r.iter_content(65536)
         with open(dest, 'wb') as out:
-            for chunk in r.iter_content(65536):
+            for chunk in chunks:
                 if time.monotonic() > deadline: raise ConnectorError('error')
                 total += len(chunk)
-                if total > MAX_BYTES: raise ConnectorError('error')
+                if total > limit: raise ConnectorError('error')
                 out.write(chunk)
+        if time.monotonic() > deadline: raise ConnectorError('error')
         return r.headers['Content-Type'].split(';')[0]
+
+
+def thumbnail_jpeg(raw):
+    from PIL import Image
+    if len(raw) > IMAGE_BYTES:
+        raise ConnectorError('error')
+    try:
+        with Image.open(BytesIO(raw), formats=['JPEG', 'PNG']) as image:
+            if image.width * image.height > IMAGE_PIXELS or getattr(image, 'n_frames', 1) != 1:
+                raise ConnectorError('error')
+            image.thumbnail((320, 320))
+            # New pixels discard EXIF, comments, ICC profiles and other metadata.
+            clean = Image.new('RGB', image.size)
+            clean.paste(image.convert('RGB'))
+            out = BytesIO()
+            clean.save(out, format='JPEG', quality=75)
+            jpeg = out.getvalue()
+            if len(jpeg) > JPEG_BYTES: raise ConnectorError('error')
+            return jpeg
+    except Exception:
+        raise ConnectorError('error') from None
+
+
+def capture_thumbnail(url):
+    deadline = time.monotonic() + IMAGE_SECONDS
+    try:
+        with tempfile.TemporaryDirectory(prefix='ocdj-instagram-poster-') as directory:
+            source = Path(directory) / 'image'
+            download(url, source, image_only=True)
+            if time.monotonic() > deadline: raise ConnectorError('error')
+            jpeg = thumbnail_jpeg(source.read_bytes())
+        if time.monotonic() > deadline: raise ConnectorError('error')
+        return jpeg
+    except ConnectorError:
+        raise
+    except Exception:
+        # Includes low-level streaming errors, without disclosing CDN URLs.
+        raise ConnectorError('error') from None
+
+
+class ThumbnailCapture:
+    """One image per idle job poll, one attempt per post in this explicit run."""
+    def __init__(self, sync, urls):
+        self.token = sync.get('sync_token')
+        self.pending = []
+        self.queue = []
+        if isinstance(self.token, str) and 0 < len(self.token) <= 512:
+            seen = set()
+            for post in sync.get('thumbnail_posts', []):
+                ident = post.get('post_id')
+                if (isinstance(ident, str) and ident.isascii() and ident.isdigit() and len(ident) <= 40
+                        and post.get('available') is False and ident in urls and ident not in seen):
+                    self.queue.append((ident, urls[ident]))
+                    seen.add(ident)
+        self.queue = iter(self.queue)
+        self.deadline = time.monotonic() + THUMBNAIL_SECONDS
+        self.stopped = False
+
+    def flush(self, api):
+        if self.pending:
+            result = api.post('thumbnails/', {'sync_token': self.token, 'thumbnails': self.pending}, timeout=10)
+            self.pending = []
+            # 409 fences this entire run. Retry/inactive results are left for
+            # a later explicit sync, as are ambiguous upload failures.
+            if result is None:
+                self.stopped = True
+
+    def step(self, api):
+        if self.stopped: return False
+        item = next(self.queue, None) if time.monotonic() < self.deadline else None
+        if item is None:
+            self.flush(api)
+            self.stopped = True
+            return False
+        ident, url = item
+        try:
+            jpeg = capture_thumbnail(url)
+        except ConnectorError as exc:
+            if str(exc) in STOP_STATUSES: raise
+        else:
+            self.pending.append({'post_id': ident, 'jpeg': base64.b64encode(jpeg).decode('ascii')})
+        if len(self.pending) == 16:
+            self.flush(api)
+        return not self.stopped
 
 
 class API:
@@ -152,10 +279,10 @@ class API:
         self.session = requests.Session()
         self.session.headers['Authorization'] = 'Bearer '+token
 
-    def post(self, endpoint, data=None, files=None, lease=None):
+    def post(self, endpoint, data=None, files=None, lease=None, timeout=90):
         headers = {'X-Instagram-Lease': lease} if lease else None
         r = self.session.post(self.base+endpoint, json=data if not files else None,
-                              files=files, headers=headers, timeout=90, allow_redirects=False)
+                              files=files, headers=headers, timeout=timeout, allow_redirects=False)
         if r.status_code == 204: return None
         if r.status_code == 409: return None  # expired result; server owns fencing
         if r.status_code != 200: raise ConnectorError('API request failed')
@@ -181,12 +308,15 @@ def run(args):
     api = API(args.api, token)
     ffmpeg = ffmpeg_path() if args.fixture else None
     try:
+        thumbnail_urls = {}
         if args.fixture:
             data = json.loads(Path(args.fixture).read_text()); urls = {}; session = None
         else:
             session = instagram_session(args.profile)
-            data, urls = read_collection(session)
-        mapping = api.post('sync/', data)['media']
+            data, urls = read_collection(session, thumbnail_urls=thumbnail_urls)
+        synced = api.post('sync/', data)
+        mapping = synced['media']
+        thumbnails = ThumbnailCapture(synced, thumbnail_urls)
         api.post('heartbeat/', {'status': 'ready'})
         # One original at a time; TemporaryDirectory owns every local byte.
         with tempfile.TemporaryDirectory(prefix='ocdj-instagram-') as directory:
@@ -249,8 +379,10 @@ def run(args):
                     # or Instagram request. The outer handler publishes the state.
                     if stop_error is not None:
                         raise stop_error
+                elif thumbnails.step(api): continue
                 elif time.monotonic() >= deadline: break
                 else: time.sleep(3)
+            thumbnails.flush(api)
     except ConnectorError as e:
         status = str(e) if str(e) in STOP_STATUSES else 'error'
         api.post('heartbeat/', {'status': status})
