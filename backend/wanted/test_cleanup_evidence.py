@@ -78,6 +78,10 @@ class CleanupPolicyTests(unittest.TestCase):
 
 
 class CatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.sleep = patch('wanted.services.cleanup_evidence.time.sleep').start()
+        self.addCleanup(patch.stopall)
+
     def test_isrc_lookup_retains_track_credit_and_full_version(self):
         payload = {'isrc': CODE, 'recordings': [{'id': RECORDING, 'title': TITLE,
                    'artist-credit': [{'name': 'Fixture', 'joinphrase': ' & '}, {'name': 'Artist'}],
@@ -97,6 +101,13 @@ class CatalogTests(unittest.TestCase):
             result = collect_evidence(snapshot(isrc=''))
         self.assertEqual(get.call_args.args[1]['limit'], 3)
         self.assertEqual(evaluate(snapshot(isrc=''), result)['changes'], {})
+        self.sleep.assert_called_once_with(3.1)
+
+    def test_search_failure_also_observes_catalog_cooldown(self):
+        with patch('wanted.services.cleanup_evidence._get_json', side_effect=requests.Timeout):
+            with self.assertRaises(requests.Timeout):
+                collect_evidence(snapshot(isrc=''))
+        self.sleep.assert_called_once_with(3.1)
 
     def test_invalid_provider_shapes_are_rejected(self):
         for payload in [[], {}, {'isrc': 'USAAA2400002', 'recordings': []},
