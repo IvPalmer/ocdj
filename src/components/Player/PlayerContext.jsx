@@ -23,6 +23,8 @@ export function PlayerProvider({ children }) {
   const sequence = useRef(0)
   const add = (track, play) => {
     if (!track.source) return
+    if (track.source.kind === 'mac') track = { ...track,
+      description: 'Indexed Mac library · temporary MP3 playback copy · Mac connector required' }
     dispatch({ type: 'add', track: { ...track, queueId: ++sequence.current }, play })
   }
   return <PlayerContext.Provider value={{ ...state, dispatch,

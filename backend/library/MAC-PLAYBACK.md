@@ -11,6 +11,9 @@ quality/Finder indicator stays last and independently clickable, with no playbac
 buttons. An absent/ambiguous match keeps the existing preview/mix behavior.
 Selecting the Mac source in the persistent player POSTs the indexed
 numeric record ID to `tracks/<id>/playback/`. Queued future items do not stage.
+Library rows also expose their own opaque playback ID through serialization,
+so existing Play/Queue works for a specific indexed record even when its tags
+are empty or artist/title matches are ambiguous. This does not weaken matching.
 The server resolves the record to its exact collection UUID + opaque HMAC ID.
 No client path, URL, glob, search, or filename becomes a source.
 

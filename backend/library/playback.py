@@ -7,6 +7,7 @@ from django.db import transaction
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -133,6 +134,7 @@ def complete(request, pk):
     return Response({'status': 'ready'})
 
 
+@never_cache
 @api_view(['GET', 'HEAD'])
 def audio(request, pk):
     job = get_object_or_404(MacPlayback, pk=pk)

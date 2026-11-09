@@ -4,7 +4,9 @@ import { usePlayer } from './PlayerContext'
 // Page links and local filesystem paths are deliberately not media sources.
 export function directSource(track) {
   const url = track.preview_url || track.playback_url
-  return url && /^(https?:\/\/|\/api\/)/.test(url) ? { kind: 'audio', url } : null
+  if (url && /^(https?:\/\/|\/api\/)/.test(url)) return { kind: 'audio', url }
+  return Number.isSafeInteger(track.playback_id) && track.playback_id > 0
+    ? { kind: 'mac', libraryId: track.playback_id } : null
 }
 
 function mixSource(value) {

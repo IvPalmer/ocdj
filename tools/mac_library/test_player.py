@@ -30,7 +30,7 @@ with sync_playwright() as playwright:
             data = dict(results=[], count=0)
             if path == 'library/tracks/':
                 data = dict(count=1, results=[dict(id=1, artist='Fixture artist', title='Mac tone',
-                    source='mac_snapshot', format='wav', file_path='', filename='',
+                    source='mac_snapshot', format='wav', file_path='', filename='', playback_id=1,
                     duration_seconds=2, file_size_bytes=32044,
                     preview_url='/api/fixture.mp3' if library_preview[0] else '')])
             elif path == 'library/match/':

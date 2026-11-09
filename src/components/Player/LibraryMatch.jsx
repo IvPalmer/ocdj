@@ -6,6 +6,7 @@ const REVEAL_URL = /^ocdj-reveal:\/\/track\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 // Reuse the exact same cached match as the Finder indicator. No staging here.
 export function useIndexedPlayback(track) {
   const { data, isError } = useLibraryMatch(track.artist, track.title)
+  if (track.source?.kind === 'mac') return track
   const id = !isError && data?.status === 'matched' && data.matches?.length === 1
     ? data.matches[0].playback_id : null
   return Number.isSafeInteger(id) && id > 0 ? { ...track,

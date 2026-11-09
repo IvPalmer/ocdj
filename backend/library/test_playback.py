@@ -2,7 +2,6 @@
 from datetime import timedelta
 from io import BytesIO
 import os
-import subprocess
 import tempfile
 from unittest.mock import patch
 
@@ -15,6 +14,10 @@ from . import playback_cache as cache
 
 
 class MacPlaybackTests(TestCase):
+    # Twelve synthetic MPEG-1 Layer III frames: sufficient for server parsing
+    # and byte/Range contracts. Real codec decoding is covered by helper/browser
+    # fixtures, without making every consumer of library tests install FFmpeg.
+    mp3 = (b'\xff\xfb\x90\x00' + b'\0' * 413) * 12
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.settings = override_settings(MAC_PLAYBACK_CACHE_ROOT=self.temp.name)
@@ -31,12 +34,6 @@ class MacPlaybackTests(TestCase):
         self.complete_url = f'/api/library/playback/{self.track.pk}/complete/'
         self.auth = {'HTTP_AUTHORIZATION': 'Bearer fixture-token'}
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.mp3 = subprocess.check_output(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
-            'sine=frequency=440:duration=1', '-f', 'mp3', '-c:a', 'libmp3lame', 'pipe:1'])
-
     def claim(self):
         return self.client.post(self.claim_url, {'collection_id': self.collection}, **self.auth)
 
@@ -47,6 +44,12 @@ class MacPlaybackTests(TestCase):
             HTTP_X_PLAYBACK_LEASE=lease, **self.auth)
 
     def test_normal_entry_and_range_and_head(self):
+        # Library rows have a precise record ID even without tags or with duplicate
+        # artist/title matches. They need no guess through the match endpoint.
+        detail = self.client.get(f'/api/library/tracks/{self.track.pk}/').data
+        self.assertEqual(detail['playback_id'], self.track.pk)
+        self.assertEqual(detail['file_path'], '')
+        self.assertEqual(detail['filename'], '')
         self.assertEqual(self.client.get(self.url).data, {'status': 'offline'})
         self.assertEqual(self.stage().status_code, 200)
         ready = self.client.get(self.url)
@@ -89,7 +92,9 @@ class MacPlaybackTests(TestCase):
             HTTP_X_PLAYBACK_LEASE=lease, **self.auth).status_code, 409)
         self.assertEqual(self.stage().status_code, 200)
         MacPlayback.objects.update(cache_until=timezone.now()-timedelta(seconds=1))
-        self.assertEqual(self.client.get(self.audio_url).status_code, 410)
+        expired = self.client.get(self.audio_url)
+        self.assertEqual(expired.status_code, 410)
+        self.assertIn('no-store', expired['Cache-Control'])
         self.assertEqual(self.client.post(self.url, {}).data['status'], 'pending')
         self.assertEqual(self.claim().status_code, 200)
         self.track.missing = True; self.track.save()
