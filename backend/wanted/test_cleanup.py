@@ -322,6 +322,21 @@ class CleanupIntegrationTests(TestCase):
         self.assertEqual(job.tracklist[0]['title'], TITLE)
         self.assertEqual(receipt.snapshot['artist'], '')
 
+    def test_recognized_wrong_artist_and_prefixed_title_are_repaired(self):
+        original = {'artist': 'Wrong credit', 'title': f'Fixture Artist - {TITLE}'}
+        job = RecognizeJob.objects.create(
+            url='https://example.test/synthetic', status='completed', raw_results=raw(**original))
+        publish_recognition(job, [track(**original)])
+        receipt = MetadataCleanup.objects.get(job_id=job.pk)
+        process_cleanup(receipt.pk)
+        receipt.refresh_from_db()
+        job.refresh_from_db()
+        self.assertEqual(receipt.status, 'applied')
+        self.assertEqual(receipt.snapshot['artist'], original['artist'])
+        self.assertEqual(receipt.snapshot['title'], original['title'])
+        self.assertEqual(job.tracklist[0]['artist'], 'Fixture Artist')
+        self.assertEqual(job.tracklist[0]['title'], TITLE)
+
     def test_actual_pipeline_completion_captures_and_retains_raw_results(self):
         from contextlib import ExitStack
         from recognize.services.pipeline import _recognize_worker
