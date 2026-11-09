@@ -251,6 +251,13 @@ class CleanupIntegrationTests(TestCase):
         process_cleanup(self.receipt(item).pk)
         self.assertEqual(WantedItem.objects.get().artist, 'Fixture Artist')
         self.assertEqual(ingest([{'artist': 'Fixture Artist', 'title': TITLE}])['created_count'], 0)
+        self.assertEqual(ingest([{'artist': '', 'title': TITLE, 'isrc': CODE}])['created_count'], 0)
+        item.refresh_from_db()
+        item.title = 'Human corrected title'
+        item.save(update_fields=['title'])
+        self.assertEqual(ingest([{'artist': '', 'title': TITLE, 'isrc': CODE}])['created_count'], 0)
+        item.delete()
+        self.assertEqual(ingest([{'artist': '', 'title': TITLE, 'isrc': CODE}])['created_count'], 1)
 
     def test_external_hook_is_idempotent_and_proposal_only(self):
         event = uuid.uuid4()

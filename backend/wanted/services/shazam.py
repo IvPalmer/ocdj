@@ -30,7 +30,7 @@ import re
 
 from django.utils import timezone
 
-from wanted.models import WantedItem, WantedSource
+from wanted.models import MetadataCleanup, WantedItem, WantedSource
 from .dedup import _normalize
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,13 @@ def ingest(items) -> dict:
         (_normalize(a), _normalize(t))
         for a, t in WantedItem.objects.values_list('artist', 'title')
     }
+    # A retry can still contain the original incomplete tags after cleanup or
+    # a human correction changed the visible pair. Keep that original delivery
+    # deduplicated while its Wanted subject exists; deletion allows re-ingest.
+    originals = MetadataCleanup.objects.filter(
+        wanted_id__in=WantedItem.objects.filter(source=source).values('pk'),
+    ).values_list('snapshot', flat=True)
+    known.update((_normalize(s['artist']), _normalize(s['title'])) for s in originals)
 
     for raw in items:
         if not isinstance(raw, dict):
