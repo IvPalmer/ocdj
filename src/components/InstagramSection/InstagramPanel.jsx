@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import api from '../../api/client'
 import TrackPlayback from '../Player/TrackPlayback'
+import LibraryMatch from '../Player/LibraryMatch'
 import { usePlayer } from '../Player/PlayerContext'
 import './InstagramPanel.css'
 
@@ -44,6 +45,8 @@ function Editor({ media, act, busy }) {
           const label = `${candidate.artist} — ${candidate.title}`
           return <div className="ig-candidate" key={JSON.stringify([candidate.artist, candidate.title])}>
             <strong>{label}</strong>
+            {!(preview.data?.url && selectedCandidate?.artist === candidate.artist && selectedCandidate?.title === candidate.title) &&
+              <LibraryMatch artist={candidate.artist} title={candidate.title} />}
             <button type="button" disabled={preview.isPending} onClick={() => listen(candidate)}
               aria-label={`Listen to preview of ${label}`}>Listen</button>
             <button type="button" disabled={busy} onClick={() => act('', { artist: candidate.artist, title: candidate.title })}
