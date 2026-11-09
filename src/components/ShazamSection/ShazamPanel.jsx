@@ -139,7 +139,10 @@ export default function ShazamPanel() {
                     <WantedPlayback item={item} />
                   </td>
                   <td className="shazam-td-artist">{item.artist || '—'}</td>
-                  <td className="shazam-td-title">{item.title || '—'}<WantedPlaybackStatus id={item.id} /></td>
+                  <td className="shazam-td-title">
+                    <span>{item.title || '—'}</span>
+                    <WantedPlaybackStatus id={item.id} />
+                  </td>
                   <td className="shazam-td-when mono">{whenShazamed(item.notes)}</td>
                   <td>
                     <StatusBadge status={item.status} />

@@ -334,7 +334,10 @@ function WantedList() {
                   />
                 </td>
                 <td className="td-artist">{item.artist || '—'}</td>
-                <td className="td-title">{item.title || '—'}<WantedPlaybackStatus id={item.id} /></td>
+                <td className="td-title">
+                  <span>{item.title || '—'}</span>
+                  <WantedPlaybackStatus id={item.id} />
+                </td>
                 <td className="td-release">
                   {item.release_name || item.catalog_number || '—'}
                   {item.release_name && item.catalog_number && (
