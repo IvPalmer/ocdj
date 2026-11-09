@@ -1,14 +1,17 @@
 import { useLibraryMatch } from '../../api/hooks'
+import { usePlayer } from './PlayerContext'
 
 const COVERAGE = 'Exact artist/title in the library index only. Unindexed collections unknown. No live disk check, bit depth or lossless provenance verification.'
 const REVEAL_URL = /^ocdj-reveal:\/\/track\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{64}$/
 
 export default function LibraryMatch({ artist, title }) {
+  const player = usePlayer()
   const query = useLibraryMatch(artist, title)
   let label = 'Artist + title needed for library check'
   let state = 'unknown'
   let quality = ''
   let revealUrl
+  let playbackId
   if (artist?.trim() && title?.trim()) {
     label = query.isError ? 'Library check unavailable' : 'Checking library index…'
     if (!query.isError && query.data) {
@@ -23,6 +26,7 @@ export default function LibraryMatch({ artist, title }) {
       if (status === 'matched' && matches?.length === 1) {
         state = 'matched'
         const match = matches[0]
+        if (Number.isSafeInteger(match.playback_id) && match.playback_id > 0) playbackId = match.playback_id
         if (typeof match.reveal_url === 'string' && REVEAL_URL.exec(match.reveal_url)?.[0] === match.reveal_url) revealUrl = match.reveal_url
         const measured = [match.bitrate > 0 && `${match.bitrate} kbps`,
           match.sample_rate > 0 && `${match.sample_rate / 1000} kHz`].filter(Boolean)
@@ -36,7 +40,9 @@ export default function LibraryMatch({ artist, title }) {
   }
   const description = `${revealUrl ? 'Open in Finder · ' : ''}${label}. ${COVERAGE}`
   const Indicator = revealUrl ? 'a' : 'span'
-  return <Indicator className={`track-library-match track-library-match--${state}`}
+  const track = { artist, title, source: { kind: 'mac', libraryId: playbackId },
+    description: 'Indexed Mac library · temporary MP3 playback copy · Mac connector required' }
+  return <><Indicator className={`track-library-match track-library-match--${state}`}
     href={revealUrl} role={revealUrl ? undefined : 'img'} tabIndex={0}
     aria-label={description} title={description}>
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -49,4 +55,9 @@ export default function LibraryMatch({ artist, title }) {
     </svg>
     {quality && <span aria-hidden="true">{quality}</span>}
   </Indicator>
+    {playbackId && <span className="track-playback">
+      <button type="button" className="btn btn-xs" aria-label={`Play library ${artist} — ${title}`} onClick={() => player.play(track)}>Play library</button>
+      <button type="button" className="btn btn-xs" aria-label={`Queue library ${artist} — ${title}`} onClick={() => player.enqueue(track)}>Queue library</button>
+    </span>}
+  </>
 }

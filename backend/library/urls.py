@@ -1,7 +1,12 @@
 from django.urls import path
 from . import views
+from . import playback
 
 urlpatterns = [
+    path('playback/claim/', playback.claim),
+    path('playback/<int:pk>/complete/', playback.complete),
+    path('tracks/<int:pk>/playback/', playback.prepare),
+    path('tracks/<int:pk>/audio/', playback.audio),
     path('match/', views.track_match, name='library-match'),
     path('tracks/', views.track_list, name='library-tracks'),
     path('tracks/<int:pk>/', views.track_detail, name='library-track-detail'),

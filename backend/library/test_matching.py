@@ -55,7 +55,7 @@ class RevealMatchingTests(unittest.TestCase):
         result = matching.match_result([self.row()])
         self.assertEqual(result, dict(status='matched', coverage='indexed_only', matches=[
             dict(id=1, format='flac', bitrate=900, sample_rate=44100,
-                 reveal_url=f'ocdj-reveal://track/{self.collection}/{self.opaque_id}')]))
+                 reveal_url=f'ocdj-reveal://track/{self.collection}/{self.opaque_id}', playback_id=1)]))
 
     def test_other_sources_and_legacy_records_have_no_url(self):
         for source in ('manual', 'traxdb', 'organize_pipeline', None, ''):
