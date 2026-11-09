@@ -85,6 +85,9 @@ def track_update(request, pk):
     except LibraryTrack.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
+    if track.metadata_only:
+        return Response({'error': 'Mac snapshot records are metadata only.'}, status=409)
+
     editable = ['artist', 'title', 'album', 'label', 'catalog_number', 'genre', 'year']
     data = {k: v for k, v in request.data.items() if k in editable}
 
@@ -109,6 +112,9 @@ def promote_track(request, pk):
         track = LibraryTrack.objects.get(pk=pk)
     except LibraryTrack.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
+
+    if track.metadata_only:
+        return Response({'error': 'Mac snapshot records are metadata only.'}, status=409)
 
     from .services_promote import promote_track as do_promote
     result = do_promote(track)

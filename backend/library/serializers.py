@@ -4,6 +4,7 @@ from .models import LibraryTrack
 
 class LibraryTrackSerializer(serializers.ModelSerializer):
     filename = serializers.SerializerMethodField()
+    file_path = serializers.SerializerMethodField()
 
     class Meta:
         model = LibraryTrack
@@ -18,7 +19,12 @@ class LibraryTrackSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['added_at', 'updated_at', 'file_path', 'filename']
 
+    def get_file_path(self, obj):
+        return '' if obj.metadata_only else obj.file_path
+
     def get_filename(self, obj):
+        if obj.metadata_only:
+            return ''
         return obj.file_path.split('/')[-1] if obj.file_path else ''
 
 

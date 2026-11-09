@@ -1,0 +1,37 @@
+name: Mac library snapshot fixtures
+on:
+  pull_request:
+    paths:
+      - 'backend/library/**'
+      - 'tools/mac_library/**'
+      - '.github/workflows/mac-library.yml'
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fixture
+      POSTGRES_DB: postgres
+      HUEY_DB_PATH: /tmp/mac-library-fixture/huey.sqlite3
+      PAPERCLIP_SCRATCH_DIR: /tmp/mac-library-fixture
+      SECRET_KEY: synthetic-ci-fixture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: mkdir -p "$PAPERCLIP_SCRATCH_DIR"
+      - run: pip install -r backend/requirements.txt
+      - run: PYTHONPATH=backend python -m unittest library.test_snapshots library.test_matching -v
+      - run: python backend/manage.py makemigrations library --check --dry-run
+      - run: python backend/manage.py test library --noinput
