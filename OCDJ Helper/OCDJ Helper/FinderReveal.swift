@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import OSLog
 
 /// Only opaque identifiers enter through LaunchServices. Paths stay in this local sidecar.
 struct FinderReveal {
@@ -49,41 +50,67 @@ struct FinderReveal {
             !path.components(separatedBy: "/").dropFirst().contains(where: { $0.isEmpty || $0 == "." || $0 == ".." })
     }
 
-    // Open each component without following symlinks (including ancestor directories).
+    private static let logger = Logger(subsystem: "com.ocdj.OCDJHelperApp", category: "FinderReveal")
+
+    // Open only the granted anchor, never its ancestors as separate descriptors.
+    // O_NOFOLLOW_ANY preserves rejection of symlinks anywhere in the absolute path.
     static func openVerified(_ path: String, directory: Bool = false) throws -> Int32 {
         guard isAbsolutePath(path) else { throw Failure.staleFile }
-        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
-        var fd = Darwin.open("/", O_EVTONLY | O_DIRECTORY | O_CLOEXEC)
-        guard fd >= 0 else { throw Failure.staleFile }
+        let flags = O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC |
+            (directory ? O_EVTONLY | O_DIRECTORY : O_RDONLY)
+        let fd = Darwin.open(path, flags)
+        guard fd >= 0 else {
+            let code = errno
+            let stage = directory ? "root-open" : "map-open"
+            logger.error("stage=\(stage, privacy: .public) errno=\(code)")
+            throw Failure.staleFile
+        }
+        return fd
+    }
+
+    // The exact user-selected root is the anchor for all untrusted map components.
+    private static func openTarget(root: String, parts: [String]) throws -> Int32 {
+        var fd = try openVerified(root, directory: true)
         for (index, part) in parts.enumerated() {
-            let isDirectory = directory || index < parts.count - 1
             let flags = O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC |
-                (isDirectory ? O_EVTONLY | O_DIRECTORY : O_RDONLY)
+                (index < parts.count - 1 ? O_EVTONLY | O_DIRECTORY : O_RDONLY)
             let next = part.withCString { openat(fd, $0, flags) }
+            let code = errno
             close(fd)
-            guard next >= 0 else { throw Failure.staleFile }
+            guard next >= 0 else {
+                logger.error("stage=target-open errno=\(code)")
+                throw Failure.staleFile
+            }
             fd = next
         }
         return fd
     }
 
     static func load(_ request: Request, from url: URL = mapURL) throws -> Map {
+        var stage = "map-open"
         do {
             let fd = try openVerified(url.path)
             let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             defer { try? handle.close() }
+            stage = "map-metadata"
             var info = stat()
             guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
                   info.st_uid == getuid(), info.st_mode & 0o077 == 0, info.st_nlink == 1,
                   info.st_size > 0, info.st_size <= 32 * 1024 * 1024 else { throw Failure.staleMap }
+            stage = "map-read"
             let data = try handle.read(upToCount: 32 * 1024 * 1024 + 1) ?? Data()
             guard data.count <= 32 * 1024 * 1024 else { throw Failure.staleMap }
+            stage = "map-decode"
             let map = try JSONDecoder().decode(Map.self, from: data)
+            stage = "map-contract"
             guard map.version == 1, map.collection_id == request.collection,
                   map.tracks.count <= 100_000, map.tracks[request.id] != nil,
                   isAbsolutePath(map.root) else { throw Failure.staleMap }
             return map
-        } catch { throw Failure.staleMap }
+        } catch {
+            logger.error("stage=\(stage, privacy: .public) result=refused")
+            throw Failure.staleMap
+        }
     }
 
     static func target(_ request: Request, in map: Map) throws -> URL {
@@ -92,7 +119,7 @@ struct FinderReveal {
         guard !relative.contains("\0"), !parts.isEmpty,
               !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || ["id3", "traxdb"].contains($0.lowercased()) }) else { throw Failure.staleFile }
         let path = map.root + "/" + relative
-        let fd = try openVerified(path)
+        let fd = try openTarget(root: map.root, parts: parts)
         defer { close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { throw Failure.staleFile }

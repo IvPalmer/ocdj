@@ -29,8 +29,10 @@ The helper requires a current-user-owned private regular map (no group/other
 permissions or hardlinks), bounded to 32 MiB and 100,000 tracks. It rejects another
 collection, unknown ID, missing/corrupt map, absolute relative paths, traversal,
 excluded ID3/TraxDB components, symlinks at any filesystem component, directories,
-nonregular files, and missing files. Descriptor-relative opens use `O_NOFOLLOW`;
-ancestor directories use `O_EVTONLY` to avoid requiring directory listing access.
+nonregular files, and missing files. The fixed map and selected root are opened directly with macOS `O_NOFOLLOW_ANY`,
+which rejects symlinks anywhere in those paths without separately opening ancestors.
+Untrusted relative components beneath the selected root use descriptor-relative
+`O_NOFOLLOW`; intermediate directories use `O_EVTONLY`.
 Immediately before `NSWorkspace.activateFileViewerSelecting`, it verifies the
 selected file is regular beneath the configured root. Failures show a local,
 path-free refresh message.
@@ -105,7 +107,7 @@ selection, production click behavior, or current availability of real files.
 ## Release and parent integration
 
 Wrapper and appex stay at marketing version 1.0.1; both Debug/Release build numbers
-advance together from 2 to 3. Build with the existing Developer ID/manual hardened
+advance together to 4 (build 3 was the initial native implementation). Build with the existing Developer ID/manual hardened
 runtime recipe in [SOUNDCLOUD-INLINE-14.md](SOUNDCLOUD-INLINE-14.md) and
 [EDGE-AND-LOCAL.md](EDGE-AND-LOCAL.md), overriding deployment target to 26.2.
 Artifacts/DerivedData must be in a separate private directory outside the repo.
@@ -121,3 +123,34 @@ Parent also integrates the parallel match API/UI contract and exercises an exact
 single available match through the authenticated Wanted page to Finder. Stale,
 missing, duplicate and non-Mac statuses must not acquire arbitrary reveal links.
 Issue #40 remains open until that integration and installed-device QA are done.
+
+## Build 4 sandbox regression (stacked on #42)
+
+Starts at exact #42 head `0af8cca637068541f22bb319c208a0e04a699641`;
+base branch `codex/40-mac-finder-reveal` is unchanged. The map still uses
+`FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]`
+plus `OCDJ/reveal-map.json`. Foundation supplies the process's user-domain location;
+there is no working-directory lookup or manually prepended container path here.
+No location fallback, entitlement, bookmark, or permission change is introduced.
+
+Build 3 separately opened every ancestor starting at `/`, before the root picker
+could appear. Build 4 opens the existing map directly, keeps its ownership/mode,
+regular-file, hardlink and size checks, then uses the exact selected root as the
+starting descriptor for no-follow relative traversal. macOS rejects combining
+`O_NOFOLLOW_ANY` and `O_NOFOLLOW` with EINVAL; direct anchors use only the former.
+
+The Swift suite launches its own synthetic child via `/usr/bin/sandbox-exec` with
+an explicit denial on opening a temporary ancestor and default allowance elsewhere.
+It asserts the ancestor open fails with EPERM/EACCES, then runs the exact shipped
+map loader and target resolver. This fails on the #42 implementation and passes on
+the fix. It models the separate-ancestor-open restriction; it does not reproduce
+all installed App Sandbox grants or establish the cause of the actual live failure.
+Additional fixtures reject symlinks at the anchor and above it, as well as the
+existing relative traversal, map privacy, wrong-ID and nonregular/missing cases.
+No GUI, Finder, private inventory, production access, or local service is used.
+
+Path-free Logger events use subsystem `com.ocdj.OCDJHelperApp`, category
+`FinderReveal`: map-open, map-metadata, map-read, map-decode, map-contract,
+root-open, target-open. Open failures include numeric errno; map failures include
+`result=refused`. No URL, root, relative path, collection, ID, or error description
+is logged. Parent owns installation and real Chrome → picker → Finder QA.
