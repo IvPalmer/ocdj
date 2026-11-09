@@ -347,31 +347,33 @@ function WantedList() {
                   {new Date(item.added).toLocaleDateString('pt-BR')}
                 </td>
                 <td className="td-actions">
-                  <WantedPlayback item={item} />
-                  <button
-                    className="btn btn-xs"
-                    onClick={() => setEditingItem(item)}
-                    title="Edit item"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className={`btn btn-xs btn-accent${queuingId === item.id ? ' btn-xs--active' : ''}`}
-                    onClick={() => handleAddToQueue(item.id)}
-                    disabled={queuingId !== null}
-                    title="Search Soulseek for this track"
-                  >
-                    {queuingId === item.id ? 'Finding...' : 'Find'}
-                  </button>
-                  <button
-                    className="btn btn-xs btn-danger"
-                    onClick={() => {
-                      deleteItem.mutate(item.id)
-                    }}
-                    title="Delete"
-                  >
-                    Del
-                  </button>
+                  <div className="wanted-row-controls">
+                    <WantedPlayback item={item} />
+                    <button
+                      className="btn btn-xs"
+                      onClick={() => setEditingItem(item)}
+                      title="Edit item"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={`btn btn-xs btn-accent${queuingId === item.id ? ' btn-xs--active' : ''}`}
+                      onClick={() => handleAddToQueue(item.id)}
+                      disabled={queuingId !== null}
+                      title="Search Soulseek for this track"
+                    >
+                      {queuingId === item.id ? 'Finding...' : 'Find'}
+                    </button>
+                    <button
+                      className="btn btn-xs btn-danger"
+                      onClick={() => {
+                        deleteItem.mutate(item.id)
+                      }}
+                      title="Delete"
+                    >
+                      Del
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
