@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from unittest import skipUnless
 
 from django.test import LiveServerTestCase
+from django.utils import timezone
 
 from organize.models import PipelineItem
 from .test_playback import PlaybackFixture
@@ -21,7 +22,8 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         PipelineItem.objects.create(original_filename='missing.wav',
             current_path=str(self.downloads / 'missing.wav'), title='Missing tone')
         PipelineItem.objects.create(original_filename='archived.aiff', artist='Fixture artist',
-            title='Archived tone', archive_state='archived')
+            title='Archived tone', stage='published', archive_state='archived',
+            archived_at=timezone.now(), music_persistent_id='fixture', sha256='a' * 64)
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
         with sync_playwright() as pw:
