@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit, bounded Mac run. Cookies and upstream URLs never leave this process."""
+"""Explicit Mac run, bounded by default with opt-in login-session residency. Cookies and upstream URLs never leave this process."""
 import argparse
 import asyncio
 import base64
@@ -87,8 +87,19 @@ def parse_posts(items, thumbnail_urls=None):
 
 
 def instagram_session(profile):
-    from yt_dlp.cookies import extract_cookies_from_browser
-    jar = extract_cookies_from_browser('chrome', profile=profile)
+    from yt_dlp import cookies
+    # The upstream macOS helper spawns `security`, which can prompt. Replace
+    # only that helper during extraction, using the same key via no-UI API.
+    if sys.platform == 'darwin':
+        from unittest.mock import patch
+        try:
+            from .mac_access import keyring_password
+        except ImportError:  # direct script entry point
+            from mac_access import keyring_password
+        with patch.object(cookies, '_get_mac_keyring_password', keyring_password):
+            jar = cookies.extract_cookies_from_browser('chrome', profile=profile)
+    else:
+        jar = cookies.extract_cookies_from_browser('chrome', profile=profile)
     session = requests.Session()
     for cookie in jar:
         if cookie.domain.lstrip('.') == 'instagram.com' or cookie.domain.endswith('.instagram.com'):
@@ -101,9 +112,27 @@ def instagram_session(profile):
     return session
 
 
+RETRY_DELAYS = (5, 15, 30)
+
+
+def safe_request(request):
+    """Bounded recovery for reads/status only. Never wrap claim/upload/complete."""
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        try:
+            response = request()
+            if response.status_code not in (502, 503, 504):
+                return response
+            response.close()
+        except (requests.ConnectionError, requests.Timeout):
+            pass
+        if attempt == len(RETRY_DELAYS):
+            raise ConnectorError('network-unavailable') from None
+        time.sleep(RETRY_DELAYS[attempt])
+
+
 def instagram_json(session, path, params=None):
-    r = session.get(IG + path, params=params, timeout=30, allow_redirects=False)
-    if r.status_code in (301, 302, 401): raise ConnectorError('session-expired')
+    r = safe_request(lambda: session.get(IG + path, params=params, timeout=30, allow_redirects=False))
+    if r.status_code in (301, 302, 303, 307, 308, 401): raise ConnectorError('session-expired')
     if r.status_code == 429: raise ConnectorError('rate-limited')
     if r.status_code == 403: raise ConnectorError('restricted')
     if r.status_code != 200: raise ConnectorError('error')
@@ -281,8 +310,15 @@ class API:
 
     def post(self, endpoint, data=None, files=None, lease=None, timeout=90):
         headers = {'X-Instagram-Lease': lease} if lease else None
-        r = self.session.post(self.base+endpoint, json=data if not files else None,
-                              files=files, headers=headers, timeout=timeout, allow_redirects=False)
+        def send():
+            return self.session.post(self.base+endpoint, json=data if not files else None,
+                                     files=files, headers=headers, timeout=timeout, allow_redirects=False)
+        # Heartbeat is an idempotent status write. All other POSTs are attempted
+        # exactly once, including a claim whose response may have been lost.
+        try:
+            r = safe_request(send) if endpoint == 'heartbeat/' else send()
+        except (requests.ConnectionError, requests.Timeout):
+            raise ConnectorError('ambiguous-transport') from None
         if r.status_code == 204: return None
         if r.status_code == 409: return None  # expired result; server owns fencing
         if r.status_code != 200: raise ConnectorError('API request failed')
@@ -306,6 +342,9 @@ def run(args):
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token: raise ConnectorError('DRAIN_TOKEN missing')
     api = API(args.api, token)
+    resident = getattr(args, 'resident', False)
+    if resident and args.fixture:
+        raise ConnectorError('resident-fixture-disallowed')
     ffmpeg = ffmpeg_path() if args.fixture else None
     try:
         thumbnail_urls = {}
@@ -318,6 +357,8 @@ def run(args):
         mapping = synced['media']
         thumbnails = ThumbnailCapture(synced, thumbnail_urls)
         api.post('heartbeat/', {'status': 'ready'})
+        refresh_at = time.monotonic() + 3600
+        last_poll = time.time()
         # One original at a time; TemporaryDirectory owns every local byte.
         with tempfile.TemporaryDirectory(prefix='ocdj-instagram-') as directory:
             video = Path(directory) / 'child.mp4'
@@ -334,8 +375,19 @@ def run(args):
                 video.unlink()
             deadline = time.monotonic()+args.work_seconds
             jobs = 0
-            while jobs < 10:
+            while resident or jobs < 10:
+                # A wake/long scheduling gap does not replay old work or sync
+                # repeatedly. Refresh once, from a complete snapshot only.
+                now = time.time()
+                woke = now - last_poll > 180
+                last_poll = now
                 api.post('heartbeat/', {'status': 'ready'})
+                if resident and (woke or time.monotonic() >= refresh_at):
+                    thumbnail_urls = {}
+                    data, _ = read_collection(session, thumbnail_urls=thumbnail_urls)
+                    synced = api.post('sync/', data)
+                    thumbnails = ThumbnailCapture(synced, thumbnail_urls)
+                    refresh_at = time.monotonic() + 3600
                 job = api.post('claim/')
                 if job:
                     jobs += 1
@@ -351,7 +403,7 @@ def run(args):
                                     comments = read_comments(session, job['post_instagram_id'])
                                     comment_status = 'partial'
                                 except ConnectorError as exc:
-                                    if str(exc) in STOP_STATUSES: raise
+                                    if str(exc) in STOP_STATUSES | {'network-unavailable'}: raise
                                     comments, comment_status = [], 'unavailable'
                                 matches, records = explicit_candidates('', job['position'], comments)
                                 evidence = {'source': 'comment' if matches else 'shazam',
@@ -369,7 +421,7 @@ def run(args):
                         status = 'identified' if matches else 'no-match'
                     except Exception as exc:
                         status, matches = 'error', []
-                        if isinstance(exc, ConnectorError) and str(exc) in STOP_STATUSES:
+                        if isinstance(exc, ConnectorError) and str(exc) in STOP_STATUSES | {'network-unavailable', 'ambiguous-transport'}:
                             stop_error = exc
                     finally:
                         video.unlink(missing_ok=True)
@@ -379,13 +431,18 @@ def run(args):
                     # or Instagram request. The outer handler publishes the state.
                     if stop_error is not None:
                         raise stop_error
+                    if resident: time.sleep(15)  # Bound sustained claim rate too.
                 elif thumbnails.step(api): continue
-                elif time.monotonic() >= deadline: break
-                else: time.sleep(3)
+                elif not resident and time.monotonic() >= deadline: break
+                else: time.sleep(15 if resident else 3)
             thumbnails.flush(api)
     except ConnectorError as e:
         status = str(e) if str(e) in STOP_STATUSES else 'error'
-        api.post('heartbeat/', {'status': status})
+        try:
+            if str(e) not in {'network-unavailable', 'ambiguous-transport'}:
+                api.post('heartbeat/', {'status': status})
+        except Exception:
+            pass  # Preserve original restriction, including when transport died.
         raise ConnectorError(status) from None
 
 
@@ -394,6 +451,7 @@ if __name__ == '__main__':
     parser.add_argument('--api', required=True, help='OCDJ origin; bearer comes from existing DRAIN_TOKEN env')
     parser.add_argument('--profile', default='Profile 1')
     parser.add_argument('--fixture', help='Offline synthetic fixture, never live Instagram data')
+    parser.add_argument('--resident', action='store_true', help='stay in this login session until stopped; no relaunch')
     parser.add_argument('--work-seconds', type=int, default=0, choices=range(0, 3601))
     try:
         run(parser.parse_args())

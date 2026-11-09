@@ -83,7 +83,7 @@ class ForegroundTests(unittest.TestCase):
     def test_run_cleans_temp_directory_and_children_on_interrupt(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_cookie = Path(directory) / 'Cookies'
-            fake_cookie.write_bytes(b'SQLite format 3')
+            fake_cookie.write_bytes(b'SQLite format 3\x00')
             processes, child_envs = [], []
             real_popen = subprocess.Popen
             def spawn(command, **kwargs):
