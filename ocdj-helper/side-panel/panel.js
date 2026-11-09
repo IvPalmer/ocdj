@@ -46,6 +46,18 @@
 
   // ── Platform Helpers ───────────────────────────────────────
 
+  function beatportEmbedUrl(sourceUrl) {
+    try {
+      const source = new URL(sourceUrl);
+      const match = source.pathname.match(/^\/(?:[a-z]{2}\/)?(track|release)\/[^/]+\/([1-9]\d*)\/?$/);
+      if (source.protocol === 'https:' && !source.port && !source.username && !source.password &&
+          ['www.beatport.com', 'beatport.com'].includes(source.hostname) && match) {
+        return `https://embed.beatport.com/?id=${match[2]}&type=${match[1]}`;
+      }
+    } catch (_) { /* Invalid or legacy source: fail closed, never search. */ }
+    return '';
+  }
+
   function hasEmbed(release) {
     return !!release.embedUrl;
   }
@@ -59,7 +71,15 @@
     playerContainer.className = '';
     const platform = getReleasePlatform(release);
 
-    if (platform === 'bandcamp') {
+    btnPlayPause.disabled = platform === 'beatport';
+    btnPlayPause.title = platform === 'beatport' ? 'Use the Beatport player controls' : 'Play / Pause';
+    const beatportNote = document.getElementById('beatport-preview-note');
+    if (beatportNote) beatportNote.hidden = platform !== 'beatport';
+    if (platform === 'beatport') {
+      document.getElementById('beatport-preview-source').href = release.source_url;
+      const isRelease = new URL(release.embedUrl).searchParams.get('type') === 'release';
+      playerContainer.classList.add(isRelease ? 'platform-beatport-release' : 'platform-beatport-track');
+    } else if (platform === 'bandcamp') {
       playerContainer.classList.add('platform-bandcamp');
     } else if (platform === 'soundcloud') {
       const isSet = release.source_url && release.source_url.includes('/sets/');
@@ -94,7 +114,11 @@
       'currentVideoIndex',
       'backendUrl',
     ]);
-    queue = data.playerQueue || [];
+    queue = (data.playerQueue || []).map(release => release.platform === 'beatport'
+      // Old versions stored a generic YouTube result under a Beatport badge.
+      // Rebind to the original exact source; never replay that search result.
+      ? { ...release, embedUrl: beatportEmbedUrl(release.source_url), videos: [], tracks: [] }
+      : release);
     currentReleaseIndex = data.currentReleaseIndex || 0;
     currentVideoIndex = data.currentVideoIndex || 0;
     backendUrl = data.backendUrl || 'http://localhost:8002';
@@ -161,7 +185,10 @@
     setPlayerContainerClass(release);
     if (externalPlayer) externalPlayer.style.display = 'none';
 
-    if (platform === 'bandcamp' && release.source_url) {
+    if (platform === 'beatport') {
+      // The official player handles exact previews and release track selection.
+      iframe.src = release.embedUrl;
+    } else if (platform === 'bandcamp' && release.source_url) {
       // Custom Bandcamp player with HTML5 audio (autoplay + transport control)
       const params = new URLSearchParams({
         url: release.source_url,
@@ -317,6 +344,21 @@
     if (queue.length === 0) return;
     const release = queue[currentReleaseIndex];
     if (!release) return;
+    if (release.platform === 'beatport' && !release.embedUrl) {
+      clearFallbackTimer();
+      iframe.src = '';
+      iframe.style.display = 'none';
+      placeholder.textContent = 'Exact Beatport source unavailable. Requeue from the exact Beatport page.';
+      placeholder.style.display = 'flex';
+      document.getElementById('beatport-preview-note').hidden = true;
+      isPlaying = false;
+      currentPlatform = null;
+      currentIsEmbed = false;
+      btnPlayPause.innerHTML = ICON_PLAY;
+      btnPlayPause.disabled = false;
+      if (externalPlayer) externalPlayer.style.display = 'none';
+      return;
+    }
 
     if (hasEmbed(release)) {
       // Native embed: Bandcamp, Spotify, YouTube playlists, SoundCloud (external)
@@ -635,6 +677,7 @@
       if (externalPlayer) externalPlayer.style.display = 'none';
       placeholder.style.display = 'flex';
       playerContainer.className = '';
+      document.getElementById('beatport-preview-note').hidden = true;
       isPlaying = false;
       currentPlatform = null;
       currentIsEmbed = false;
@@ -651,7 +694,8 @@
     }
 
     await saveState();
-    chrome.runtime.sendMessage({ type: 'dig:removeFromQueue', data: { index } });
+    // saveState already removed this entry from the worker's shared storage.
+    // Sending removeFromQueue as well would delete the following entry.
     renderQueue();
     updateNowPlaying();
   }
@@ -665,6 +709,7 @@
     if (externalPlayer) externalPlayer.style.display = 'none';
     placeholder.style.display = 'flex';
     playerContainer.className = '';
+    document.getElementById('beatport-preview-note').hidden = true;
     isPlaying = false;
     currentPlatform = null;
     currentIsEmbed = false;
@@ -687,7 +732,8 @@
       // Album-level platforms: title is empty, release_name is the album name
       // Track-level platforms: title IS the track title, no release_name
       const isAlbum = platform === 'discogs' || platform === 'bandcamp' ||
-        (platform === 'spotify' && release.embedUrl && release.embedUrl.includes('/album/'));
+        (platform === 'spotify' && release.embedUrl && release.embedUrl.includes('/album/')) ||
+        (platform === 'beatport' && new URL(release.embedUrl).searchParams.get('type') === 'release');
 
       const data = {
         artist: release.artist || '',
@@ -788,6 +834,7 @@
       playCurrentVideo();
       return;
     }
+    if (currentIsEmbed && currentPlatform === 'beatport') return; // Use the official player controls.
     if (currentIsEmbed) {
       // Send play/pause to embed via proxy relay
       const action = isPlaying ? 'pause' : 'play';

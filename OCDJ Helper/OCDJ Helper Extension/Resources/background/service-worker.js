@@ -484,6 +484,7 @@ const messageHandlers = {
   },
 
   'dig:queue-search': async (data) => {
+    if (data.platform === 'beatport') return { error: 'Exact Beatport source required — refresh the Beatport page' };
     const { artist, title, thumb, source_url, platform } = data;
     const query = `${artist || ''} ${title || ''}`.trim();
     if (!query) return { error: 'No search query' };
@@ -507,6 +508,19 @@ const messageHandlers = {
 
   'dig:queue-embed': async (data, sender) => {
     let { platform, artist, title, embedUrl, thumb, source_url, tracks } = data;
+    if (platform === 'beatport') {
+      let source;
+      try { source = new URL(source_url); } catch { return { error: 'Exact Beatport source unavailable' }; }
+      const match = source.pathname.match(/^\/(?:[a-z]{2}\/)?(track|release)\/[^/]+\/([1-9]\d*)\/?$/);
+      if (source.protocol !== 'https:' || source.port || source.username || source.password ||
+          !['www.beatport.com', 'beatport.com'].includes(source.hostname) || !match) {
+        return { error: 'Exact Beatport source unavailable' };
+      }
+      // Derive from the source identity, never trust an arbitrary embed/preview URL.
+      embedUrl = `https://embed.beatport.com/?id=${match[2]}&type=${match[1]}`;
+      tracks = []; // Release track selection belongs to the exact official catalog.
+    }
+
     if (!embedUrl) return { error: 'No embed URL' };
 
     if (platform === 'soundcloud' && source_url) {
@@ -532,7 +546,8 @@ const messageHandlers = {
     const { playerQueue = [] } = await chrome.storage.local.get('playerQueue');
     if (playerQueue.some(item =>
       (item.embedUrl && item.embedUrl === embedUrl) ||
-      (item.source_url && source_url && item.source_url === source_url)
+      (item.source_url && source_url && item.source_url === source_url &&
+        (platform !== 'beatport' || item.embedUrl === embedUrl))
     )) {
       return { queued: true, duplicate: true };
     }

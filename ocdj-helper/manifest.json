@@ -20,7 +20,7 @@
     "default_path": "side-panel/panel.html"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; frame-src https://ocdj.grooveops.dev http://localhost:8002 http://127.0.0.1:8002 https://bandcamp.com https://w.soundcloud.com https://open.spotify.com"
+    "extension_pages": "script-src 'self'; frame-src https://embed.beatport.com https://ocdj.grooveops.dev http://localhost:8002 http://127.0.0.1:8002 https://bandcamp.com https://w.soundcloud.com https://open.spotify.com"
   },
   "content_scripts": [
     {

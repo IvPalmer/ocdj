@@ -216,3 +216,5 @@ body {
   background: #7f1d1d;
   color: #fca5a5;
 }
+
+#queue-link { text-decoration: none; }
