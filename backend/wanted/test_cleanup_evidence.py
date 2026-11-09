@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import requests
-from wanted.services.cleanup_evidence import clean_isrc, collect_evidence, evaluate, _get_json
+from wanted.services.cleanup_evidence import clean_isrc, collect_evidence, evaluate, evaluate_review, _get_json
 
 CODE = 'USAAA2400001'
 RECORDING = '510e4d03-487b-4748-86a1-63d850557c25'
@@ -179,3 +179,26 @@ class CatalogTests(unittest.TestCase):
         with patch('wanted.services.cleanup_evidence.requests.Session', return_value=self._session(chunks=[b'{'])):
             with self.assertRaises(ValueError):
                 _get_json('https://example.test', {})
+
+
+class LegacyReviewPolicyTests(unittest.TestCase):
+    def test_protected_anchored_hypothesis_is_not_a_write(self):
+        original = snapshot(artist='Fixture Label', protected=True)
+        before = copy.deepcopy(original)
+        result = evaluate_review(original, evidence())
+        self.assertEqual(result['changes'], {})
+        self.assertEqual(result['proposed_changes'], {'artist': 'Fixture Artist'})
+        self.assertEqual(original, before)
+
+    def test_search_full_title_is_unverified_and_remix_conflict_has_no_delta(self):
+        original = snapshot(artist='Compilation', protected=True, isrc='')
+        for title, assessment in [(TITLE, 'full_title_only_identity_unverified'),
+                                  ('Night Signal (Other Remix)', 'version_or_title_conflict')]:
+            e = {'kind': 'title_search', 'candidates': [{'provider': 'itunes', 'id': 1,
+                 'artist': 'Fixture Artist', 'title': title}]}
+            result = evaluate_review(original, e)
+            self.assertEqual(result['proposed_changes'], {})
+            self.assertEqual(result['candidate_assessments'][0]['assessment'], assessment)
+        result = evaluate_review(snapshot(protected=True), evidence(title='Night Signal'))
+        self.assertEqual(result['proposed_changes'], {})
+        self.assertEqual(result['candidate_assessments'][0]['assessment'], 'version_or_title_conflict')
