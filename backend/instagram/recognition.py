@@ -156,6 +156,13 @@ def release_candidates(caption, position, media_count):
                 return [], []
             fields[key] = value
     code = _caption_release_code(caption[:10000], fields.get('catalog', ''))
+    if not fields.get('label'):
+        # Catalog numbers are reused across labels, even when a provider has
+        # indexed only one of the releases.
+        from .discogs_evidence import tracklist_evidence
+
+        header = next((line.strip() for line in caption[:10000].splitlines() if line.strip()), '')
+        return [], tracklist_evidence(header) if media_count > 0 else []
     if not re.fullmatch(r'(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9 ._-]{2,60}', code):
         return [], []
     if media_count < 1 or (fields.get('track') and media_count != 1):

@@ -98,6 +98,8 @@ class ReleaseTests(unittest.TestCase):
         cls.addClassCleanup(modules.stop)
 
     def resolve(self, detail=None, caption='Catalog: FIX001\nLabel: Fixture Label\nTrack: A1', count=1, position=0):
+        if 'Label:' not in caption:
+            caption += '\nLabel: Fixture Label'
         with patch(f'{MODULE}._release_json', side_effect=[
                 {'count': 1, 'releases': [{'id': RELEASE_ID}]}, detail if detail is not None else release_fixture()]) as provider, \
                 patch('time.sleep'):
@@ -136,7 +138,7 @@ class ReleaseTests(unittest.TestCase):
                 detail['label-info'][0]['catalog-number'] = code
                 (candidates, _), provider = self.resolve(detail, caption)
                 self.assertEqual(candidates, [CANDIDATE])
-                self.assertEqual(provider.call_args_list[0].args[1]['query'], 'catno:"' + code + '"')
+                self.assertEqual(provider.call_args_list[0].args[1]['query'], f'catno:"{code}" AND label:"Fixture Label"')
 
     def test_normal_caption_ambiguous_or_nonrelease_codes_need_audio(self):
         for caption in ['#FIX001', 'Love #FIX001 tonight', '#TECHNO2026 #DANCE2026',
@@ -151,7 +153,7 @@ class ReleaseTests(unittest.TestCase):
                         '[VERYLONGPREFIX001] Fixture Label',
                         'Great release today\n#FIX001', 'We played FIX001 yesterday']:
             with self.subTest(caption=caption), patch(f'{MODULE}._release_json') as provider:
-                self.assertEqual(release_candidates(caption, 0, 1), ([], []))
+                self.assertEqual(release_candidates(caption + '\nLabel: Fixture Label', 0, 1), ([], []))
                 provider.assert_not_called()
 
     def test_normal_caption_code_does_not_associate_unproven_carousel_track(self):
@@ -173,6 +175,34 @@ class ReleaseTests(unittest.TestCase):
             result, _ = self.resolve(detail, caption + '\nCarousel: tracklist order', count=2, position=1)
             self.assertEqual(result[0], [{'artist': 'Fixture Artist', 'title': second['title']}])
 
+    def test_catalog_code_alone_cannot_assign_another_labels_release(self):
+        with patch(f'{MODULE}._release_json') as provider:
+            self.assertEqual(release_candidates('FIX001 is up on Bandcamp today', 0, 1), ([], []))
+            provider.assert_not_called()
+
+    def test_label_release_title_and_number_corroborate_discogs_tracklist(self):
+        from types import SimpleNamespace
+        from . import discogs_evidence
+        detail = {'id': 123, 'title': 'Fixture EP',
+                  'labels': [{'name': 'Fixture Label', 'catno': 'FIX001'}],
+                  'artists': [{'name': CANDIDATE['artist']}],
+                  'tracklist': [{'type_': 'track', 'title': CANDIDATE['title'], 'position': 'A1'}]}
+        search = {'pagination': {'items': 1}, 'results': [{'id': 123}]}
+        header = '@fixture_label_ 001 - FIXTURE EP. 🎵'
+        with patch.dict('sys.modules', {'core.views': SimpleNamespace(get_config=lambda _: 'fixture-only')}), \
+                patch.object(discogs_evidence, '_json', side_effect=[search, detail]) as provider, \
+                patch.object(discogs_evidence, '_NEXT', 0), patch('time.sleep'):
+            candidates, records = release_candidates(header, 0, 4)
+            self.assertEqual(candidates, [])
+            self.assertEqual(records[0]['candidate'], CANDIDATE)
+            self.assertIn('clip unverified', records[0]['text'])
+            self.assertEqual(provider.call_args_list[1].args[1], '/releases/123')
+        detail['labels'][0]['catno'] = 'FIX0001'
+        with patch.dict('sys.modules', {'core.views': SimpleNamespace(get_config=lambda _: 'fixture-only')}), \
+                patch.object(discogs_evidence, '_json', side_effect=[search, detail]), \
+                patch.object(discogs_evidence, '_NEXT', 0), patch('time.sleep'):
+            self.assertEqual(release_candidates(header, 0, 4), ([], []))
+
     def test_title_only_invalid_or_conflicting_catalog_does_not_call_provider(self):
         for caption in ['Release: Artist - Album EP', 'Catalog: 1234', 'Catalog: FIX001\nCatalog: OTHER002',
                         'Catalog: FIX001\nTrack: A1']:
@@ -184,7 +214,7 @@ class ReleaseTests(unittest.TestCase):
     def test_ambiguous_search_never_picks_first(self):
         for search in [{'count': 2, 'releases': [{'id': RELEASE_ID}]}, {}, {'count': 1, 'releases': [{'id': '../../evil'}]}]:
             with patch(f'{MODULE}._release_json', return_value=search) as provider:
-                self.assertEqual(release_candidates('Catalog: FIX001', 0, 1), ([], []))
+                self.assertEqual(release_candidates('Catalog: FIX001\nLabel: Fixture Label', 0, 1), ([], []))
                 provider.assert_called_once()
 
     def test_wrong_catalog_label_version_or_missing_credit_needs_audio(self):
@@ -217,11 +247,11 @@ class ReleaseTests(unittest.TestCase):
         import requests
         for failure in [requests.Timeout(), requests.HTTPError(), ValueError(), TypeError()]:
             with patch(f'{MODULE}._release_json', side_effect=failure):
-                self.assertEqual(release_candidates('Catalog: FIX001', 0, 1), ([], []))
+                self.assertEqual(release_candidates('Catalog: FIX001\nLabel: Fixture Label', 0, 1), ([], []))
         for detail in [[], None, {'media': None}, {'id': RELEASE_ID, 'label-info': [None]}]:
             with patch(f'{MODULE}._release_json', side_effect=[
                     {'count': 1, 'releases': [{'id': RELEASE_ID}]}, detail]), patch('time.sleep'):
-                self.assertEqual(release_candidates('Catalog: FIX001', 0, 1), ([], []))
+                self.assertEqual(release_candidates('Catalog: FIX001\nLabel: Fixture Label', 0, 1), ([], []))
 
     def test_fixed_origin_timeout_redirect_body_caps_and_close(self):
         response = Mock(status_code=200)
