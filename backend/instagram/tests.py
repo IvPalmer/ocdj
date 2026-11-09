@@ -297,6 +297,7 @@ class WorkspaceTests(TestCase):
         self.media.post.save(update_fields=['caption'])
 
     def test_complete_numbered_caption_maps_only_equal_all_video_carousel(self):
+        Media.objects.filter(post=self.media.post, kind='image').update(active=False)
         children = list(self.media.post.media.filter(active=True).order_by('position'))
         self.assertTrue(all(m.kind == 'video' for m in children))
         self.caption('Tracklist:\n' + '\n'.join(f'{i+1}. Fixture - Track {i+1} (Dub Mix)' for i in range(len(children))))
