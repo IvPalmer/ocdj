@@ -57,6 +57,7 @@ with sync_playwright() as playwright:
         expect(player.get_by_text('Fixture artist — Mac tone', exact=True)).to_be_visible()
         mode[0] = 'offline'
         expect(player.get_by_role('alert')).to_contain_text('Mac audio unavailable')
+        expect(player.get_by_text('Waiting for Mac audio… The Mac connector must be running.')).to_have_count(0)
         expect(player.get_by_role('button', name='Play playback')).to_be_visible()
         mode[0] = 'ready'
         player.get_by_role('button', name='Play playback').click()
