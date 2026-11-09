@@ -18,7 +18,8 @@ The only additional content-script declaration is CSS-only, on exact
 `all_frames: true`. JavaScript stays in the top document. Existing host
 permissions, authentication, options, and all other site adapters are unchanged.
 This is not a request to grant Safari access or change any user settings.
-Connected and wrapper SoundCloud JavaScript/CSS are byte-identical.
+Connected and wrapper frame adapters and CSS are byte-identical. Safari-specific
+native API embeds and playlist visibility/deduplication behavior are preserved.
 
 Versions: extension manifest `1.1.1`; wrapper and appex `1.0.1` (build `2`).
 Use the existing [signing recipe](EDGE-AND-LOCAL.md), with build-only
@@ -29,7 +30,7 @@ registration changes, merging, or deployment are part of this slice.
 
 ## Offline proof
 
-All 40 extension fixtures pass in both active trees. SoundCloud coverage includes
+All 42 extension fixtures pass in both active trees. SoundCloud coverage includes
 late mount, simultaneous legacy controls, multiple matching frames, repeated
 script evaluation, current action payloads, unrelated frame mutations, title
 changes, detached-heading remount, missing metadata/recovery, outer navigation,

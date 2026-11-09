@@ -339,3 +339,26 @@ for (const root of roots) {
     } finally { await f.close(); }
   });
 }
+
+const safariRoot = roots[1];
+test('Safari SoundCloud preserves native track API embeds', async () => {
+  const f = fixture(safariRoot, 'soundcloud', 'https://soundcloud.com/artist/song',
+    '<div class="soundTitle"><span class="soundTitle__usernameText">Artist</span><div class="soundTitle__title"><span>Song</span></div></div>',
+    '<meta property="al:ios:url" content="soundcloud://sounds:12345">');
+  try {
+    click(f.w, '.ocdj-play-btn');
+    assert.equal(f.messages.at(-1).type, 'dig:queue-embed');
+    assert.match(f.messages.at(-1).data.embedUrl, /api.soundcloud.com%2Ftracks%2F12345/);
+    assert.equal(f.messages.at(-1).data.source_url, 'https://soundcloud.com/artist/song');
+  } finally { await f.close(); }
+});
+test('Safari SoundCloud set rows preserve native recording embeds', async () => {
+  const f = fixture(safariRoot, 'soundcloud', 'https://soundcloud.com/artist/sets/album',
+    '<div class="trackList__item"><div class="trackItem__content"><a class="trackTitle" href="/artist/song?ref=fixture">Artist - Song</a></div></div>');
+  try {
+    click(f.w, '.ocdj-play-btn');
+    assert.equal(f.messages.at(-1).type, 'dig:queue-embed');
+    assert.match(f.messages.at(-1).data.embedUrl, /soundcloud.com%2Fartist%2Fsong/);
+    assert.equal(f.messages.at(-1).data.source_url, 'https://soundcloud.com/artist/song?ref=fixture');
+  } finally { await f.close(); }
+});
