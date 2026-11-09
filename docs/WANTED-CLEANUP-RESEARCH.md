@@ -43,7 +43,7 @@ empty evidence and unusable observations produce reviewable uncertainty.
 ## Decision and review contract
 
 Output schema v1 preserves deep copies of the receipt and evidence, identifies
-policy/parser versions, and lists every candidate with its evidence index and
+the policy version and reused parser, and lists every candidate with its evidence index and
 rejection reasons. `changes` records exact before/after and supporting indices.
 Repeated identical input yields identical output; no timestamps/random IDs are
 invented. The event UUID identifies the original intake, never a recording or a
@@ -92,7 +92,7 @@ python backend/manage.py research_wanted_cleanup \
 ```
 
 Outputs JSON to stdout; redirect it explicitly to retain a private review artifact.
-The command skips system checks, uses no models and changes no files. Django's
+The command handler skips system checks, uses no models and writes no files. Django's
 normal settings/app initialization still occurs; this is not a standalone exporter.
 No background invocation, provider error retry, live-data experiment or deployment
 is part of this slice.
@@ -105,3 +105,18 @@ checks run only against disposable PostgreSQL in GitHub CI under RUNTIME.md.
 
 Rollback: remove the command and pure service; #26 receipts and producers remain
 unchanged. #16 stays open for the reviewed correction and integration gates above.
+
+## Validation receipt
+
+Runtime head `3705853`: [Wanted CI](https://github.com/IvPalmer/ocdj/actions/runs/42539022105)
+passed full backend discovery (44 tests: 43 passed, one optional browser fixture
+skipped) and Wanted migration drift checks. The 12 new tests use SimpleTestCase;
+all database-backed suites ran only in disposable PostgreSQL CI.
+[Separate fixture CI](https://github.com/IvPalmer/ocdj/actions/runs/42539022176)
+passed the frontend build, five connector tests and 15 Instagram tests including
+the browser fixture. No Instagram source changed.
+
+Test-first runs exposed absent service/command at `5921637` and the known-release
+subject gap at `77aa619` before their respective implementations. Source AST and
+stacked whitespace checks passed. Self-review only; no independent reviewer,
+local DB/API, live/provider validation, production access, merge or deployment.
