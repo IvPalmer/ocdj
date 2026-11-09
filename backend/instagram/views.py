@@ -21,7 +21,7 @@ from wanted.services.preview import find_exact_preview
 from .models import Collection, Post, Media
 from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion, ThumbnailBatch
 from . import cache, thumbnails
-from .recognition import explicit_candidates
+from .recognition import explicit_candidates, release_candidates
 
 
 def collection():
@@ -73,6 +73,17 @@ def candidate_preview(request, pk):
 
 @api_view(['PATCH', 'POST'])
 def media_action(request, pk, action='edit'):
+    prepared = None
+    if action == 'recognize' and request.method == 'POST':
+        source = get_object_or_404(Media.objects.select_related('post'), pk=pk, active=True, post__active=True)
+        if source.kind == 'video' and not source.queued:
+            children = list(source.post.media.filter(active=True).order_by('position').values_list('pk', 'kind', 'position'))
+            count = len(children) if all(kind == 'video' and pos == i for i, (_, kind, pos) in enumerate(children)) else 0
+            candidates, records = explicit_candidates(source.post.caption, source.position, media_count=count)
+            if not candidates and not records:
+                candidates, records = release_candidates(source.post.caption, source.position, count)
+            prepared = (source.post.caption, source.position, children, candidates, records,
+                        (source.artist, source.title, source.reviewed, source.lease_token, source.status))
     with transaction.atomic():
         m = get_object_or_404(Media.objects.select_for_update(), pk=pk, active=True, post__active=True)
         if action == 'edit' and request.method == 'PATCH':
@@ -87,7 +98,15 @@ def media_action(request, pk, action='edit'):
             if m.kind != 'video':
                 raise ValidationError('Only videos can be recognized')
             if not m.queued:
-                candidates, records = explicit_candidates(m.post.caption, m.position)
+                candidates, records = [], []
+                children = list(m.post.media.filter(active=True).order_by('position').values_list('pk', 'kind', 'position'))
+                # Provider work is outside the row lock. Recheck source context
+                # before accepting it, including resync/reordered carousel slots.
+                if prepared and prepared[5] != (m.artist, m.title, m.reviewed, m.lease_token, m.status):
+                    return Response(child_json(m))
+                if prepared and prepared[:3] == (m.post.caption, m.position, children):
+                    candidates, records = prepared[3:5]
+
                 if candidates:
                     m.candidates = candidates; m.status = 'identified'
                     m.recognition = dict(source='caption', certainty='explicit', outcome='identified',
