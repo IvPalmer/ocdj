@@ -1,4 +1,5 @@
 import WantedPlayback from '../Player/WantedPlayback'
+import LibraryMatch from '../Player/LibraryMatch'
 import { useState } from 'react'
 import {
   useWantedItems, useWantedSources, useCreateWantedItem,
@@ -319,6 +320,7 @@ function WantedList() {
               <th>Score</th>
               <th>Added</th>
               <th>Actions</th>
+              <th className="td-library">Library</th>
             </tr>
           </thead>
           <tbody>
@@ -348,7 +350,7 @@ function WantedList() {
                 </td>
                 <td className="td-actions">
                   <div className="wanted-row-controls">
-                    <WantedPlayback item={item} />
+                    <WantedPlayback item={item} showLibraryMatch={false} />
                     <button
                       className="btn btn-xs"
                       onClick={() => setEditingItem(item)}
@@ -375,11 +377,14 @@ function WantedList() {
                     </button>
                   </div>
                 </td>
+                <td className="td-library">
+                  <LibraryMatch artist={item.artist} title={item.title} />
+                </td>
               </tr>
             ))}
             {items.length === 0 && (
               <tr>
-                <td colSpan="8" className="empty-state">
+                <td colSpan="9" className="empty-state">
                   <div className="empty-state__inner">
                     <div className="empty-state__title">Nothing wanted yet</div>
                     <div className="empty-state__subtitle">Add tracks from a source or a mix:</div>

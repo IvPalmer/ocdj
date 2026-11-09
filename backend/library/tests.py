@@ -59,3 +59,28 @@ class LibraryMatchTests(TestCase):
         self.assertEqual(self.match().data, dict(status='no_indexed_match', coverage='indexed_only', matches=[]))
         self.assertEqual(self.client.post('/api/library/match/', {}).status_code, 405)
         self.assertEqual(LibraryTrack.objects.count(), 0)
+
+    key = 'mac-snapshot:12345678-1234-5678-9abc-123456789abc:' + 'ab' * 32
+    url = 'ocdj-reveal://track/12345678-1234-5678-9abc-123456789abc/' + 'ab' * 32
+
+    def test_mac_available_match_has_only_opaque_reveal_url(self):
+        track = self.record(source='mac_snapshot', file_path=self.key)
+        response = self.match()
+        self.assertEqual(response.data, dict(status='matched', coverage='indexed_only', matches=[
+            dict(id=track.id, format='flac', bitrate=900, sample_rate=44100, reveal_url=self.url)]))
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+
+    def test_missing_mac_match_does_not_reveal(self):
+        self.record(source='mac_snapshot', file_path=self.key, missing=True)
+        self.assertEqual(self.match().data, dict(status='indexed_missing', coverage='indexed_only', matches=[]))
+
+    def test_available_duplicate_does_not_reveal(self):
+        self.record(source='mac_snapshot', file_path=self.key)
+        self.record(file_path='/synthetic/duplicate.flac')
+        response = self.match().data
+        self.assertEqual(response['status'], 'multiple_matches')
+        self.assertTrue(all('reveal_url' not in match for match in response['matches']))
+
+    def test_legacy_mac_key_does_not_reveal(self):
+        self.record(source='mac_snapshot', file_path='/synthetic/legacy.flac')
+        self.assertNotIn('reveal_url', self.match().data['matches'][0])

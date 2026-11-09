@@ -82,7 +82,7 @@
 
 .wanted-table th {
   text-align: left;
-  padding: 8px 12px;
+  padding: 8px;
   color: var(--text-muted);
   font-weight: 600;
   font-size: 11px;
@@ -92,7 +92,7 @@
 }
 
 .wanted-table td {
-  padding: 9px 12px;
+  padding: 9px 8px;
   border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
 }
@@ -161,10 +161,14 @@
 .wanted-table .td-actions { white-space: nowrap; }
 .wanted-row-controls { display: inline-flex; align-items: center; gap: 4px; }
 .wanted-row-controls .track-controls { flex-wrap: nowrap; }
+.wanted-row-controls .track-playback { display: inline-flex; flex-wrap: nowrap; gap: 4px; }
+.wanted-row-controls .track-no-source { max-width: 100px; white-space: normal; }
 .wanted-row-controls .btn { flex: none; min-height: 24px; }
+/* Reserve quality space independently of the action controls. */
+.wanted-table .td-library { width: 132px; min-width: 132px; white-space: nowrap; }
 @media (max-width: 767px) {
   .wanted-row-controls .btn { min-height: 44px; }
-  .wanted-row-controls .track-library-match { min-height: 44px; }
+  .td-library .track-library-match { min-height: 44px; min-width: 44px; }
 }
 
 .empty-state {

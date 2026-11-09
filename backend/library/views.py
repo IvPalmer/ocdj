@@ -173,7 +173,7 @@ def track_match(request):
         match_artist=Lower(Trim('artist')), match_title=Lower(Trim('title')),
     ).filter(match_artist=artist, match_title=title)
     rows = list(candidates.filter(missing=False).order_by('id').values(
-        'id', 'format', 'bitrate', 'sample_rate')[:4])
+        'id', 'format', 'bitrate', 'sample_rate', 'source', 'file_path')[:4])
     result = match_result(rows, missing=not rows and candidates.filter(missing=True).exists())
     response = Response(result)
     response['Cache-Control'] = 'private, no-store'

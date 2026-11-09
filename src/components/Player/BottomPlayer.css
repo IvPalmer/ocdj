@@ -24,6 +24,7 @@
 .track-playback { align-items: center; }
 .track-library-match { min-width: 24px; min-height: 24px; justify-content: center; display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 11px; line-height: 1.4; color: var(--text-secondary); white-space: nowrap; border-radius: 3px; }
 .track-library-match svg { flex: none; }
+a.track-library-match { text-decoration: none; }
 .track-library-match--matched { color: var(--accent-green); }
 .track-library-match--warning { color: var(--accent-amber); }
 .track-library-match:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }

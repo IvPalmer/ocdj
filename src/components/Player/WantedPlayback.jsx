@@ -4,7 +4,7 @@ import { usePlayer } from './PlayerContext'
 import { directSource } from './TrackPlayback'
 import LibraryMatch from './LibraryMatch'
 
-export default function WantedPlayback({ item }) {
+export default function WantedPlayback({ item, showLibraryMatch = true }) {
   const player = usePlayer()
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
@@ -35,7 +35,7 @@ export default function WantedPlayback({ item }) {
   }
 
   return <span className="track-controls">
-    <LibraryMatch artist={item.artist} title={item.title} />
+    {showLibraryMatch && <LibraryMatch artist={item.artist} title={item.title} />}
     {!directSource(item) && item.preview_checked
       ? <small className="track-no-source">No catalog preview found.</small>
       : <span className="track-playback">
