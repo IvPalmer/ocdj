@@ -9,7 +9,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from wanted.models import MetadataCleanup, WantedItem
-from .cleanup_evidence import clean_isrc, collect_evidence, evaluate, same_name
+from .cleanup_evidence import clean_isrc, collect_evidence, evaluate, evaluate_review, same_name
 
 logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
@@ -141,9 +141,16 @@ def process_cleanup(cleanup_id):
         receipt.available_at = now + LEASE
         receipt.save(update_fields=['lease', 'attempts', 'status', 'available_at', 'updated'])
         snapshot = deepcopy(receipt.snapshot)
+        review_only = (receipt.subject_key.startswith('wanted-legacy-review:')
+                       or snapshot.get('review_only') is True)
     try:
-        evidence = collect_evidence(snapshot)
-        result = evaluate(snapshot, evidence)
+        query = deepcopy(snapshot)
+        if review_only and not query.get('isrc'):
+            # Imported label/compilation credits can poison artist+title search.
+            # Full-title search supplies candidates, never proof of identity.
+            query['artist'] = ''
+        evidence = collect_evidence(query)
+        result = evaluate_review(snapshot, evidence) if review_only else evaluate(snapshot, evidence)
     except Exception as exc:
         # Retain a safe classification only, never provider error text.
         import requests
@@ -165,7 +172,17 @@ def process_cleanup(cleanup_id):
         receipt.evidence = evidence
         receipt.result = result
         receipt.status = 'protected' if snapshot.get('protected') else 'proposed'
-        if receipt.wanted_id:
+        if review_only:
+            # No application path, independent of current protection. Later
+            # unprotection cannot activate these historical review receipts.
+            current = WantedItem.objects.select_for_update().filter(pk=receipt.wanted_id).first()
+            receipt.status = 'proposed'
+            if (current is None or current.metadata_revision != snapshot['revision']
+                    or current.artist != snapshot['artist'] or current.title != snapshot['title']
+                    or current.cleanup_isrc != snapshot['isrc']
+                    or current.metadata_protected != snapshot['protected']):
+                receipt.status = 'superseded'
+        elif receipt.wanted_id:
             current = WantedItem.objects.select_for_update().filter(pk=receipt.wanted_id).first()
             if (current is None or current.metadata_revision != snapshot['revision']
                     or current.metadata_protected or current.artist != snapshot['artist']

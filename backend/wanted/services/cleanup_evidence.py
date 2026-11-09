@@ -162,3 +162,24 @@ def verified_changes(result, artist, title, candidate, reason):
     if prefixed:
         changes['title'] = candidate['title']
     return {'changes': changes, 'reason': reason}
+
+
+def evaluate_review(snapshot, evidence):
+    """Protected historical hypotheses, never application authority.
+
+    Search credit conflicts are review leads, never verified repairs. Preserve
+    full titles: a remix mismatch cannot support a metadata delta.
+    """
+    assessed = []
+    for candidate in evidence.get('candidates', []):
+        full_title = (same_name(snapshot.get('title', ''), candidate.get('title', ''))
+                      or has_artist_prefix(snapshot.get('title', ''), candidate))
+        assessed.append({'provider': candidate.get('provider'), 'id': candidate.get('id'),
+                         'assessment': 'full_title_only_identity_unverified' if full_title
+                         else 'version_or_title_conflict'})
+    # Reuse strict policy for anchored hypotheses but never expose its write
+    # delta under "changes". Human edits retain all authority.
+    hypothesis = evaluate({**snapshot, 'protected': False}, evidence)
+    return {'changes': {}, 'proposed_changes': hypothesis['changes'],
+            'reason': 'legacy_review_only', 'hypothesis_reason': hypothesis['reason'],
+            'candidate_assessments': assessed}

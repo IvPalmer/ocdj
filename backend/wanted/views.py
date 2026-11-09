@@ -57,6 +57,9 @@ class WantedItemViewSet(viewsets.ModelViewSet):
         from .serializers import MetadataCleanupSerializer
         item = self.get_object()
         receipt = MetadataCleanup.objects.filter(subject_key=f'wanted:{item.pk}').first()
+        if receipt is None:
+            receipt = MetadataCleanup.objects.filter(
+                subject_key=f'wanted-legacy-review:v1:{item.pk}').first()
         return Response(MetadataCleanupSerializer(receipt).data if receipt else None)
 
     @action(detail=True, methods=['post'])
