@@ -10,7 +10,6 @@
   let currentReleaseIndex = 0;
   let currentVideoIndex = 0;
   let isPlaying = false;
-  let port = null;
   let fallbackTimer = null;
 
   // ── DOM Refs ───────────────────────────────────────────────
@@ -32,6 +31,18 @@
 
   // ── Platform Helpers ───────────────────────────────────────
 
+  function beatportEmbedUrl(sourceUrl) {
+    try {
+      const source = new URL(sourceUrl);
+      const match = source.pathname.match(/^\/(?:[a-z]{2}\/)?(track|release)\/[^/]+\/([1-9]\d*)\/?$/);
+      if (source.protocol === 'https:' && !source.port && !source.username && !source.password &&
+          ['www.beatport.com', 'beatport.com'].includes(source.hostname) && match) {
+        return `https://embed.beatport.com/?id=${match[2]}&type=${match[1]}`;
+      }
+    } catch (_) { /* Invalid or legacy source: fail closed, never search. */ }
+    return '';
+  }
+
   function hasEmbed(release) {
     return !!release.embedUrl;
   }
@@ -44,7 +55,13 @@
     playerContainer.className = '';
     const platform = getReleasePlatform(release);
 
-    if (platform === 'bandcamp') {
+    const beatportNote = document.getElementById('beatport-preview-note');
+    if (beatportNote) beatportNote.hidden = platform !== 'beatport';
+    if (platform === 'beatport') {
+      document.getElementById('beatport-preview-source').href = release.source_url;
+      const isRelease = new URL(release.embedUrl).searchParams.get('type') === 'release';
+      playerContainer.classList.add(isRelease ? 'platform-beatport-release' : 'platform-beatport-track');
+    } else if (platform === 'bandcamp') {
       playerContainer.classList.add('platform-bandcamp');
     } else if (platform === 'soundcloud') {
       const isSet = release.source_url && release.source_url.includes('/sets/');
@@ -56,20 +73,6 @@
     // YouTube / Discogs: no class, uses default 16:9 padding-top
   }
 
-  // ── Persistent Port to Service Worker ──────────────────────
-
-  function connectPort() {
-    port = chrome.runtime.connect({ name: 'side-panel' });
-    port.onMessage.addListener((msg) => {
-      if (msg.type === 'queue-updated') {
-        loadState();
-      }
-    });
-    port.onDisconnect.addListener(() => {
-      setTimeout(connectPort, 1000);
-    });
-  }
-
   // ── State Persistence ──────────────────────────────────────
 
   async function loadState() {
@@ -78,7 +81,11 @@
       'currentReleaseIndex',
       'currentVideoIndex',
     ]);
-    queue = data.playerQueue || [];
+    queue = (data.playerQueue || []).map(release => release.platform === 'beatport'
+      // Old versions stored a generic YouTube result under a Beatport badge.
+      // Rebind to the original exact source; never replay that search result.
+      ? { ...release, embedUrl: beatportEmbedUrl(release.source_url), videos: [], tracks: [] }
+      : release);
     currentReleaseIndex = data.currentReleaseIndex || 0;
     currentVideoIndex = data.currentVideoIndex || 0;
 
@@ -165,6 +172,19 @@
     if (queue.length === 0) return;
     const release = queue[currentReleaseIndex];
     if (!release) return;
+    if (release.platform === 'beatport' && !release.embedUrl) {
+      clearFallbackTimer();
+      iframe.src = '';
+      iframe.style.display = 'none';
+      placeholder.textContent = 'Exact Beatport source unavailable. Requeue from the exact Beatport page.';
+      placeholder.style.display = 'flex';
+      document.getElementById('beatport-preview-note').hidden = true;
+      isPlaying = false;
+      nowPlayingTitle.textContent = 'Beatport source unavailable';
+      nowPlayingRelease.textContent = [release.artist, release.title].filter(Boolean).join(' — ');
+      renderQueue();
+      return;
+    }
 
     loadEmbed(release);
     updateNowPlaying();
@@ -462,9 +482,11 @@
       currentVideoIndex = 0;
       iframe.src = '';
       iframe.style.display = 'none';
+      placeholder.textContent = 'Queue a release to start listening';
       placeholder.style.display = 'flex';
 
       playerContainer.className = '';
+      document.getElementById('beatport-preview-note').hidden = true;
       isPlaying = false;
       clearFallbackTimer();
     } else if (index < currentReleaseIndex) {
@@ -478,7 +500,8 @@
     }
 
     await saveState();
-    chrome.runtime.sendMessage({ type: 'dig:removeFromQueue', data: { index } }).catch(() => {});
+    // saveState already removed this entry from the worker's shared storage.
+    // Sending removeFromQueue as well would delete the following entry.
     renderQueue();
     updateNowPlaying();
   }
@@ -489,8 +512,10 @@
     currentVideoIndex = 0;
     iframe.src = '';
     iframe.style.display = 'none';
+    placeholder.textContent = 'Queue a release to start listening';
     placeholder.style.display = 'flex';
     playerContainer.className = '';
+    document.getElementById('beatport-preview-note').hidden = true;
     isPlaying = false;
     clearFallbackTimer();
 
@@ -509,7 +534,8 @@
     try {
       const platform = getReleasePlatform(release);
       const isAlbum = platform === 'discogs' || platform === 'bandcamp' ||
-        (platform === 'spotify' && release.embedUrl && release.embedUrl.includes('/album/'));
+        (platform === 'spotify' && release.embedUrl && release.embedUrl.includes('/album/')) ||
+        (platform === 'beatport' && new URL(release.embedUrl).searchParams.get('type') === 'release');
 
       const data = {
         artist: release.artist || '',
@@ -637,6 +663,10 @@
 
   // ── Init ───────────────────────────────────────────────────
 
-  connectPort();
+  // Safari has no sidePanel API or worker port handler. Observe its existing
+  // shared queue directly; no reconnect timers or worker keepalive are needed.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.playerQueue) loadState();
+  });
   loadState();
 })();

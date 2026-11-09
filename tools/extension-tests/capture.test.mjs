@@ -106,7 +106,7 @@ for (const root of roots) {
       f.w.document.title = 'Riton, Kid Enigma, RUZE - So Fly (Extended) [Label] | Music & Downloads on Beatport';
       await pause();
       click(f.w, '.ocdj-play-btn'); click(f.w, '.ocdj-dig-btn');
-      assert.equal(f.messages[0].type, 'dig:queue-search');
+      assert.equal(f.messages[0].type, 'dig:queue-embed');
       assert.equal(f.messages[0].data.platform, 'beatport');
       assert.equal(f.messages[0].data.title, 'So Fly (Extended)');
       assert.equal(f.messages[1].data.source_site, 'beatport');
@@ -191,7 +191,7 @@ test('Safari release queue search reads current URL/token on each call and prese
     },
   };
   const handlers = runInNewContext(readFileSync(`${root}/background/service-worker.js`, 'utf8') + '\nmessageHandlers;', context);
-  const data = { artist: 'Fixture', title: 'Recording', platform: 'beatport' };
+  const data = { artist: 'Fixture', title: 'Recording', platform: 'discogs' };
   await handlers['dig:queue-search'](data);
   assert.match(calls[0].url, /^https:\/\/fixture.invalid\/api\/dig\/yt-search\//);
   assert.equal(calls[0].options.headers.Authorization, 'Bearer synthetic-first');
@@ -225,12 +225,12 @@ for (const root of roots) {
       },
     };
     const handlers = runInNewContext(readFileSync(`${root}/background/service-worker.js`, 'utf8') + '\nmessageHandlers;', context);
-    const data = { artist: 'Artist', title: 'Track (Extended)', platform: 'beatport', source_url: 'https://www.beatport.com/track/track/123' };
+    const data = { artist: 'Artist', title: 'Track (Extended)', platform: 'discogs', source_url: 'https://www.discogs.com/release/123' };
     const result = await handlers['dig:queue-search'](data);
     assert.equal(result.queued, true);
     assert.match(calls[0].url, /\/api\/dig\/yt-search\/\?q=Artist%20Track%20/);
     assert.equal(stored.playerQueue[0].source_url, data.source_url);
-    assert.equal(stored.playerQueue[0].platform, 'beatport');
+    assert.equal(stored.playerQueue[0].platform, 'discogs');
     assert.equal(stored.playerQueue[0].videos[0].videoId, 'test-video');
     await handlers['dig:queue-search'](data);
     assert.equal(stored.playerQueue.length, 1);

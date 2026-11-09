@@ -76,7 +76,7 @@ for (const root of roots) {
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
       f.w.document.querySelector('.ocdj-dig-btn').click();
       f.w.document.querySelector('.ocdj-play-btn').click();
-      assert.deepEqual(f.messages.map(m => m.type), ['dig:add', 'dig:queue-search']);
+      assert.deepEqual(f.messages.map(m => m.type), ['dig:add', 'dig:queue-embed']);
       assert.deepEqual(f.messages[0].data, {
         artist: 'Fixture Alpha, Fixture Beta', title: 'Synthetic (Night) (Extended Mix)', release_name: '',
         source_site: 'beatport', source_url: 'https://www.beatport.com/track/synthetic-recording/910001',
@@ -84,11 +84,11 @@ for (const root of roots) {
       assert.equal(f.messages[1].data.title, f.messages[0].data.title);
       assert.equal(f.messages[1].data.source_url, f.messages[0].data.source_url);
       assert.equal(f.messages[1].data.platform, 'beatport');
-      assert.equal(f.messages[1].data.embedUrl, undefined);
+      assert.equal(f.messages[1].data.embedUrl, 'https://embed.beatport.com/?id=910001&type=track');
     } finally { await f.close(); }
   });
 
-  test(`${root}: localized release is one release-level Wanted and search Queue pair`, async () => {
+  test(`${root}: localized release is one release-level Wanted and exact preview selector pair`, async () => {
     const f = page('/fr/release/synthetic-release/910002',
       'Fixture Ensemble - Synthetic Release [Fixture Label] | Music & Downloads on Beatport', 'Synthetic Release');
     try {
@@ -99,10 +99,24 @@ for (const root of roots) {
       assert.equal(f.messages[0].data.release_name, 'Synthetic Release');
       assert.equal(f.messages[0].data.artist, 'Fixture Ensemble');
       assert.equal(f.messages[1].data.title, 'Synthetic Release');
+      assert.equal(f.messages[1].data.embedUrl, 'https://embed.beatport.com/?id=910002&type=release');
       assert.equal(f.messages[1].data.source_url, 'https://www.beatport.com/fr/release/synthetic-release/910002');
       f.w.document.body.append(f.w.document.createElement('p'));
       await pause();
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
+    } finally { await f.close(); }
+  });
+
+  test(`${root}: Queue rejects a stale SPA callback before observer refresh`, async () => {
+    const f = page('/track/synthetic/910005', 'Fixture - Synthetic | Beatport', 'Synthetic');
+    try {
+      const oldButton = f.w.document.querySelector('.ocdj-play-btn');
+      f.w.history.pushState({}, '', '/track/new/910006');
+      oldButton.click();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(f.messages.length, 0);
+      assert.match(f.w.document.querySelector('.ocdj-toast').textContent, /source changed/);
+      assert.equal(oldButton.textContent, 'Queue');
     } finally { await f.close(); }
   });
 
