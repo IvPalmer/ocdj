@@ -1,4 +1,4 @@
-import WantedPlayback from '../Player/WantedPlayback'
+import WantedPlayback, { WantedPlaybackStatus } from '../Player/WantedPlayback'
 import LibraryMatch from '../Player/LibraryMatch'
 import { useState } from 'react'
 import {
@@ -334,7 +334,10 @@ function WantedList() {
                   />
                 </td>
                 <td className="td-artist">{item.artist || '—'}</td>
-                <td className="td-title">{item.title || '—'}</td>
+                <td className="td-title">
+                  <span>{item.title || '—'}</span>
+                  <WantedPlaybackStatus id={item.id} />
+                </td>
                 <td className="td-release">
                   {item.release_name || item.catalog_number || '—'}
                   {item.release_name && item.catalog_number && (

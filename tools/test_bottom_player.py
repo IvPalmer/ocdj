@@ -22,7 +22,7 @@ def audio_bytes():
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True, channel="chrome")
+    browser = p.chromium.launch(headless=True)
     page = browser.new_page()
     page.set_default_timeout(10000)
     errors = []
@@ -64,12 +64,17 @@ with sync_playwright() as p:
             data = dict(total=1, spotify_connected=True, overdue=False)
         elif path == 'wanted/items/2/preview/':
             data = dict(url='/api/fixture.wav', provider='itunes')
+        elif path == 'wanted/items/1/online-source/':
+            data = dict(url='https://www.youtube.com/watch?v=fixture0001', provider='youtube')
         elif path == 'wanted/items/' and 'identified_via=shazam' in request.url:
             data = dict(count=1, results=[dict(id=2, artist='Fixture artist', title='Shazam tone',
                  status='identified', notes='synthetic fixture', added='2026-01-01T00:00:00Z')])
         elif path == 'wanted/items/' and request.method == 'GET':
-            data = dict(count=1, results=[dict(id=1, artist='Fixture artist', title='Wanted tone',
-                 status='pending', preview_checked='2026-01-01T00:00:00Z', added='2026-01-01T00:00:00Z')])
+            data = dict(count=2, results=[dict(id=1, artist='Fixture artist', title='Wanted tone',
+                 status='pending', preview_checked='2026-01-01T00:00:00Z', added='2026-01-01T00:00:00Z'),
+                dict(id=3, artist='Fixture artist', title='Spotify tone', status='pending',
+                     notes='https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT',
+                     added='2026-01-01T00:00:00Z')])
         elif path == 'wanted/items/':
             data = dict(id=7)
         elif path == 'soulseek/queue/add/':
@@ -80,6 +85,18 @@ with sync_playwright() as p:
 
     page.route('https://**', lambda r: r.abort())
     page.route(BASE + '/api/**', route)
+    page.route('https://open.spotify.com/embed/iframe-api/v1', lambda r: r.fulfill(
+        content_type='application/javascript', body='''
+          window.onSpotifyIframeApiReady({createController(target, options, callback) {
+            const handlers = {};
+            const update = isPaused => handlers.playback_update?.({data: {
+              playingURI: options.uri, isPaused, duration: 30000, position: 0 }});
+            window.adapterCalls.push(['spotify-uri', options.uri]);
+            callback({addListener: (name, fn) => { handlers[name] = fn },
+              resume: () => update(false), pause: () => update(true), destroy: () => target.remove() });
+            setTimeout(() => handlers.ready?.(), 0);
+          }});
+        '''))
     page.route('https://w.soundcloud.com/**', lambda r: r.fulfill(body='<html>Synthetic SoundCloud adapter</html>', content_type='text/html'))
     page.add_init_script('''
       window.adapterCalls = [];
@@ -139,18 +156,25 @@ with sync_playwright() as p:
     assert ('soulseek/queue/add/', dict(query='Fixture artist Source tone')) in writes
     assert not any('clear' in path for path, _ in writes)
     page.get_by_role('link', name='Wanted', exact=True).click()
-    expect(page.get_by_text('No catalog preview found.')).to_be_visible()
+    wanted_row = page.get_by_role('row').filter(has_text='Wanted tone')
+    wanted_row.get_by_role('button', name='Play Fixture artist — Wanted tone').click()
+    page.wait_for_function("window.adapterCalls.some(c => c[0] === 'youtube-segment' && c[1] === 'fixture0001')")
+    expect(wanted_row.get_by_text('Playing', exact=True)).to_be_visible()
+    player.get_by_role('button', name='Pause playback').click()
+    expect(wanted_row.get_by_text('Paused', exact=True)).to_be_visible()
+    assert not any(path == 'wanted/items/1/preview/' for path, _ in writes)
     page.get_by_role('link', name='Shazam', exact=True).click()
     page.get_by_role('button', name='Queue Fixture artist — Shazam tone', exact=True).click()
-    expect(page.get_by_text('Looking up preview…')).to_have_count(0)
-    assert ('wanted/items/2/preview/', {}) in writes
-    player.get_by_text('Queue (3)', exact=True).click()
+    assert ('wanted/items/2/preview/', {}) not in writes
+    player.get_by_text('Queue (4)', exact=True).click()
     player.get_by_role('button', name='Up next: Fixture artist — Shazam tone').click()
-    page.wait_for_function("!document.querySelector('.bottom-player audio').paused")
+    page.wait_for_function("document.querySelector('.bottom-player audio')?.paused === false")
+    assert ('wanted/items/2/preview/', {}) in writes
+    expect(page.get_by_text('Playing', exact=True)).to_be_visible()
     expect(player.get_by_role('button', name='In Wanted')).to_be_disabled()
     page.get_by_role('link', name='YouTube', exact=True).click()
     expect(player.get_by_text('Fixture artist — Shazam tone', exact=True)).to_be_visible()
-    player.get_by_text('Queue (3)', exact=True).click()
+    player.get_by_text('Queue (4)', exact=True).click()
     page.get_by_role('link', name='Instagram', exact=True).click()
     page.locator('video[controls]').evaluate('video => video.play()')
     page.wait_for_function("document.querySelector('.bottom-player audio').paused")
@@ -179,6 +203,12 @@ with sync_playwright() as p:
     page.get_by_role('link', name='Settings', exact=True).click()
     expect(page).to_have_url(BASE + '/settings')
     expect(player.get_by_text('Fixture artist — SoundCloud segment', exact=True)).to_be_visible()
+    page.get_by_role('link', name='Wanted', exact=True).click()
+    spotify_row = page.get_by_role('row').filter(has_text='Spotify tone')
+    spotify_row.get_by_role('button', name='Play Fixture artist — Spotify tone').click()
+    expect(spotify_row.get_by_text('Playing', exact=True)).to_be_visible()
+    assert page.evaluate("window.adapterCalls.some(c => c[0] === 'spotify-uri' && c[1] === 'spotify:track:4cOdK2wGLETKBW3PvgPWqT')")
+    expect(wanted_row.get_by_text('Playing', exact=True)).to_have_count(0)
     assert not errors, errors
     browser.close()
     print('PASS: native audio, route persistence, queue/previous/next/end, pause/play, error retry, video exclusion, action payloads, source labels, mobile layout, YouTube/SoundCloud adapter fixtures. External provider playback not live-tested.')

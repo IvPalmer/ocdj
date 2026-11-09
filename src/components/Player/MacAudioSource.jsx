@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
-import { directSource } from './TrackPlayback'
 
 // Preparation belongs to the persistent player, never to a route or a queue row.
-export default function MacAudioSource({ track, playing, onPlaying, onEnded, onError, AudioSource, EmbedSource }) {
+export default function MacAudioSource({ track, playing, onPlaying, onEnded, onError, AudioSource, EmbedSource, WantedOnlineSource }) {
   const [resolved, setResolved] = useState(null)
   const [failed, setFailed] = useState(false)
   const [fallbackSelected, setFallbackSelected] = useState(false)
@@ -14,17 +13,8 @@ export default function MacAudioSource({ track, playing, onPlaying, onEnded, onE
     const endpoint = `/library/tracks/${track.source.libraryId}/playback/`
     const deadline = Date.now() + 185000
     setResolved(null)
-    const resolveFallback = async () => {
-      // Preserve the original preview/mix and its segment bounds. Wanted lookup
-      // stays lazy: future queue entries never fetch previews or stage Mac audio.
-      let fallback = track.fallback
-      try {
-        if (fallback && !fallback.source && fallback.wantedId && !fallback.previewChecked) {
-          const preview = await api.post(`/wanted/items/${fallback.wantedId}/preview/`, {})
-          fallback = { ...fallback, source: directSource({ preview_url: preview?.url }) }
-        }
-      } catch { /* Keep the explicit retry when both sources are unavailable. */ }
-      if (!active) return
+    const resolveFallback = () => {
+      const fallback = track.fallback
       if (fallback?.source) setResolved({ ...fallback, queueId: track.queueId })
       else { setFailed(true); onError() }
     }
@@ -45,13 +35,16 @@ export default function MacAudioSource({ track, playing, onPlaying, onEnded, onE
     return () => { active = false; clearTimeout(timer) }
   }, [track.queueId, fallbackSelected])
   if (failed) return null
-  const Source = resolved?.source.kind === 'audio' ? AudioSource : EmbedSource
+  const Source = resolved?.source.kind === 'wanted' ? WantedOnlineSource
+    : resolved?.source.kind === 'audio' ? AudioSource : EmbedSource
   return <>
-    {!fallbackSelected && (track.fallback?.source || (track.fallback?.wantedId && !track.fallback.previewChecked)) &&
-      <button type="button" className="btn btn-xs" onClick={() => setFallbackSelected(true)}>Use preview / mix</button>}
+    {!fallbackSelected && track.fallback?.source &&
+      <button type="button" className="btn btn-xs" onClick={() => setFallbackSelected(true)}>
+        {track.fallback.source.kind === 'wanted' ? 'Use online source' : 'Use preview / mix'}
+      </button>}
     {!resolved ? <small role="status">Waiting for Mac audio… The Mac connector must be running.</small> : <>
-      {fallbackSelected && <small role="status">Using fallback · {resolved.description}</small>}
-      <Source {...{ track: resolved, playing, onPlaying, onEnded }}
+      {fallbackSelected && resolved.source.kind !== 'wanted' && <small role="status">Using fallback · {resolved.description}</small>}
+      <Source {...{ track: resolved, playing, onPlaying, onEnded, AudioSource, EmbedSource }}
         onError={fallbackSelected ? onError : () => setFallbackSelected(true)} />
     </>}
   </>

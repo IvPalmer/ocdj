@@ -4,6 +4,7 @@ on:
     paths:
       - 'backend/library/**'
       - 'tools/mac_library/**'
+      - 'tools/test_bottom_player.py'
       - 'src/components/Player/**'
       - '.github/workflows/mac-library.yml'
 jobs:
@@ -54,3 +55,4 @@ jobs:
             sleep 1
           done
           python tools/mac_library/test_player.py http://127.0.0.1:5189
+          python tools/test_bottom_player.py http://127.0.0.1:5189

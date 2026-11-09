@@ -31,6 +31,23 @@ function mixSource(value) {
   return null
 }
 
+export function linkedTrackSource(value) {
+  let url
+  try { url = new URL(value) } catch { return null }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port) return null
+  const trackId = url.pathname.match(/^\/(?:intl-[a-z]{2}\/)?track\/([a-zA-Z0-9]{22})\/?$/)?.[1]
+  if (url.hostname === 'open.spotify.com' && trackId) {
+    return { kind: 'spotify', uri: `spotify:track:${trackId}` }
+  }
+  const source = mixSource(url.href)
+  if (source?.kind === 'youtube' && /^[a-zA-Z0-9_-]{11}$/.test(source.videoId)) return source
+  if (source?.kind === 'soundcloud' && /^\/[^/]+\/[^/]+\/?$/.test(url.pathname)
+      && !['sets', 'tracks', 'likes', 'reposts', 'albums', 'popular-tracks'].includes(url.pathname.split('/')[2])) {
+    return source
+  }
+  return null
+}
+
 export function recognizedTrack(track, job, index) {
   const preview = directSource(track)
   const source = preview || mixSource(job.url)
