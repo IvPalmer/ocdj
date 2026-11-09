@@ -6,7 +6,9 @@
   'use strict';
 
   function init() {
-    OCDJ.observePage(inject);
+    // A second evaluation must not install competing frame observers.
+    if (OCDJ.soundcloudObserver) return;
+    OCDJ.soundcloudObserver = OCDJ.observePage(inject);
   }
 
   function inject() {
@@ -24,16 +26,16 @@
   }
 
   // New SoundCloud layouts render the recording in a same-origin /n/ frame.
-  // Keep controls in the outer page, where the declared stylesheet and runtime
-  // already live. Never inject scripts into frames or widen manifest access.
+  // Use the matching frame’s track heading, with its own scoped extension CSS.
   const frames = new Map();
-  let framedControls;
+  const frameOwner = 'data-ocdj-sc-frame';
   function injectFramedTrack() {
     for (const [frame, state] of frames) {
       if (!frame.isConnected) {
         state.observer?.disconnect();
         clearTimeout(state.timer);
         state.group?.remove();
+        frame.removeAttribute(frameOwner);
         frame.removeEventListener('load', state.refresh);
         frames.delete(frame);
       }
@@ -55,6 +57,7 @@
               url.pathname.replace(/\/$/, '') !== '/n' + path ||
               !/^\/[^/]+\/[^/]+$/.test(path)) {
             state.group?.remove();
+            frame.removeAttribute(frameOwner);
             return;
           }
           state.observer = new MutationObserver(() => {
@@ -69,10 +72,16 @@
           const artist = [...(heading?.parentElement?.querySelectorAll('a[href]') || [])]
             .find(link => link.pathname.replace(/\/$/, '') === profilePath)?.textContent.trim();
           const key = path + '|' + artist + '|' + title;
-          if (previousDoc === doc && state.key === key && state.group?.isConnected) return;
+          if (previousDoc === doc && state.key === key && state.group?.isConnected && state.group.previousElementSibling === heading) return;
           state.group?.remove();
           state.key = key;
-          if (!title || !artist || framedControls?.isConnected) return;
+          const owner = document.querySelector(`iframe[${frameOwner}]`);
+          if (owner && owner !== frame) return;
+          if (!title || !artist) {
+            if (!doc.querySelector('.ocdj-sc-framed-controls')) frame.removeAttribute(frameOwner);
+            return;
+          }
+          if (doc.querySelector('.ocdj-sc-framed-controls')) return;
           const source_url = window.location.origin + path;
           const queue = OCDJ.createPlayButton({
             size: 'medium',
@@ -92,8 +101,9 @@
           });
           state.group = OCDJ.createButtonGroup(queue, wantlist);
           state.group.classList.add('ocdj-sc-framed-controls');
-          framedControls = state.group;
-          document.body.append(state.group);
+          frame.setAttribute(frameOwner, '');
+          document.querySelector('.ocdj-sc-track-controls')?.remove();
+          heading.after(state.group);
         };
         frames.set(frame, state);
         frame.addEventListener('load', state.refresh);
@@ -160,6 +170,7 @@
   // ── Track Page ────────────────────────────────────────────
 
   function injectTrackPage() {
+    if (document.querySelector(`iframe[${frameOwner}]`)) return;
     const actionsBar =
       document.querySelector('.soundActions .sc-button-group') ||
       document.querySelector('.listenEngagement .soundActions') ||
@@ -199,6 +210,7 @@
     });
 
     const group = OCDJ.createButtonGroup(queueBtn, btn);
+    group.classList.add('ocdj-sc-track-controls');
     group.style.marginLeft = '8px';
     actionsBar.appendChild(group);
   }
