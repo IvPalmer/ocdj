@@ -27,6 +27,7 @@ struct FinderReveal {
         let collection_id: String
         let root: String
         let tracks: [String: String]
+        let review_fingerprints: [String: [String]]?
     }
 
     enum Failure: Error {
@@ -117,12 +118,23 @@ struct FinderReveal {
         guard map.collection_id == request.collection, let relative = map.tracks[request.id] else { throw Failure.staleMap }
         let parts = relative.components(separatedBy: "/")
         guard !relative.contains("\0"), !parts.isEmpty,
-              !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || ["id3", "traxdb"].contains($0.lowercased()) }) else { throw Failure.staleFile }
+              !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { throw Failure.staleFile }
+        let reviewArchive = parts.count == 3 && parts[0].lowercased() == "id3" && parts[1].lowercased() == "_review"
+        guard reviewArchive || !parts.contains(where: { ["id3", "traxdb"].contains($0.lowercased()) }) else {
+            throw Failure.staleFile
+        }
         let path = map.root + "/" + relative
         let fd = try openTarget(root: map.root, parts: parts)
         defer { close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { throw Failure.staleFile }
+        if reviewArchive {
+            let modified = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
+            let changed = Int64(info.st_ctimespec.tv_sec) * 1_000_000_000 + Int64(info.st_ctimespec.tv_nsec)
+            let fingerprint = [String(info.st_dev), String(info.st_ino), String(info.st_size),
+                               String(modified), String(changed)]
+            guard map.review_fingerprints?[request.id] == fingerprint else { throw Failure.staleFile }
+        }
         return URL(fileURLWithPath: path)
     }
 }

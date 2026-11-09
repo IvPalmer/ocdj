@@ -20,6 +20,8 @@ def main():
     parser.add_argument('--key-file', help='Existing private file containing exactly 32 random bytes')
     parser.add_argument('--local-reveal-map', action='store_true',
                         help='Atomically refresh the private map in OCDJ Helper’s sandbox; no server export required')
+    parser.add_argument('--include-ocdj-review', action='store_true',
+                        help='Include marked OCDJ archives from ID3/_review only')
     args = parser.parse_args()
     try:
         if (args.export or args.local_reveal_map) and not (args.collection_id and args.key_file):
@@ -36,7 +38,7 @@ def main():
                     raise SnapshotError('Key must contain exactly 32 bytes.')
         local_paths = {} if args.local_reveal_map else None
         payload, counts = scan(args.root, args.collection_id or '00000000-0000-0000-0000-000000000000', key,
-                               local_paths=local_paths)
+                               local_paths=local_paths, include_ocdj_review=args.include_ocdj_review)
         print(json.dumps(dict(mode='export' if args.export else ('local_map' if args.local_reveal_map else 'dry_run'), complete=payload['complete'], **counts), sort_keys=True))
         if args.local_reveal_map:
             destination = default_map_path()

@@ -184,6 +184,29 @@ class SnapshotTests(unittest.TestCase):
                           if 'archive_item_id' in row], [123])
         self.assertNotIn('personal grouping', json.dumps(payload))
 
+    def test_opt_in_review_exports_only_direct_marked_archives(self):
+        from mutagen.id3 import GRP1
+        from mutagen.wave import WAVE
+
+        self.audio('ordinary.wav')
+        for relative, marker in [('ID3/_review/marked.wav', 'ocdj:713'),
+                                 ('ID3/_review/unmarked.wav', ''),
+                                 ('ID3/_review/nested/skipped.wav', 'ocdj:714'),
+                                 ('ID3/staging/skipped.wav', 'ocdj:715')]:
+            path = self.audio(relative)
+            if marker:
+                audio = WAVE(path)
+                audio.add_tags()
+                audio.tags.add(GRP1(encoding=3, text=[marker]))
+                audio.save()
+        default, _ = self.scan()
+        paths = {}
+        payload, _ = snapshots.scan(self.root, self.collection, self.key,
+                                    local_paths=paths, include_ocdj_review=True)
+        self.assertEqual(len(default['tracks']), 1)
+        self.assertEqual({row.get('archive_item_id') for row in payload['tracks']}, {None, 713})
+        self.assertIn('ID3/_review/marked.wav', paths.values())
+
     def test_size_cap_and_bad_envelopes(self):
         self.audio()
         payload, _ = self.scan()

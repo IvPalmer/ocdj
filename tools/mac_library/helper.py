@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from tools.mac_library.reveal_map import default_map_path
+from tools.mac_library.reveal_map import default_map_path, review_archive_path, review_fingerprint
 
 MAX_SOURCE = 512 * 1024 * 1024
 MAX_OUTPUT = 64 * 1024 * 1024
@@ -86,7 +86,8 @@ def source(map_data, collection, opaque):
         raise Refused()
     relative = map_data['tracks'][opaque]
     parts = components(relative)
-    if any(p.casefold() in ('id3', 'traxdb') for p in parts):
+    review = review_archive_path(parts)
+    if any(p.casefold() in ('id3', 'traxdb') for p in parts) and not review:
         raise Refused()
     demuxer = DEMUXERS.get(Path(relative).suffix.lower())
     if not demuxer:
@@ -102,6 +103,10 @@ def source(map_data, collection, opaque):
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= MAX_SOURCE:
             raise Refused()
+        if review:
+            fingerprints = map_data.get('review_fingerprints')
+            if not isinstance(fingerprints, dict) or fingerprints.get(opaque) != review_fingerprint(before):
+                raise Refused()
         yield fd, demuxer
         after = os.fstat(fd)
         if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
