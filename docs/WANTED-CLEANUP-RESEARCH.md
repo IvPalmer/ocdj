@@ -49,6 +49,7 @@ Repeated identical input yields identical output; no timestamps/random IDs are
 invented. The event UUID identifies the original intake, never a recording or a
 new proposal revision.
 
+A receipt explicitly marked as a release cannot receive recording suggestions.
 Only a blank artist can currently receive a suggestion: all supplied observations
 must declare recording granularity, parse losslessly to a complete artist/title,
 and agree with the receipt's entire nonblank title (including version text).

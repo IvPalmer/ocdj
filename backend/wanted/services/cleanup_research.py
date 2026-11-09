@@ -65,6 +65,8 @@ def build_cleanup_proposal(receipt, evidence):
     metadata = snapshot['metadata']
     candidates = []
     reasons = set()
+    if snapshot['granularity'] == 'release':
+        reasons.add('subject_is_release')
     identities = set()
     for index, observation in enumerate(evidence):
         parsed = parse_video_title(observation['raw_title'])
