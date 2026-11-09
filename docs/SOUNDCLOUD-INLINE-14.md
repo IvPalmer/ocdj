@@ -21,7 +21,8 @@ This is not a request to grant Safari access or change any user settings.
 Connected and wrapper frame adapters and CSS are byte-identical. Safari-specific
 native API embeds and playlist visibility/deduplication behavior are preserved.
 
-Versions: extension manifest `1.1.1`; wrapper and appex `1.0.1` (build `2`).
+Versions: connected manifest `1.1.1`; Safari manifest, wrapper and appex
+`1.0.1` (wrapper/appex build `2`).
 Use the existing [signing recipe](EDGE-AND-LOCAL.md), with build-only
 `MACOSX_DEPLOYMENT_TARGET=26.2`. Keep derived data and notarized artifacts
 outside the repository in a private directory. No installation, launch,
