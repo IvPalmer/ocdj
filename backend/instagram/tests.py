@@ -316,6 +316,24 @@ class WorkspaceTests(TestCase):
             self.assertEqual(self.complete(job, 'no-match', []).status_code, 200)
 
     @patch('instagram.views.release_candidates')
+    def test_unassigned_catalog_evidence_survives_connector_audio_fallback(self, lookup):
+        candidate = {'artist': 'Fixture', 'title': 'Unassigned track'}
+        record = {'source': 'caption', 'comment_id': '', 'text': 'Release tracklist; clip unverified',
+                  'candidate': candidate}
+        lookup.return_value = ([], [record])
+        self.caption('Catalog: FIX001')
+        result = self.action('recognize').data
+        self.assertTrue(result['queued'])
+        self.assertEqual(result['recognition']['records'], [record])
+        job = self.claim().data
+        self.assertEqual(job['child_count'], self.media.post.media.filter(active=True).count())
+        self.assertEqual(self.complete(job, 'no-match', []).status_code, 200)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.status, 'no-match')
+        self.assertEqual(self.media.recognition['records'], [record])
+        self.assertEqual(self.media.title, '')
+
+    @patch('instagram.views.release_candidates')
     def test_catalog_acceptance_preserves_human_metadata_and_evidence(self, lookup):
         candidate = {'artist': 'Catalog Artist', 'title': 'Track (Dub Mix)'}
         record = {'source': 'caption', 'comment_id': '', 'text': 'Catalog FIX001; recording fixture', 'candidate': candidate}

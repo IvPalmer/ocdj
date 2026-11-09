@@ -430,7 +430,8 @@ def run(args):
                                 except ConnectorError as exc:
                                     if str(exc) in STOP_STATUSES | {'network-unavailable'}: raise
                                     comments, comment_status = [], 'unavailable'
-                                matches, records = explicit_candidates('', job['position'], comments)
+                                matches, records = explicit_candidates(
+                                    '', job['position'], comments, media_count=job.get('child_count'))
                                 evidence = {'source': 'comment' if matches else 'shazam',
                                             'certainty': 'tentative', 'comments': comment_status, 'records': records}
                             if not matches:
