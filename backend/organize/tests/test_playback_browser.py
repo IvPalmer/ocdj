@@ -20,6 +20,8 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
             current_path=str(self.path), artist='Fixture artist', title='Second tone', stage='ready')
         PipelineItem.objects.create(original_filename='missing.wav',
             current_path=str(self.downloads / 'missing.wav'), title='Missing tone')
+        PipelineItem.objects.create(original_filename='archived.aiff', artist='Fixture artist',
+            title='Archived tone', archive_state='archived')
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
         with sync_playwright() as pw:
@@ -79,6 +81,11 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                         return [response.status, response.headers.get('Content-Range'), (await response.arrayBuffer()).byteLength];
                     }""", self.url)
                     self.assertEqual(result, [206, f'bytes 100-199/{self.path.stat().st_size}', 100])
+                    page.get_by_role('link', name='Organize', exact=True).click()
+                    archived = page.get_by_role('button', name='Queue Fixture artist — Archived tone', exact=True)
+                    expect(archived).to_be_enabled()
+                    archived.click()
+                    expect(player.get_by_text('Queue (3)', exact=True)).to_be_visible()
                     self.assertFalse(writes)
                     self.assertFalse(errors)
                     browser.close()

@@ -47,3 +47,6 @@ then authenticated list → Play/Queue of a real supported pipeline row, 206 see
 page navigation, Next/Previous, and a missing/archived item. Record deployed SHA
 and browser/format coverage. No migration or connector activation is required.
 Rollback is the parent's normal previous-image/source rollback; no data undo.
+
+A row with unavailable server audio can still queue an exact indexed Mac match.
+The original server file remains preferred whenever the row can stream it.
