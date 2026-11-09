@@ -320,6 +320,20 @@
   margin-bottom: 0;
 }
 
+.edit-modal__lookup { margin-top: var(--s-3); }
+.release-candidates { list-style: none; margin: var(--s-2) 0 0; padding: 0; }
+.release-candidates li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.release-candidates a { color: var(--text); font-weight: 600; }
+.release-candidates small { display: block; color: var(--text-secondary); }
+.release-candidates button { flex-shrink: 0; }
+
 .edit-modal__footer {
   display: flex;
   justify-content: flex-end;
