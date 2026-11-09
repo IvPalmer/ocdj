@@ -68,6 +68,73 @@
     return meta;
   }
 
+  function explicitReleaseFields() {
+    const fields = new Map();
+    for (const description of document.querySelectorAll('.buyItem .bd, .tralbum-about')) {
+      const text = description.cloneNode(true);
+      for (const br of text.querySelectorAll('br')) br.replaceWith('\n');
+      for (const line of text.textContent.split('\n')) {
+        const match = line.match(/^\s*(Catalog(?:ue)?(?: (?:No\.?|Number))?|Release name|Label|Format|Country)\s*:\s*(.+?)\s*$/i);
+        if (!match) continue;
+        const name = match[1].toLowerCase().replace(/^catalog.*$/, 'catalog');
+        const value = match[2].replace(/^\[([^\]]+)\]$/, '$1');
+        if (!fields.has(name)) fields.set(name, new Set());
+        fields.get(name).add(value);
+      }
+    }
+    return name => fields.get(name)?.size === 1 ? [...fields.get(name)][0] : '';
+  }
+
+  function trackPath(value) {
+    if (!value) return '';
+    try {
+      const url = new URL(value, window.location.href);
+      return url.origin === window.location.origin && url.pathname.startsWith('/track/')
+        ? url.origin + url.pathname : '';
+    } catch { return ''; }
+  }
+
+  function focusedTrack(tralbum) {
+    const info = tralbum?.trackinfo || [];
+    if (window.location.pathname.startsWith('/track/')) return info[0];
+    const player = document.querySelector('.inline_player .title_link');
+    const url = trackPath(player?.getAttribute('href'));
+    if (url) return info.find(track => trackPath(track.title_link) === url);
+    const title = player?.textContent.trim();
+    const matches = title ? info.filter(track => track.title === title) : [];
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  function wantedPayload(track, fallbackTitle = '', fallbackUrl = '') {
+    const meta = extractMeta();
+    const tralbum = extractTralbumData();
+    const field = explicitReleaseFields();
+    const isTrackPage = window.location.pathname.startsWith('/track/');
+    const releaseLink = document.querySelector('#name-section a[href*="/album/"]');
+    const code = (tralbum?.current?.isrc || '').toUpperCase().replace(/-/g, '');
+    const notes = [
+      track?.track_num && `Track number: ${track.track_num}`,
+      field('format') && `Release format: ${field('format')}`,
+      field('country') && `Release country: ${field('country')}`,
+    ].filter(Boolean).join('\n');
+    return {
+      artist: track?.artist || meta.artist || '',
+      title: track?.title || fallbackTitle || (isTrackPage ? tralbum?.current?.title || meta.release_name || '' : ''),
+      release_name: field('release name') || releaseLink?.textContent.trim() || (isTrackPage ? '' : meta.release_name || ''),
+      label: field('label') || (isLabelPage(tralbum) ? meta.label || '' : ''),
+      catalog_number: field('catalog'),
+      isrc: isTrackPage && /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/.test(code) ? code : '',
+      notes,
+      source_url: trackPath(track?.title_link) || trackPath(fallbackUrl) || meta.source_url,
+      source_site: 'bandcamp',
+    };
+  }
+
+  function isLabelPage(tralbum) {
+    const current = tralbum?.current;
+    return current?.band_id && current?.selling_band_id && current.band_id !== current.selling_band_id;
+  }
+
   function injectAlbumTrackPage() {
     const meta = extractMeta();
 
@@ -122,14 +189,7 @@
       const btn = OCDJ.createDigButton({
         size: 'large',
         tooltip: 'Add to OCDJ Wanted List',
-        onClick: () => OCDJ.sendToBackground('dig:add', {
-          artist: meta.artist || '',
-          title: '',
-          release_name: meta.release_name || '',
-          label: meta.label || '',
-          source_url: meta.source_url,
-          source_site: 'bandcamp',
-        }),
+        onClick: () => OCDJ.sendToBackground('dig:add', wantedPayload(focusedTrack(extractTralbumData()))),
       });
       group.appendChild(btn);
 
@@ -140,17 +200,21 @@
     if (meta.tracks && meta.tracks.length > 1) {
       const tralbum = extractTralbumData();
       const trackRows = document.querySelectorAll('.track_list .track_row_view, table.track_list tr');
-      trackRows.forEach((row, i) => {
+      trackRows.forEach(row => {
         if (OCDJ.isInjected(row)) return;
 
         const titleEl = row.querySelector('.track-title, .title a, .title span, .title-col span');
-        const trackTitle = titleEl?.textContent.trim() || meta.tracks[i]?.title || '';
+        const trackTitle = titleEl?.textContent.trim();
         if (!trackTitle) return;
 
         const buttons = [];
 
         // Queue single track embed
-        const trackInfo = tralbum?.trackinfo?.[i];
+        const rowUrl = row.querySelector('a[href*="/track/"]')?.href;
+        const exactPath = trackPath(rowUrl);
+        const trackInfo = exactPath
+          ? tralbum?.trackinfo?.find(track => trackPath(track.title_link) === exactPath)
+          : tralbum?.trackinfo?.find(track => track.title === trackTitle);
         const trackId = trackInfo?.id || trackInfo?.track_id;
         if (trackId) {
           const trackEmbedUrl = `https://bandcamp.com/EmbeddedPlayer/track=${trackId}/size=large/bgcol=333333/linkcol=0f91ff/tracklist=false/artwork=small/transparent=true/`;
@@ -176,14 +240,7 @@
         buttons.push(OCDJ.createDigButton({
           size: 'small',
           tooltip: `Add "${meta.artist} - ${trackTitle}" to Wanted List`,
-          onClick: () => OCDJ.sendToBackground('dig:add', {
-            artist: meta.artist || '',
-            title: trackTitle,
-            release_name: meta.release_name || '',
-            label: meta.label || '',
-            source_url: meta.source_url,
-            source_site: 'bandcamp',
-          }),
+          onClick: () => OCDJ.sendToBackground('dig:add', wantedPayload(trackInfo, trackTitle, rowUrl)),
         }));
 
         const group = OCDJ.createButtonGroup(...buttons);

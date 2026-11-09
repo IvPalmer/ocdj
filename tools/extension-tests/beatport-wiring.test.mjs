@@ -78,7 +78,7 @@ for (const root of roots) {
       f.w.document.querySelector('.ocdj-play-btn').click();
       assert.deepEqual(f.messages.map(m => m.type), ['dig:add', 'dig:queue-embed']);
       assert.deepEqual(f.messages[0].data, {
-        artist: 'Fixture Alpha, Fixture Beta', title: 'Synthetic (Night) (Extended Mix)', release_name: '',
+        artist: 'Fixture Alpha, Fixture Beta', title: 'Synthetic (Night) (Extended Mix)', release_name: '', label: 'Fixture Label',
         source_site: 'beatport', source_url: 'https://www.beatport.com/track/synthetic-recording/910001',
       });
       assert.equal(f.messages[1].data.title, f.messages[0].data.title);

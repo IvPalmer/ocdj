@@ -208,7 +208,8 @@
   // ── Per-Track Buttons (Queue + Wantlist) ───────────────────
 
   function injectTracklistButtons() {
-    const { artist: albumArtist } = extractSpotifyMeta();
+    const { artist: albumArtist, title: containerTitle } = extractSpotifyMeta();
+    const releaseName = /^\/(?:intl-[a-z]{2}\/)?album\//.test(window.location.pathname) ? containerTitle : '';
 
     const rows = document.querySelectorAll(
       '[data-testid="tracklist-row"], ' +
@@ -269,6 +270,7 @@
         onClick: () => OCDJ.sendToBackground('dig:add', {
           artist: trackArtist,
           title: trackName,
+          release_name: releaseName,
           source_url: trackHref ? new URL(trackHref, window.location.origin).href : window.location.href,
           source_site: 'spotify',
         }),
