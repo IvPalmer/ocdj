@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from uuid import UUID
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase
 
 
@@ -142,3 +143,21 @@ class CleanupResearchTests(SimpleTestCase):
             self.assertEqual(json.loads(output.getvalue()), self.propose())
             self.assertEqual(receipt_path.read_text(), receipt_text)
             self.assertEqual(evidence_path.read_text(), evidence_text)
+
+    def test_known_release_subject_cannot_be_promoted_by_track_evidence(self):
+        receipt = self.receipt()
+        receipt['snapshot']['granularity'] = 'release'
+        result = self.propose(receipt)
+        self.assertEqual(result['changes'], {})
+        self.assertIn('subject_is_release', result['reasons'])
+        self.assertEqual(result['receipt']['snapshot']['granularity'], 'release')
+
+    def test_command_rejects_invalid_json_without_echoing_private_contents(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'private.json'
+            path.write_text('private invalid source content')
+            with self.assertRaisesMessage(CommandError, 'invalid or unreadable input JSON') as caught:
+                call_command('research_wanted_cleanup', receipt_json=str(path),
+                             evidence_json=str(path), stdout=StringIO())
+            self.assertNotIn('private', str(caught.exception))
+            self.assertNotIn(directory, str(caught.exception))
