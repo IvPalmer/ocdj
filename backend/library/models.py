@@ -6,6 +6,7 @@ class LibraryTrack(models.Model):
         ('organize_pipeline', 'Organize Pipeline'),
         ('traxdb', 'TraxDB'),
         ('manual', 'Manual'),
+        ('mac_snapshot', 'Mac Metadata Snapshot'),
     ]
 
     FORMAT_CHOICES = [
@@ -46,7 +47,23 @@ class LibraryTrack(models.Model):
     class Meta:
         ordering = ['-added_at']
 
+    @property
+    def metadata_only(self):
+        return self.source == 'mac_snapshot'
+
+    def require_local_file(self):
+        if self.metadata_only:
+            raise ValueError('Mac snapshot records are metadata only.')
+
     def __str__(self):
         if self.artist and self.title:
             return f"{self.artist} - {self.title}"
         return self.file_path.split('/')[-1]
+
+
+class MacLibrarySnapshot(models.Model):
+    """Private import receipt and per-collection serialization lock; no paths."""
+    collection_id = models.UUIDField(primary_key=True, editable=False)
+    captured_at = models.CharField(max_length=27, blank=True)
+    digest = models.CharField(max_length=64, blank=True)
+    imported_at = models.DateTimeField(auto_now=True)

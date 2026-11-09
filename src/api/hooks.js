@@ -889,6 +889,17 @@ export function useRunAutomation() {
 
 // ── Library ──────────────────────────────────────────────────
 
+export function useLibraryMatch(artist = '', title = '') {
+  const params = new URLSearchParams({ artist, title })
+  return useQuery({
+    queryKey: ['library-match', artist, title],
+    queryFn: () => api.get(`/library/match/?${params}`),
+    enabled: Boolean(artist?.trim() && title?.trim()),
+    staleTime: 60000,
+    retry: false,
+  })
+}
+
 export function useLibraryTracks(params = {}) {
   const searchParams = new URLSearchParams()
   if (params.format) searchParams.set('format', params.format)
@@ -918,6 +929,7 @@ export function useScanLibrary() {
     mutationFn: () => api.post('/library/scan/sync/'),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['library-tracks'] })
+      qc.invalidateQueries({ queryKey: ['library-match'] })
       qc.invalidateQueries({ queryKey: ['library-stats'] })
     },
   })
@@ -929,6 +941,7 @@ export function useUpdateLibraryTrack() {
     mutationFn: ({ id, ...data }) => api.patch(`/library/tracks/${id}/update/`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['library-tracks'] })
+      qc.invalidateQueries({ queryKey: ['library-match'] })
     },
   })
 }

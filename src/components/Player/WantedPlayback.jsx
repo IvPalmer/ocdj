@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api } from '../../api/client'
 import { usePlayer } from './PlayerContext'
 import { directSource } from './TrackPlayback'
+import LibraryMatch from './LibraryMatch'
 
 export default function WantedPlayback({ item }) {
   const player = usePlayer()
@@ -33,15 +34,17 @@ export default function WantedPlayback({ item }) {
     }
   }
 
-  if (!directSource(item) && item.preview_checked) {
-    return <small className="track-no-source">No catalog preview found.</small>
-  }
-  return <span className="track-playback">
-    <button type="button" className="btn btn-xs" disabled={pending}
-      aria-label={`Play ${label}`} onClick={() => audition(true)}>Play</button>
-    <button type="button" className="btn btn-xs" disabled={pending}
-      aria-label={`Queue ${label}`} onClick={() => audition(false)}>Queue</button>
-    {pending && <small role="status">Looking up preview…</small>}
-    {message && <small role="status">{message}</small>}
+  return <span className="track-controls">
+    <LibraryMatch artist={item.artist} title={item.title} />
+    {!directSource(item) && item.preview_checked
+      ? <small className="track-no-source">No catalog preview found.</small>
+      : <span className="track-playback">
+        <button type="button" className="btn btn-xs" disabled={pending}
+          aria-label={`Play ${label}`} onClick={() => audition(true)}>Play</button>
+        <button type="button" className="btn btn-xs" disabled={pending}
+          aria-label={`Queue ${label}`} onClick={() => audition(false)}>Queue</button>
+        {pending && <small role="status">Looking up preview…</small>}
+        {message && <small role="status">{message}</small>}
+      </span>}
   </span>
 }
