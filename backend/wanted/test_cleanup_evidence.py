@@ -45,9 +45,22 @@ class CleanupPolicyTests(unittest.TestCase):
         for changes in [{'disambiguation': 'radio edit'}, {'isrcs': []}, {'isrc': 'USAAA2400002'}]:
             self.assertEqual(evaluate(snapshot(), evidence(**changes))['changes'], {})
 
-    def test_nonempty_wrong_recognized_tag_stays_reviewable(self):
-        self.assertEqual(evaluate(snapshot(artist='Wrong tag'), evidence())['changes'], {})
+    def test_exact_isrc_repairs_artist_and_strips_confirmed_title_prefix(self):
+        self.assertEqual(evaluate(snapshot(artist='Wrong tag'), evidence())['changes'],
+                         {'artist': 'Fixture Artist'})
+        self.assertEqual(evaluate(snapshot(artist='Wrong tag', title=f'Fixture Artist - {TITLE}'),
+                                  evidence())['changes'], {'artist': 'Fixture Artist', 'title': TITLE})
         self.assertEqual(evaluate(snapshot(title='Incomplete'), evidence())['changes'], {})
+
+    def test_catalog_search_corroborates_explicit_artist_credit_only(self):
+        candidate = {'provider': 'itunes', 'artist': 'Fixture Artist', 'title': TITLE}
+        search = {'kind': 'title_search', 'candidates': [candidate]}
+        explicit = snapshot(isrc='', title=f'Fixture Artist - {TITLE}')
+        self.assertEqual(evaluate(explicit, search)['changes'], {'artist': 'Fixture Artist', 'title': TITLE})
+        self.assertEqual(evaluate(snapshot(isrc=''), search)['changes'], {})
+        self.assertEqual(evaluate({**explicit, 'artist': 'Uploader'}, search)['changes'], {})
+        self.assertEqual(evaluate({**explicit, 'protected': True}, search)['changes'], {})
+        self.assertEqual(evaluate(explicit, {**search, 'candidates': [candidate, candidate]})['changes'], {})
 
     def test_placeholder_artist_is_not_a_recovered_credit(self):
         for artist in ['Various Artists', '[unknown]']:

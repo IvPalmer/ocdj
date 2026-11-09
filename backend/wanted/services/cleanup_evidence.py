@@ -1,7 +1,7 @@
 """Bounded catalog evidence and conservative, version-preserving cleanup policy.
 
-Search results are proposals. Only an unambiguous ISRC lookup plus an exact
-full title can fill a missing artist. Never normalize away mix/version text.
+Use a verified ISRC or an explicit artist credit corroborated by the catalog.
+Keep the complete mix/version text when repairing tags.
 """
 import json
 import re
@@ -119,22 +119,46 @@ def evaluate(snapshot, evidence):
     if snapshot.get('protected'):
         result['reason'] = 'protected'
         return result
-    if (evidence.get('kind') == 'isrc_lookup' and len(candidates) == 1
-            and clean_isrc(snapshot.get('isrc'))
-            and evidence.get('isrc') == snapshot['isrc']):
-        candidate = candidates[0]
-        # Disambiguation can distinguish versions even when titles do not.
-        # Conservatively withhold in that case rather than infer equivalence.
-        if (candidate.get('provider') == 'musicbrainz'
-                and candidate.get('isrc') == snapshot['isrc']
-                and snapshot['isrc'] in candidate.get('isrcs', [])
-                and not candidate.get('disambiguation')
-                and same_name(snapshot.get('title'), candidate.get('title'))
-                and not same_name(candidate.get('artist', ''), 'Various Artists')
-                and not same_name(candidate.get('artist', ''), '[unknown]')
-                and candidate.get('artist') and not snapshot.get('artist', '').strip()):
-            result.update(changes={'artist': candidate['artist']}, reason='exact_isrc_and_full_title')
-            return result
     if not candidates:
         result['reason'] = 'no_evidence'
+        return result
+
+    artist, title = snapshot.get('artist', ''), snapshot.get('title', '')
+    kind = evidence.get('kind')
+    if kind == 'isrc_lookup' and len(candidates) == 1:
+        candidate = candidates[0]
+        code = clean_isrc(snapshot.get('isrc'))
+        # Catalog disambiguation may distinguish versions with identical titles.
+        if (code and evidence.get('isrc') == code
+                and candidate.get('provider') == 'musicbrainz'
+                and candidate.get('isrc') == code
+                and code in candidate.get('isrcs', [])
+                and not candidate.get('disambiguation')):
+            return verified_changes(result, artist, title, candidate, 'exact_isrc_and_full_title')
+
+    if kind == 'title_search' and not artist.strip():
+        # The search corroborates both tags explicitly present in the original
+        # title. A title-only hit cannot supply an artist on its own.
+        explicit = [row for row in candidates if row.get('provider') == 'itunes'
+                    and has_artist_prefix(title, row)]
+        if len(explicit) == 1:
+            return verified_changes(result, artist, title, explicit[0], 'catalog_confirms_explicit_credit')
     return result
+
+
+def has_artist_prefix(title, candidate):
+    return same_name(title, f"{candidate['artist']} - {candidate['title']}")
+
+
+def verified_changes(result, artist, title, candidate, reason):
+    credit = candidate['artist']
+    prefixed = has_artist_prefix(title, candidate)
+    if (not credit or same_name(credit, 'Various Artists') or same_name(credit, '[unknown]')
+            or not (prefixed or same_name(title, candidate['title']))):
+        return result
+    changes = {}
+    if not same_name(artist, credit):
+        changes['artist'] = credit
+    if prefixed:
+        changes['title'] = candidate['title']
+    return {'changes': changes, 'reason': reason}

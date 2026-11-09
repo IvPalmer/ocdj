@@ -24,16 +24,15 @@ Duplicate delivery cannot apply twice. A global Huey cleanup lock serializes
 cleanup catalog requests; collisions leave the durable intent due for the next
 sweep. This has deliberately modest throughput and no new worker/dependency.
 
-Missing-artist automatic application requires a producer-supplied valid ISRC,
-exactly one MusicBrainz recording, the same returned ISRC, an explicit matching
-recording ISRC list, and the exact full title including mix/version. Only Unicode
-NFC, case and whitespace are normalized. Any catalog disambiguation blocks writes.
-Nonempty artist/title values are never automatically replaced. Title-only iTunes
-search (at most three songs) and mismatches/collisions remain durable proposals.
-This permits clear missing-artist recovery while an incomplete/wrong recognized
-value stays reviewable with the full catalog candidate, not silently overwritten.
-The ISRC is recording evidence supplied by the producer, not independent proof
-that fingerprint recognition itself was right. Catalog errors remain possible.
+Automatic corrections with an ISRC require exactly one MusicBrainz recording,
+the same returned ISRC, an explicit matching recording ISRC list, and the same
+full title including mix/version. This can fill or correct an unprotected artist
+and remove a verified artist prefix from the title. Only Unicode NFC, case and
+whitespace are normalized for comparisons. Catalog disambiguation blocks writes.
+With an empty artist and an explicit `Artist - Title` credit in the title, a
+single iTunes result confirming both full tags can separate them. Title-only hits,
+mismatches and collisions remain durable proposals. The ISRC identifies the
+producer's reported recording. Fingerprint and catalog errors remain possible.
 
 The [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API) documents ISRC
 lookup as a list of recordings, artist-credits/isrcs inclusions, a meaningful
@@ -79,7 +78,7 @@ Changed evidence/metadata after a new run may produce new occurrences. To anchor
 a clustered row, all overlapping raw hits must agree on full artist/title and
 one nonempty ISRC; lossy mix merges, missing IDs and conflicts cannot authorize
 writes. Shazam and ACRCloud adapters now retain their ISRC field. Old saved raw
-results without ISRC remain proposal-only. Recognition application compares the
+results without ISRC need a corroborated explicit artist credit to apply. Recognition application compares the
 entire saved track row by stable UUID under the job lock, preserving other rows.
 
 **Not all recognition is covered.** No `backend/instagram/*` file is changed.
