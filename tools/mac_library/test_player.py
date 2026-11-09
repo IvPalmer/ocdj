@@ -27,7 +27,7 @@ with sync_playwright() as playwright:
             data = dict(results=[], count=0)
             if path == 'library/tracks/':
                 data = dict(count=1, results=[dict(id=1, artist='Fixture artist', title='Mac tone',
-                    source='mac_snapshot', format='wav', file_path='', filename='',
+                    source='mac_snapshot', format='wav', file_path='', filename='', playback_id=1,
                     duration_seconds=2, file_size_bytes=32044)])
             elif path == 'library/match/':
                 data = dict(status='matched', coverage='indexed_only', matches=[dict(
@@ -51,7 +51,7 @@ with sync_playwright() as playwright:
         page.goto(BASE + '/library')
         player = page.get_by_role('region', name='Persistent player')
         expect(page.get_by_role('link', name='Open in Finder')).to_have_attribute('href', REVEAL)
-        page.get_by_role('button', name='Play library Fixture artist — Mac tone', exact=True).click()
+        page.get_by_role('button', name='Play Fixture artist — Mac tone', exact=True).click()
         expect(player.get_by_text('Waiting for Mac audio… The Mac connector must be running.')).to_be_visible()
         page.get_by_role('link', name='Settings', exact=True).click()
         expect(player.get_by_text('Fixture artist — Mac tone', exact=True)).to_be_visible()
@@ -66,7 +66,7 @@ with sync_playwright() as playwright:
         page.wait_for_function("document.querySelector('.bottom-player audio').paused")
         page.get_by_role('link', name='Library', exact=True).click()
         before = len(prepares)
-        page.get_by_role('button', name='Queue library Fixture artist — Mac tone', exact=True).click()
+        page.get_by_role('button', name='Queue Fixture artist — Mac tone', exact=True).click()
         expect(player.get_by_text('Queue (2)', exact=True)).to_be_visible()
         assert len(prepares) == before, 'Queue must not request another source'
         player.get_by_role('button', name='Next track').click()

@@ -4,7 +4,7 @@ import { usePlayer } from './PlayerContext'
 const COVERAGE = 'Exact artist/title in the library index only. Unindexed collections unknown. No live disk check, bit depth or lossless provenance verification.'
 const REVEAL_URL = /^ocdj-reveal:\/\/track\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{64}$/
 
-export default function LibraryMatch({ artist, title }) {
+export default function LibraryMatch({ artist, title, playbackControls = true }) {
   const player = usePlayer()
   const query = useLibraryMatch(artist, title)
   let label = 'Artist + title needed for library check'
@@ -55,7 +55,7 @@ export default function LibraryMatch({ artist, title }) {
     </svg>
     {quality && <span aria-hidden="true">{quality}</span>}
   </Indicator>
-    {playbackId && <span className="track-playback">
+    {playbackControls && playbackId && <span className="track-playback">
       <button type="button" className="btn btn-xs" aria-label={`Play library ${artist} — ${title}`} onClick={() => player.play(track)}>Play library</button>
       <button type="button" className="btn btn-xs" aria-label={`Queue library ${artist} — ${title}`} onClick={() => player.enqueue(track)}>Queue library</button>
     </span>}
