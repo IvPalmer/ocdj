@@ -58,6 +58,26 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaises(snapshots.SnapshotError):
             snapshots.scan(self.root / 'ID3', self.collection, self.key)
 
+    def test_empty_and_tag_only_placeholders_are_excluded(self):
+        from mutagen.id3 import ID3, TPE1
+        self.audio()
+        (self.root / 'empty.aiff').touch()
+        tags = ID3()
+        tags.add(TPE1(encoding=3, text=['Fixture']))
+        path = self.root / 'tags-only.mp3'
+        tags.save(path, padding=lambda _: 0)
+        with path.open('ab') as handle:
+            handle.write(bytes(2))
+        payload, counts = self.scan()
+        self.assertTrue(payload['complete'])
+        self.assertEqual(counts['excluded_non_audio'], 2)
+        self.assertEqual(len(payload['tracks']), 1)
+        with path.open('ab') as handle:
+            handle.write(bytes(2))
+        payload, counts = self.scan()
+        self.assertFalse(payload['complete'])
+        self.assertEqual(counts['read_errors'], 1)
+
     def test_failures_make_export_incomplete_without_disclosing_paths(self):
         (self.root / 'private-broken.mp3').write_bytes(b'broken')
         payload, counts = self.scan()

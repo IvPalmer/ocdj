@@ -53,7 +53,8 @@ exception text is suppressed. No per-file diagnostics or public inventory dump.
 The exporter validates the entire payload, writes a mode-0600 temporary file,
 then atomically links it to a **new** destination. Existing files/symlinks are
 never overwritten. Failed publication removes only its own temporary artifact.
-Walk/read/tag-validation failures or changed files make the scan incomplete;
+The scanner excludes empty files and valid ID3-only MP3 placeholders with fewer
+than four bytes beyond the tag. Other walk/read/tag-validation failures or changed files make the scan incomplete;
 export is refused. Empty inventories are refused to prevent accidental index
 replacement. Limit: 32 MiB JSON, 100,000 unique tracks. This is a sequential scan,
 not an atomic filesystem snapshot; rescan if the library is being reorganized.
@@ -118,10 +119,9 @@ aggregate error-stage classification; exit status 2 correctly signals incomplete
 Readable formats: MP3 7,710; AIFF 3,672; WAV 3,946; M4A 462; FLAC 9.
 The excluded subtree was not traversed, so these are not staging/archive counts.
 6,751 readable files lacked a complete tagged artist/title pair. These are
-measured coverage limits, not evidence of track absence. The ten metadata-read
-failures remain undiagnosed; no filenames, tags or exception strings are archived.
-Real export is blocked until an error-free scan or a separately reviewed scope
-change. No source file repairs were attempted.
+measured coverage limits, not evidence of track absence. The ten initial read failures were nine empty files and one ID3-only MP3 with
+two trailing bytes. These are excluded as non-audio placeholders. The originals
+are retained. The report includes no filenames, tags or exception text.
 
 ## Validation and next step
 

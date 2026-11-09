@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import mutagen
+from mutagen.id3 import ID3
+from mutagen.mp3 import HeaderNotFoundError
 
 FORMATS = {'.mp3': 'mp3', '.flac': 'flac', '.aif': 'aiff', '.aiff': 'aiff',
            '.wav': 'wav', '.ogg': 'ogg', '.m4a': 'm4a'}
@@ -56,6 +58,23 @@ def read_metadata(handle, fmt):
                 duration_seconds=duration if isinstance(duration, (int, float)) and math.isfinite(duration) and duration >= 0 else None)
 
 
+def read_audio(handle, fmt, size):
+    """Skip only provably non-audio placeholders."""
+    if size == 0:
+        return None
+    try:
+        return read_metadata(handle, fmt)
+    except HeaderNotFoundError:
+        if fmt != 'mp3':
+            raise
+        handle.seek(0)
+        tag_size = ID3(handle).size
+        # An MPEG frame header alone needs four bytes after the ID3 tag.
+        if not (tag_size > 0 and 0 <= size - tag_size < 4):
+            raise
+        return None
+
+
 def scan(root, collection_id, key):
     """Explicit root; ID3/TraxDB and symlinks are outside this snapshot's scope.
 
@@ -69,7 +88,8 @@ def scan(root, collection_id, key):
     if str(uuid.UUID(collection_id)) != collection_id or len(key) != 32:
         raise SnapshotError('Invalid collection identity or key.')
     counts = dict(audio_candidates=0, readable=0, tagged_identity=0, measured_quality=0,
-                  read_errors=0, walk_errors=0, excluded_staging_dirs=0, skipped_symlinks=0)
+                  read_errors=0, walk_errors=0, excluded_staging_dirs=0, skipped_symlinks=0,
+                  excluded_non_audio=0)
     formats = {}
     failures = {}
     rows = []
@@ -104,11 +124,14 @@ def scan(root, collection_id, key):
                     if not stat.S_ISREG(before.st_mode):
                         raise SnapshotError('Not a regular audio file.')
                     phase = 'metadata_read'
-                    row = read_metadata(handle, fmt)
+                    row = read_audio(handle, fmt, before.st_size)
                     after = os.fstat(handle.fileno())
                 if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
                     phase = 'file_changed'
                     raise SnapshotError('File changed during metadata read.')
+                if row is None:
+                    counts['excluded_non_audio'] += 1
+                    continue
                 relative = os.fsencode(path.relative_to(root))
                 row['id'] = hmac.new(key, collection_id.encode() + b'\0' + relative, hashlib.sha256).hexdigest()
                 row['file_size_bytes'] = before.st_size
