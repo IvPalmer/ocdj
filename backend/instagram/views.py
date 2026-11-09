@@ -119,7 +119,8 @@ def media_action(request, pk, action='edit'):
                         m.artist = candidates[0]['artist']; m.title = candidates[0]['title']
                         accepted = True
                 else:
-                    m.queued = True; m.status = 'pending'; m.recognition = {}
+                    m.queued = True; m.status = 'pending'
+                    m.recognition = {'records': records} if records else {}
                     if m.cache_key and m.cache_until and m.cache_until > timezone.now():
                         from .tasks import recognize_cached
                         transaction.on_commit(lambda: recognize_cached(m.pk))
@@ -199,6 +200,7 @@ def claim(request):
         m.save()
         return Response(dict(id=m.pk, instagram_id=m.instagram_id, token=m.lease_token,
                              permalink=m.post.permalink, post_instagram_id=m.post.instagram_id, position=m.position,
+                             child_count=m.post.media.filter(active=True).count(),
                              action=m.lease_action, mime='video/mp4' if m.kind == 'video' else 'image/jpeg', lease_until=m.lease_until))
 
 
@@ -220,8 +222,11 @@ def complete(request, pk):
             return Response({'error': 'stale lease'}, status=409)
         if m.lease_action != 'playback' and m.queued:
             m.status = d['status']; m.candidates = d['candidates']; m.queued = False
+            records = m.recognition.get('records', [])
             m.recognition = d.get('recognition', dict(source='shazam', certainty='tentative',
                                  outcome=d['status'], comments='not-read'))
+            if records:
+                m.recognition['records'] = (records + m.recognition.get('records', []))[:10]
             if len(m.candidates) == 1 and not m.reviewed and not (m.artist or m.title):
                 m.artist = m.candidates[0]['artist']; m.title = m.candidates[0]['title']
                 accepted = True

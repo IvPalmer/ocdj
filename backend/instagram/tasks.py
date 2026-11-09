@@ -58,7 +58,10 @@ def recognize_cached(pk):
                 or not m.lease_until or m.lease_until <= timezone.now()):
             return
         m.status = status; m.candidates = candidates; m.queued = False
+        records = m.recognition.get('records', [])
         m.recognition = dict(source='shazam', certainty='tentative', outcome=status, comments='not-read')
+        if records:
+            m.recognition['records'] = records
         m.lease_token = ''; m.lease_until = None; m.lease_action = ''
         accepted = len(candidates) == 1 and not m.reviewed and not (m.artist or m.title)
         if accepted:

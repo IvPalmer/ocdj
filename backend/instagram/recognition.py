@@ -58,23 +58,41 @@ def explicit_candidates(caption, position, comments=(), *, media_count=None):
         numbers = [int(m['number']) for m in numbered if m and m['number']]
         mapped = (source == 'caption' and
                   (media_count is None or (media_count > 0 and sorted(numbers) == list(range(1, media_count + 1)))))
-        for line in lines:
-            line = line.strip()
+        nonempty = [line.strip() for line in lines if line.strip()]
+        # A single clip can carry a plain credit followed only by metadata
+        # such as the release year and artist/label handles.
+        plain_credit = (source == 'caption' and media_count == 1 and position == 0
+                        and len(nonempty) > 1 and all(re.fullmatch(
+                            r'(?:[12][0-9]{3}(?: [\w .-]{1,40})?|(?:[@#][\w.]+\s*)+)', line)
+                            for line in nonempty[1:]))
+        for index, line in enumerate(nonempty):
             slot = slide.match(line)
             parsed = 'ID: ' + line[slot.end():] if slot else line
             match = pattern.fullmatch(parsed)
-            if not match or '?' in line: continue
+            if '?' in line: continue
             if slot and int(slot[1]) != position + 1: continue
-            if match['number'] and (not mapped or int(match['number']) != position + 1): continue
+            if match and match['number'] and (not mapped or int(match['number']) != position + 1): continue
+            if not match and plain_credit and index == 0:
+                match = pattern.fullmatch('ID: ' + line)
+                if match and re.search(r'\b(?:EP|LP|album|release)\b', match['title'], re.I):
+                    continue
+            associated = not (source == 'comment' and media_count is not None and media_count != 1 and not slot)
+            if not match and source == 'comment':
+                quote = re.search(r'\b(?:track|faixa|tema)\s+["“]([^"”]{1,180})["”]', line, re.I)
+                if quote:
+                    match = pattern.fullmatch('ID: ' + quote[1])
+                    associated = False  # A quoted mention alone does not identify a clip.
+            if not match: continue
             artist, title = match['artist'].strip(), match['title'].strip()
             if not artist or not title: continue
             candidate = {'artist': artist, 'title': title}
-            if not any(all(' '.join(c[k].casefold().split()) == ' '.join(candidate[k].casefold().split())
-                           for k in candidate) for c in candidates) and len(candidates) < 2:
+            if associated and not any(all(' '.join(c[k].casefold().split()) == ' '.join(candidate[k].casefold().split())
+                                       for k in candidate) for c in candidates) and len(candidates) < 2:
                 candidates.append(candidate)
             if len(records) < 10:
+                evidence = line if associated else 'Track mentioned; clip unverified: ' + line
                 records.append({'source': source, 'comment_id': comment_id,
-                                'text': line[:1100], 'candidate': candidate})
+                                'text': evidence[:1100], 'candidate': candidate})
     # Disagreement is evidence for review, never a reason to skip Shazam.
     return (candidates if len(candidates) == 1 else []), records
 
@@ -116,8 +134,8 @@ def release_candidates(caption, position, media_count):
     """Resolve an explicit catalog code, never a release title as a recording.
 
     Keyless MusicBrainz lookup, at most search + one release request. Only a
-    unique exact catalog/label hit and an explicit track selector or complete
-    all-video carousel can establish association. No previews are identities.
+    unique exact catalog/label hit can supply release evidence. A track selector
+    or verified carousel mapping is required for an associated candidate.
     """
     import re
     import time
@@ -173,36 +191,44 @@ def release_candidates(caption, position, media_count):
         selector = fields.get('track')
         if selector:
             selected = [t for t in tracks if _same_name(selector, str(t.get('number', '')))]
+            association = 'explicit Track selector'
         elif (media_count == 1 or carousel_order) and len(tracks) == media_count and 0 <= position < media_count:
             selected = [tracks[position]]
+            association = 'single-track video' if media_count == 1 else f'declared carousel tracklist order; slide {position + 1}'
         else:
-            return [], []
+            records = [_catalog_record(t, code, release_id, 'release tracklist; clip unverified', _same_name)
+                       for t in tracks[:10]]
+            return [], [record for record in records if record]
         if len(selected) != 1:
             return [], []
-        track = selected[0]
-        recording = track.get('recording', {})
-        title = track.get('title') or recording.get('title', '')
-        if not _same_name(title, recording.get('title', '')):
-            return [], []
-        # A recording qualifier missing from the title would lose its version.
-        if recording.get('disambiguation') and recording['disambiguation'].casefold() not in title.casefold():
-            return [], []
-        credits = track.get('artist-credit') or recording.get('artist-credit') or []
-        artist = ''.join(c['name'] + c.get('joinphrase', '') for c in credits).strip()
-        if (not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', recording.get('id', '')) or not artist or not title or max(len(artist), len(title)) > 500
-                or artist.casefold() in ('various artists', 'unknown artist', '[unknown]')):
-            return [], []
-        candidate = {'artist': artist, 'title': title}
-        # Evidence fits the existing private record schema; no migration or hook.
-        record = {'source': 'caption', 'comment_id': '', 'candidate': candidate,
-                  'text': ('Catalog: ' + code + '; https://musicbrainz.org/release/' + release_id +
-                           '; track ' + str(track.get('number', '')) + '; recording ' + recording['id'] +
-                           '; association: ' + ('explicit Track selector' if selector else
-                               'single-track video' if media_count == 1 else
-                               'declared carousel tracklist order; slide ' + str(position + 1)))[:1100]}
-        return [candidate], [record]
+        record = _catalog_record(selected[0], code, release_id, association, _same_name)
+        return ([record['candidate']], [record]) if record else ([], [])
     except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
         return [], []
+
+
+def _catalog_record(track, code, release_id, association, same_name):
+    import re
+
+    recording = track.get('recording', {})
+    title = track.get('title') or recording.get('title', '')
+    if not same_name(title, recording.get('title', '')):
+        return None
+    # A recording qualifier missing from the title would lose its version.
+    if recording.get('disambiguation') and recording['disambiguation'].casefold() not in title.casefold():
+        return None
+    credits = track.get('artist-credit') or recording.get('artist-credit') or []
+    artist = ''.join(c['name'] + c.get('joinphrase', '') for c in credits).strip()
+    recording_id = recording.get('id', '')
+    if (not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', recording_id)
+            or not artist or not title or max(len(artist), len(title)) > 500
+            or artist.casefold() in ('various artists', 'unknown artist', '[unknown]')):
+        return None
+    text = (f'Catalog: {code}; https://musicbrainz.org/release/{release_id}; '
+            f'track {track.get("number", "")}; recording {recording_id}; '
+            f'{artist} — {title}; association: {association}')
+    return {'source': 'caption', 'comment_id': '', 'candidate': {'artist': artist, 'title': title},
+            'text': text[:1100]}
 
 
 def _release_json(release_id, params):

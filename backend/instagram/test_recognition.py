@@ -55,6 +55,26 @@ class ExplicitTests(unittest.TestCase):
             self.assertEqual(explicit_candidates(caption, 1, comments, media_count=0)[0],
                              [{'artist': 'Artist', 'title': 'Track (Dub Mix)'}])
 
+    def test_plain_single_clip_credit_with_metadata(self):
+        caption = 'Fixture Artist - Fixture Track (Dub Mix)\n\n2026 Germany\n\n@artist @label'
+        self.assertEqual(explicit_candidates(caption, 0, media_count=1)[0], [CANDIDATE])
+        for count in [0, 2]:
+            self.assertEqual(explicit_candidates(caption, 0, media_count=count)[0], [])
+        for title in ['New Release', 'Fixture EP', 'Fixture Track?']:
+            text = f'Fixture Artist - {title}\n2026 Germany'
+            self.assertEqual(explicit_candidates(text, 0, media_count=1)[0], [])
+
+    def test_unassigned_comment_credit_is_evidence_and_keeps_audio(self):
+        for text in ['ID: Fixture Artist - Fixture Track (Dub Mix)',
+                     'That track "Fixture Artist - Fixture Track (Dub Mix)" was excellent']:
+            with self.subTest(text=text):
+                candidates, records = explicit_candidates('', 0, [{'id': '123', 'text': text}], media_count=4)
+                self.assertEqual(candidates, [])
+                self.assertEqual(records[0]['candidate'], CANDIDATE)
+                self.assertIn('clip unverified', records[0]['text'])
+        text = 'Slide 1: ID: Fixture Artist - Fixture Track (Dub Mix)'
+        self.assertEqual(explicit_candidates('', 0, [{'id': '123', 'text': text}], media_count=4)[0], [CANDIDATE])
+
     def test_bounded_comments_and_records(self):
         comments = [{'id': str(i), 'text': 'ID: Artist - Track'} for i in range(100)]
         self.assertEqual(len(explicit_candidates('', 0, comments)[1]), 10)
@@ -145,7 +165,10 @@ class ReleaseTests(unittest.TestCase):
                         'FIX001 is up on Bandcamp today.']:
             for count in [0, 1, 2, 3]:
                 with self.subTest(caption=caption, count=count):
-                    self.assertEqual(self.resolve(detail, caption, count=count)[0], ([], []))
+                    candidates, records = self.resolve(detail, caption, count=count)[0]
+                    self.assertEqual(candidates, [])
+                    self.assertEqual(len(records), 2 if count else 0)
+                    self.assertTrue(all('clip unverified' in record['text'] for record in records))
             self.assertEqual(self.resolve(detail, caption + '\nTrack: A1', count=2)[0], ([], []))
             result, _ = self.resolve(detail, caption + '\nCarousel: tracklist order', count=2, position=1)
             self.assertEqual(result[0], [{'artist': 'Fixture Artist', 'title': second['title']}])
@@ -181,8 +204,11 @@ class ReleaseTests(unittest.TestCase):
         detail = release_fixture()
         second = copy.deepcopy(detail['media'][0]['tracks'][0]); second.update(number='A2', title='Other (Original Mix)'); second['recording']['title'] = second['title']
         detail['media'][0]['tracks'].append(second); detail['media'][0]['track-count'] = 2
-        self.assertEqual(self.resolve(detail, 'Catalog: FIX001', count=1)[0], ([], []))
-        self.assertEqual(self.resolve(detail, 'Catalog: FIX001', count=2)[0], ([], []))
+        for count in [1, 2]:
+            candidates, records = self.resolve(detail, 'Catalog: FIX001', count=count)[0]
+            self.assertEqual(candidates, [])
+            self.assertEqual([record['candidate']['title'] for record in records],
+                             [CANDIDATE['title'], second['title']])
         result, _ = self.resolve(detail, 'Catalog: FIX001\nCarousel: tracklist order', count=2, position=1)
         self.assertEqual(result[0], [{'artist': 'Fixture Artist', 'title': 'Other (Original Mix)'}])
         self.assertEqual(self.resolve(detail, 'Catalog: FIX001\nTrack: Z9')[0], ([], []))
