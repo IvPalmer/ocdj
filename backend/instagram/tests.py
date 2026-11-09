@@ -282,7 +282,7 @@ class WorkspaceTests(TestCase):
         self.assertEqual(self.media.pk, workspace['posts'][0]['media'][0]['id'])
 
     def test_caption_id_recognizes_without_mac_or_playback(self):
-        self.media.post.caption = '1. Fixture Artist - Track (Dub Mix)\n2. Other - Another'
+        self.media.post.caption = 'ID: Fixture Artist - Track (Dub Mix)'
         self.media.post.save()
         response = self.action('recognize')
         self.assertEqual(response.data['status'], 'identified')
@@ -291,6 +291,68 @@ class WorkspaceTests(TestCase):
         self.assertEqual(response.data['recognition']['certainty'], 'explicit')
         self.assertFalse(response.data['reviewed'])
         self.assertEqual(self.claim().status_code, 204)
+
+    def caption(self, text):
+        self.media.post.caption = text
+        self.media.post.save(update_fields=['caption'])
+
+    def test_complete_numbered_caption_maps_only_equal_all_video_carousel(self):
+        Media.objects.filter(post=self.media.post, kind='image').update(active=False)
+        children = list(self.media.post.media.filter(active=True).order_by('position'))
+        self.assertTrue(all(m.kind == 'video' for m in children))
+        self.caption('Tracklist:\n' + '\n'.join(f'{i+1}. Fixture - Track {i+1} (Dub Mix)' for i in range(len(children))))
+        result = self.action('recognize', children[-1].pk).data
+        self.assertEqual(result['title'], f'Track {len(children)} (Dub Mix)')
+        self.assertFalse(result['queued'])
+
+    @patch('instagram.views.release_candidates', return_value=([], []))
+    def test_ambiguous_numbered_caption_and_release_title_queue_audio(self, lookup):
+        for caption in ['1. Artist - One\n2. Artist - Two', 'Release: Fixture - Album EP']:
+            self.caption(caption)
+            result = self.action('recognize').data
+            self.assertTrue(result['queued'])
+            self.assertEqual(result['status'], 'pending')
+            job = self.claim().data
+            self.assertEqual(self.complete(job, 'no-match', []).status_code, 200)
+
+    @patch('instagram.views.release_candidates')
+    def test_catalog_acceptance_preserves_human_metadata_and_evidence(self, lookup):
+        candidate = {'artist': 'Catalog Artist', 'title': 'Track (Dub Mix)'}
+        record = {'source': 'caption', 'comment_id': '', 'text': 'Catalog FIX001; recording fixture', 'candidate': candidate}
+        lookup.return_value = ([candidate], [record])
+        self.caption('Catalog: FIX001')
+        self.media.artist = 'Human'; self.media.title = 'Correction'; self.media.reviewed = True
+        self.media.save()
+        result = self.action('recognize').data
+        self.assertEqual((result['artist'], result['title']), ('Human', 'Correction'))
+        self.assertEqual(result['candidates'], [candidate])
+        self.assertEqual(result['recognition']['records'], [record])
+        self.assertFalse(result['queued'])
+        self.assertIsNone(result['wanted_id'])
+        self.assertEqual(self.claim().status_code, 204)
+
+    @patch('instagram.views.release_candidates')
+    def test_correction_during_lookup_fences_prepared_candidate(self, lookup):
+        def correct(*args):
+            Media.objects.filter(pk=self.media.pk).update(artist='Human', title='Correction', status='identified')
+            return ([{'artist': 'Stale', 'title': 'Result'}], [])
+        lookup.side_effect = correct
+        self.caption('Catalog: FIX001')
+        result = self.action('recognize').data
+        self.assertEqual((result['artist'], result['title']), ('Human', 'Correction'))
+        self.assertEqual(result['candidates'], [])
+        self.assertFalse(result['queued'])
+
+    @patch('instagram.views.release_candidates')
+    def test_reordered_carousel_during_lookup_does_not_accept_old_association(self, lookup):
+        def reorder(*args):
+            Media.objects.filter(pk=self.media.pk).update(position=19)
+            return ([{'artist': 'Stale', 'title': 'Result'}], [])
+        lookup.side_effect = reorder
+        self.caption('Catalog: FIX001')
+        result = self.action('recognize').data
+        self.assertEqual(result['candidates'], [])
+        self.assertTrue(result['queued'])
 
     def test_selected_playback_claim_does_not_overwrite_recognition(self):
         self.media.artist = 'Human'; self.media.title = 'Correction'; self.media.reviewed = True
