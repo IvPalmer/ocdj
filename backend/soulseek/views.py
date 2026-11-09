@@ -409,16 +409,14 @@ def download_file(request):
     client = SlskdClient()
     try:
         result = client.download(username, filename, size=size)
-    except requests.exceptions.HTTPError as e:
-        try:
-            body = e.response.text if e.response else str(e)
-        except Exception:
-            body = str(e)
-        logger.error(f"slskd download failed for {username}: {body}")
-        return Response({'error': body}, status=e.response.status_code if e.response else 500)
-    except Exception as e:
-        logger.error(f"Download request failed: {e}")
-        return Response({'error': str(e)}, status=500)
+    except requests.HTTPError as exc:
+        code = exc.response.status_code if exc.response is not None else 502
+        logger.warning('slskd rejected download enqueue (HTTP %s)', code)
+        return Response({'error': 'Soulseek could not queue this file. Refresh the results and try again.'},
+                        status=code if 400 <= code < 500 else 502)
+    except requests.RequestException:
+        return Response({'error': 'Soulseek did not confirm the request. Check Downloads before retrying.'},
+                        status=502)
 
     slskd_id = ''
     enqueued = result.get('enqueued', [])
@@ -655,44 +653,51 @@ def downloads_status(request):
     })
 
 
+def _peer_transfers(users, username):
+    return [
+        (peer['username'], transfer)
+        for peer in users if peer.get('username', '').casefold() == username.casefold()
+        for directory in peer.get('directories', [])
+        for transfer in directory.get('files', [])
+    ]
+
+
 @api_view(['POST'])
 def cancel_download(request):
-    """Cancel a download, whether or not we have a row for it.
-
-    Transfers slskd is running that this app never recorded are just as
-    cancellable as our own — slskd only needs the peer and the transfer id.
-    Refusing them would leave the only copy of "stop this" inside slskd's own
-    interface, which is precisely the split that made three dead transfers sit
-    in a queue for a day with a greyed-out button next to them.
-    """
+    """Cancel an active transfer without removing an unrelated retry."""
     dl_id = request.data.get('download_id')
-
+    client = SlskdClient()
     if isinstance(dl_id, str) and dl_id.startswith('slskd:'):
-        # id shape from downloads_status: slskd:<username>:<transfer id>
-        _, username, transfer_id = dl_id.split(':', 2)
-        if not transfer_id:
-            return Response({'error': 'untracked transfer has no slskd id'}, status=400)
+        username, _, transfer_id = dl_id[len('slskd:'):].rpartition(':')
+        if not username or not transfer_id:
+            return Response({'error': 'Invalid slskd transfer ID'}, status=400)
         try:
-            SlskdClient().cancel_download(username, transfer_id, remove=True)
-        except Exception as e:
-            logger.warning('Could not cancel untracked slskd transfer: %s', e)
-            return Response({'error': str(e)[:200]}, status=502)
+            if any(t.get('id') == transfer_id for _, t in _peer_transfers(client.get_downloads(), username)):
+                client.cancel_download(username, transfer_id, remove=True)
+        except requests.RequestException:
+            return Response({'error': 'Could not cancel the transfer. Refresh and try again.'}, status=502)
         return Response({'status': 'cancelled', 'id': dl_id, 'untracked': True})
 
-    if not dl_id:
-        return Response({'error': 'download_id required'}, status=400)
-
-    try:
-        dl = Download.objects.get(id=dl_id)
-    except Download.DoesNotExist:
+    if not str(dl_id).isdecimal():
+        return Response({'error': 'Invalid download ID'}, status=400)
+    dl = Download.objects.filter(pk=dl_id).first()
+    if dl is None:
         return Response({'error': 'Download not found'}, status=404)
-
-    if dl.slskd_id and dl.status in ('queued', 'downloading'):
-        client = SlskdClient()
-        try:
-            client.cancel_download(dl.username, dl.slskd_id, remove=True)
-        except Exception as e:
-            logger.warning(f"Could not cancel slskd transfer: {e}")
+    if dl.status not in ('queued', 'downloading'):
+        return Response({'error': 'This transfer already ended. Refresh Downloads.'}, status=409)
+    try:
+        matches = [(peer, t) for peer, t in _peer_transfers(client.get_downloads(), dl.username)
+                   if (t.get('filename') or '').casefold() == dl.filename.casefold()]
+        active = [(peer, t) for peer, t in matches if not _is_terminal_transfer(t.get('state'))]
+        if len(active) > 1 or any(not t.get('id') or (dl.slskd_id and t['id'] != dl.slskd_id) for _, t in active):
+            return Response({'error': 'The active transfer changed. Refresh Downloads.'}, status=409)
+        if active:
+            peer, transfer = active[0]
+            client.cancel_download(peer, transfer['id'], remove=True)
+        elif matches:
+            return Response({'error': 'This transfer already ended. Refresh Downloads.'}, status=409)
+    except requests.RequestException:
+        return Response({'error': 'Could not cancel the transfer. Refresh and try again.'}, status=502)
 
     dl.status = 'cancelled'
     dl.save()
@@ -845,15 +850,13 @@ def delete_download(request, download_id=None):
 
     client = SlskdClient()
     try:
-        users = client.get_downloads()
-        matches = [
-            (peer['username'], transfer)
-            for peer in users if peer.get('username', '').casefold() == username.casefold()
-            for directory in peer.get('directories', [])
-            for transfer in directory.get('files', [])
-            if (transfer.get('id') == transfer_id if transfer_id else
-                (transfer.get('filename') or '').casefold() == dl.filename.casefold())
-        ]
+        transfers = _peer_transfers(client.get_downloads(), username)
+        same_file = [(peer, t) for peer, t in transfers if dl is not None
+                     and (t.get('filename') or '').casefold() == dl.filename.casefold()]
+        if any(not _is_terminal_transfer(t.get('state')) for _, t in same_file):
+            return Response({'error': 'A retry of this download is still active.'}, status=409)
+        matches = ([(peer, t) for peer, t in transfers if t.get('id') == transfer_id]
+                   if transfer_id else same_file)
         if len(matches) > 1 or any(not _is_terminal_transfer(t.get('state')) for _, t in matches):
             return Response({'error': 'A matching transfer is active or ambiguous. Refresh and try again.'}, status=409)
         if matches:

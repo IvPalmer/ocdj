@@ -104,7 +104,7 @@ class SlskdClient:
         payload = [{'filename': filename}]
         if size:
             payload[0]['size'] = size
-        r = self.session.post(self._url(f'/transfers/downloads/{username}'), json=payload, timeout=DEFAULT_TIMEOUT)
+        r = self.session.post(self._url(f'/transfers/downloads/{quote(username, safe="")}'), json=payload, timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
         # slskd answers a successful enqueue with 201 and an empty body, and
         # only sometimes with a JSON object. Parsing unconditionally threw on
@@ -128,7 +128,7 @@ class SlskdClient:
 
     def get_user_downloads(self, username):
         """Get downloads from a specific user."""
-        r = self.session.get(self._url(f'/transfers/downloads/{username}'), timeout=DEFAULT_TIMEOUT)
+        r = self.session.get(self._url(f'/transfers/downloads/{quote(username, safe="")}'), timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
         return r.json()
 
@@ -139,7 +139,7 @@ class SlskdClient:
         users with huge shares — caller should consider scoping the result
         before returning it to the frontend.
         """
-        r = self.session.get(self._url(f'/users/{username}/browse'), timeout=120)
+        r = self.session.get(self._url(f'/users/{quote(username, safe="")}/browse'), timeout=120)
         r.raise_for_status()
         return r.json()
 
@@ -150,32 +150,17 @@ class SlskdClient:
         The caller must select terminal transfers; this endpoint also cancels
         active transfers if called for one. It does not delete downloaded audio.
         """
-        r = self.session.delete(
-            self._url(f'/transfers/downloads/{quote(username, safe="")}/{quote(transfer_id, safe="")}'),
-            params={'remove': 'true'},
-            timeout=DEFAULT_TIMEOUT,
-        )
-        if r.status_code != 404:  # Already removed is a successful retry.
-            r.raise_for_status()
+        self.cancel_download(username, transfer_id, remove=True)
 
     def cancel_download(self, username, transfer_id, remove=False):
-        """Cancel a download transfer. If remove=True, also remove from slskd."""
-        # Cancel the transfer
-        r = self.session.put(
-            self._url(f'/transfers/downloads/{username}/{transfer_id}'),
-            json={'state': 'Completed, Cancelled'},
+        """Cancel the transfer and optionally remove it from slskd history."""
+        r = self.session.delete(
+            self._url(f'/transfers/downloads/{quote(username, safe="")}/{quote(transfer_id, safe="")}'),
+            params={'remove': 'true' if remove else 'false'},
             timeout=DEFAULT_TIMEOUT,
         )
-        r.raise_for_status()
-        if remove:
-            try:
-                self.session.delete(
-                    self._url(f'/transfers/downloads/{username}/{transfer_id}'),
-                    timeout=DEFAULT_TIMEOUT,
-                )
-            except Exception:
-                pass
-        return True
+        if r.status_code != 404:  # A transfer already absent is a successful retry.
+            r.raise_for_status()
 
 
 # ── Matching Engine ───────────────────────────────────────────
