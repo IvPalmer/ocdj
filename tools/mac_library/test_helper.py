@@ -3,6 +3,9 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
+import signal
 import unittest
 from unittest.mock import patch
 import wave
@@ -112,6 +115,81 @@ class HelperTests(unittest.TestCase):
         self.data['tracks'][self.opaque] = 'missing.wav'
         self.assertTrue(helper.serve_one(api, self.data))
         self.assertEqual(api.post.call_args.kwargs['data'], {})
+
+    def test_singleton_rejects_duplicate_then_releases_without_unlink(self):
+        lock = self.base / 'lock'
+        with helper.singleton(lock):
+            with self.assertRaises(BlockingIOError), helper.singleton(lock):
+                pass
+        with helper.singleton(lock):
+            self.assertEqual(lock.stat().st_mode & 0o777, 0o600)
+        lock.chmod(0o644)
+        with self.assertRaises(helper.Refused), helper.singleton(lock):
+            pass
+        lock.unlink()
+        lock.symlink_to(self.map)
+        with self.assertRaises(OSError), helper.singleton(lock):
+            pass
+
+    def test_bounded_default_and_login_session_beyond_fifteen_minutes(self):
+        from unittest.mock import Mock
+        with patch.object(helper.time, 'monotonic', side_effect=[0, 0, 900]), \
+                patch.object(helper.time, 'sleep'), patch.object(helper, 'serve_one', return_value=True) as serve:
+            helper.listen(Mock(), self.data)
+            self.assertEqual(serve.call_count, 1)
+        with patch.object(helper.time, 'monotonic', return_value=99999), \
+                patch.object(helper.time, 'sleep'), \
+                patch.object(helper, 'serve_one', side_effect=[False, True, helper.requests.Timeout()]) as serve:
+            with self.assertRaises(helper.requests.Timeout):
+                helper.listen(Mock(), self.data, seconds=None)
+            self.assertEqual(serve.call_count, 3)  # No retry of the ambiguous claim.
+
+    def test_login_session_signals_stop_and_release_lock(self):
+        # A real foreground subprocess, but fake claims and no API/SSH/token.
+        code = """
+import signal, sys
+from tools.mac_library import helper
+for sig in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+    signal.signal(sig, helper.interrupted)
+helper.serve_one = lambda *a, **k: False
+try:
+    with helper.singleton(sys.argv[1]):
+        print('ready', flush=True)
+        helper.listen(None, {}, seconds=None)
+except KeyboardInterrupt:
+    raise SystemExit(130)
+"""
+        lock = self.base / 'signal-lock'
+        for sig in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+            child = subprocess.Popen([sys.executable, '-c', code, str(lock)], stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(child.stdout.readline().strip(), 'ready')
+                child.send_signal(sig)
+                self.assertEqual(child.wait(timeout=5), 130)
+                with helper.singleton(lock):
+                    pass
+            finally:
+                if child.poll() is None:
+                    child.kill(); child.wait()
+                child.stdout.close()
+
+    def test_login_mode_keeps_exact_map_and_bounded_mode_validation(self):
+        args = ['helper', '--api', 'http://127.0.0.1:1', '--root', str(self.root),
+                '--map', str(self.map)]
+        with patch.object(sys, 'argv', args + ['--login-session']), \
+                patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic-fixture'}, clear=True), \
+                patch.object(helper, 'singleton') as lock, patch.object(helper, 'API'), \
+                patch.object(helper, 'listen') as listen:
+            self.assertEqual(helper.main(), 0)
+            self.assertIsNone(listen.call_args.kwargs['seconds'])
+            self.assertEqual(listen.call_args.args[1], self.data)
+        with patch.object(sys, 'argv', args + ['--seconds', '1801']), \
+                patch.object(helper, 'API') as api:
+            self.assertEqual(helper.main(), 1)
+            api.assert_not_called()
+        with patch.object(sys, 'argv', args + ['--login-session', '--seconds', '30']):
+            with self.assertRaises(SystemExit):
+                helper.main()
 
 
 if __name__ == '__main__':

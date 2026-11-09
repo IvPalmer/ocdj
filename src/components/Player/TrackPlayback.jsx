@@ -1,4 +1,4 @@
-import LibraryMatch from './LibraryMatch'
+import LibraryMatch, { useIndexedPlayback } from './LibraryMatch'
 import { usePlayer } from './PlayerContext'
 
 // Page links and local filesystem paths are deliberately not media sources.
@@ -41,12 +41,13 @@ export function recognizedTrack(track, job, index) {
 
 export default function TrackPlayback({ track, unavailable = 'No browser-playable audio source supplied.' }) {
   const player = usePlayer()
+  const playable = useIndexedPlayback(track)
   const label = [track.artist, track.title].filter(Boolean).join(' — ')
   return <span className="track-controls">
-    <LibraryMatch artist={track.artist} title={track.title} />
-    {!track.source ? <small className="track-no-source">{unavailable}</small> : <span className="track-playback">
-      <button type="button" className="btn btn-xs" aria-label={`Play ${label}`} onClick={() => player.play(track)}>Play</button>
-      <button type="button" className="btn btn-xs" aria-label={`Queue ${label}`} onClick={() => player.enqueue(track)}>Queue</button>
+    {!playable.source ? <small className="track-no-source">{unavailable}</small> : <span className="track-playback">
+      <button type="button" className="btn btn-xs" aria-label={`Play ${label}`} onClick={() => player.play(playable)}>Play</button>
+      <button type="button" className="btn btn-xs" aria-label={`Queue ${label}`} onClick={() => player.enqueue(playable)}>Queue</button>
     </span>}
+    <LibraryMatch artist={track.artist} title={track.title} />
   </span>
 }

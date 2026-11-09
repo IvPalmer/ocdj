@@ -23,6 +23,7 @@ export default function BottomPlayer() {
   const track = player.items[player.index]
   const container = useRef(null)
   const [attempt, setAttempt] = useState(0)
+  const ended = useRef(false)
   useEffect(() => {
     const observer = new ResizeObserver(() => {
       document.documentElement.style.setProperty('--player-height', `${container.current.offsetHeight}px`)
@@ -35,7 +36,7 @@ export default function BottomPlayer() {
   const wanted = useCreateWantedItem()
   const soulseek = useAddToQueue()
   const navigate = useNavigate()
-  useEffect(() => { setError(''); setActionMessage('') }, [track?.queueId])
+  useEffect(() => { setError(''); setActionMessage(''); ended.current = false }, [track?.queueId])
   useEffect(() => {
     if (player.playing) document.querySelectorAll('video, audio').forEach(media => {
       if (!media.closest('.bottom-player')) media.pause()
@@ -46,7 +47,7 @@ export default function BottomPlayer() {
     : 'Audio source unavailable or playback blocked. Press Play to retry.'); player.pause() }
   const onPlaying = value => player.dispatch({ type: 'playing', value })
   const onEnded = () => {
-    if (player.index === player.items.length - 1) setAttempt(value => value + 1)
+    ended.current = player.index === player.items.length - 1
     player.dispatch({ type: 'next' })
   }
   async function action(kind) {
@@ -72,7 +73,8 @@ export default function BottomPlayer() {
       <div className="bottom-player__controls">
         <button disabled={player.index <= 0} aria-label="Previous track" onClick={() => player.dispatch({ type: 'previous' })}>Previous</button>
         <button disabled={!track} aria-label={player.playing ? 'Pause playback' : 'Play playback'} onClick={() => {
-          if (error) setAttempt(value => value + 1)
+          if (error || ended.current) setAttempt(value => value + 1)
+          ended.current = false
           setError(''); onPlaying(!player.playing)
         }}>{player.playing ? 'Pause' : 'Play'}</button>
         <button disabled={player.index >= player.items.length - 1} aria-label="Next track" onClick={onEnded}>Next</button>
@@ -89,7 +91,7 @@ export default function BottomPlayer() {
       </details>
     </div>
     {track && (track.source.kind === 'mac'
-      ? <MacAudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail, AudioSource }} />
+      ? <MacAudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail, AudioSource, EmbedSource }} />
       : track.source.kind === 'audio'
       ? <AudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail }} />
       : <EmbedSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail }} />)}
