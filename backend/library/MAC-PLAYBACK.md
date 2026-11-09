@@ -5,9 +5,11 @@ Parent owns review, integration, activation, deployment and live QA.
 
 ## Flow and boundaries
 
-An unambiguous exact artist/title Mac snapshot match adds Play library / Queue
-library beside the existing quality/Finder indicator. Other previews remain
-available. Selecting that source in the persistent player POSTs the indexed
+An unambiguous exact artist/title Mac snapshot match reuses the existing Play /
+Queue actions in Wanted and shared track controls, including Recognize. The
+quality/Finder indicator stays last and independently clickable, with no playback
+buttons. An absent/ambiguous match keeps the existing preview/mix behavior.
+Selecting the Mac source in the persistent player POSTs the indexed
 numeric record ID to `tracks/<id>/playback/`. Queued future items do not stage.
 Library rows also expose their own opaque playback ID through serialization,
 so existing Play/Queue works for a specific indexed record even when its tags
@@ -36,8 +38,10 @@ The VPS keeps only staged MP3s in `/app/.cache/mac-playback`, outside MEDIA_ROOT
 and nginx routes, with mode 0600. Defaults are 512 MiB source, 120 seconds per
 transcode, 64 MiB per MP3, 256 MiB total staging, 3 minute request/lease,
 30 minute cache, and a 15 minute connector run (maximum 30 minutes, plus at most
-one in-flight transcode/upload). Output exceeding the cap is refused, not used
-as a truncated song. Uploads hold a process-wide file lock through DB commit;
+one in-flight transcode/upload). An explicit `--login-session` instead listens
+until Ctrl-C, HUP/logout, TERM or an error, without the 15 minute cutoff.
+Both modes hold one per-user singleton lock. Output exceeding the cap is refused,
+not used as a truncated song. Uploads hold a process-wide file lock through DB commit;
 stale/expired leases cannot publish or replace a cache entry. Aborted uploads
 remove partials; a process crash may leave bounded orphan staging, removed by
 lazy expiry cleanup on the next upload. Expired bytes are immediately
@@ -57,10 +61,17 @@ malformed/multiple/unsatisfiable ranges return 416. All media uses private,
 no-store and nosniff. No public Mac listener, CORS exception or file:// link.
 
 Offline and local-source failures do not mark the library file missing. The
-player retains the current track, queue and controls; retry is explicit. The
-connector reports only a sanitized local failure, and stops on any transport
+player retains the current track, queue and controls. If Mac preparation fails,
+the persistent player uses the original catalog preview or mix segment, preserving
+its bounds and showing the fallback source. The persistent player also offers
+"Use preview / mix" while Mac is pending/selected, cancelling its polling and
+using the fallback without another Mac preparation POST. Wanted preview lookup
+occurs only when selected and needed, never for future queue entries. Without a fallback,
+retry is explicit. Development effect replay shares one preparation request,
+and ending the final track never prepares another Mac copy until explicit Play.
+The connector reports only a sanitized local failure, and stops on any transport
 error/ambiguous result without resending. There is no automatic relaunch,
-LaunchAgent, permanent polling service, new dependency, or native installation.
+LaunchAgent, new dependency, or native installation.
 Pause during preparation still allows that already requested copy to finish.
 
 ## Parent operations (not executed by this change)
@@ -92,6 +103,19 @@ Pause during preparation still allows that already requested copy to finish.
      --ffmpeg '<verified-existing-ffmpeg-binary>' --seconds 900
    ```
 
+   For an explicitly requested foreground login session, replace `--seconds 900`
+   with `--login-session`. Keep that terminal attached to the login session and
+   the existing private tunnel open. Nothing installs or starts automatically.
+   Stop with Ctrl-C in that terminal, or TERM the known helper job; HUP/logout
+   also stops it. All three unwind the in-flight encoder, temporary files and
+   lock; an upload interrupted during transport is ambiguous and is never
+   resent. Do not kill a PID read from a stale file. The singleton is a persistent
+   mode-0600 flock file at `~/.ocdj-mac-playback.lock`; it contains no PID/token
+   and is deliberately not unlinked. A second invocation fails before any API
+   call. A crash releases the OS lock; do not delete it to bypass a running job.
+   The helper does not own or terminate the caller's tunnel. Parent owns all
+   activation, including choosing the exact existing map/root and FFmpeg binary.
+
    Map defaults to the existing sandbox-side reveal-map; `--map` can select a
    private existing map. Root mismatch/permissions/transport fail closed.
    No key is needed/read. Check FFmpeg `-version` first: this Mac's Homebrew
@@ -102,8 +126,8 @@ Pause during preparation still allows that already requested copy to finish.
    Mac offline, stale map, and Safari/Chrome playback under real browser auth.
    Only synthetic browser/codec evidence is provided by this PR; physical
    library access, production ingress and actual Safari/Chrome sessions remain
-   parent QA. The connector is deliberately bounded and must be explicitly
-   started again for a later listening session.
+   parent QA. Both modes require explicit startup for a later session; neither
+   reconnects or relaunches after an ambiguous result.
 
 ## Rollback
 
@@ -119,9 +143,12 @@ state, native app, browser extension or LaunchAgent is modified.
 Pure fixtures cover map scope, exact ID lookup, traversal/symlink/FIFO/missing/
 oversized/changed-file rejection, actual WAV-to-MP3 encoding, output caps,
 private transport URL/redirect/proxy restrictions, and no resend after ambiguous
-upload. CI PostgreSQL covers normal prepare/claim/upload/status/audio, bearer
-fail-closed, collection isolation, stale completion, quota/invalid media,
+upload, bounded versus login-session lifetime, singleton exclusion/release and
+real subprocess INT/HUP/TERM shutdown. CI PostgreSQL covers normal
+prepare/claim/upload/status/audio, bearer fail-closed, collection isolation, stale completion, quota/invalid media,
 expiry, missing records/cache, retry, HEAD and Range. Browser fixtures enter
 through the normal Library UI with synthetic API responses and real synthetic
 MP3, checking Finder, prepare/offline/retry, play/pause, queue/next/previous and
-route continuity. CI runs Chromium and WebKit; neither equals live Safari QA.
+route continuity, single row actions/Finder placement, Wanted lazy preview fallback
+and Recognize mix fallback with segment bounds. CI runs Chromium and WebKit;
+neither equals live Safari QA.

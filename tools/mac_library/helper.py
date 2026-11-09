@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Explicit bounded Mac playback connector. No daemon, listener, scan or install.
+"""Explicit Mac playback connector. No listener, scan or install.
 
 Run with a caller-owned loopback SSH forward to the private backend, an inherited
 DRAIN_TOKEN, and the exact snapshot root. Paths and source tags never leave Mac.
 """
 import argparse
+import fcntl
 from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -170,26 +172,65 @@ def serve_one(api, map_data, *, ffmpeg='ffmpeg'):
     return True
 
 
+@contextmanager
+def singleton(filename=None):
+    # Stable per-user path across launch contexts; never unlink a flock inode.
+    filename = filename or Path.home() / '.ocdj-mac-playback.lock'
+    fd = os.open(filename, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(fd, 'r+') as lock:
+        info = os.fstat(lock.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_nlink != 1):
+            raise Refused()
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+
+
+def listen(api, data, *, seconds=900, ffmpeg='ffmpeg'):
+    deadline = time.monotonic() + seconds if seconds is not None else None
+    while deadline is None or time.monotonic() < deadline:
+        if not serve_one(api, data, ffmpeg=ffmpeg):
+            time.sleep(2 if deadline is None else min(2, max(0, deadline - time.monotonic())))
+
+
+def interrupted(signum, frame):
+    # subprocess.run kills/waits for in-flight FFmpeg on this exception; temporary
+    # files and the singleton lock unwind normally. No completion is resent.
+    raise KeyboardInterrupt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--api', required=True)
     parser.add_argument('--root', required=True)
     parser.add_argument('--map', type=Path, default=default_map_path())
-    parser.add_argument('--seconds', type=int, default=900)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--seconds', type=int, default=900)
+    mode.add_argument('--login-session', action='store_true',
+                      help='Listen until Ctrl-C, logout/HUP or TERM; no restart or installation')
     parser.add_argument('--ffmpeg', default='ffmpeg', help='Existing executable; nothing is downloaded or installed')
     args = parser.parse_args()
+    previous = {sig: signal.signal(sig, interrupted) for sig in
+                (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     try:
         if not 1 <= args.seconds <= 1800:
             raise Refused()
-        data = load_map(args.map, args.root)
-        api = API(args.api, os.environ.get('DRAIN_TOKEN', ''))
-        deadline = time.monotonic() + args.seconds
-        while time.monotonic() < deadline:
-            if not serve_one(api, data, ffmpeg=args.ffmpeg):
-                time.sleep(min(2, max(0, deadline - time.monotonic())))
+        with singleton():
+            data = load_map(args.map, args.root)
+            fd = open_absolute(args.root, directory=True)
+            os.close(fd)
+            api = API(args.api, os.environ.get('DRAIN_TOKEN', ''))
+            print('Playback connector listening; Ctrl-C stops; no automatic restart.', flush=True)
+            listen(api, data, seconds=None if args.login_session else args.seconds, ffmpeg=args.ffmpeg)
+    except KeyboardInterrupt:
+        print('Playback connector stopped by session/operator; no restart.', flush=True)
+        return 130
     except Exception:
-        print('Playback connector stopped: private transport, map, source or staging unavailable. No automatic retry.', file=sys.stderr)
+        print('Playback connector stopped: singleton, private transport, map, source or staging unavailable. No automatic retry.', file=sys.stderr)
         return 1
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
     return 0
 
 
