@@ -17,7 +17,7 @@ with sync_playwright() as p:
     titles = ['Measured tone', 'Unknown quality', 'Multiple tone', 'Missing tone', 'Absent tone', 'Failed lookup', 'Bitrate tone', 'Loading tone', '']
     items = [dict(id=i + 1, artist='Fixture artist', title=title, status='pending',
                   added='2026-01-01T00:00:00Z', preview_checked='2026-01-01T00:00:00Z',
-                  preview_url='/api/fixture.wav' if title == 'Measured tone' else '') for i, title in enumerate(titles)]
+                  preview_url='/api/fixture.wav' if title in ('Measured tone', 'Unknown quality', 'Absent tone') else '') for i, title in enumerate(titles)]
     job = dict(id=1, status='completed', title='Synthetic Shazam job', url='https://example.invalid/mix',
                engine='shazam', tracklist=[dict(artist='Fixture artist', title='Measured tone',
                timestamp_start=12, confidence='high')], description_tracks=[])
@@ -95,10 +95,11 @@ with sync_playwright() as p:
     badge = indicator('Measured tone', 'Indexed match')
     row('Measured tone').locator('input').focus()
     page.keyboard.press('Tab')
+    expect(row('Measured tone').get_by_role('button', name='Play Fixture artist — Measured tone', exact=True)).to_be_focused()
+    for _ in range(5):
+        page.keyboard.press('Tab')
     expect(badge).to_be_focused()
     assert badge.evaluate("el => getComputedStyle(el).outlineStyle") == 'solid'
-    page.keyboard.press('Tab')
-    expect(row('Measured tone').get_by_role('button', name='Play Fixture artist — Measured tone', exact=True)).to_be_focused()
 
     metrics = {}
     for width, height, name in [(1280, 900, 'desktop'), (390, 844, 'mobile')]:
@@ -116,6 +117,17 @@ with sync_playwright() as p:
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         if name == 'desktop':
             assert page.locator('.wanted-table').bounding_box()['x'] + page.locator('.wanted-table').bounding_box()['width'] <= width
+        expect(page.get_by_role('columnheader').last).to_have_text('Library')
+        assert cells.locator('td').count() == 9
+        assert cells.locator('td').last.locator('.track-library-match').count() == 1
+        # Quality and absent states share identical action positions and row centers.
+        for title in ('Unknown quality', 'Absent tone'):
+            other = row(title).get_by_role('button')
+            other_boxes = [b.bounding_box() for b in other.all()]
+            assert [round(b['x'], 1) for b in boxes] == [round(b['x'], 1) for b in other_boxes]
+        badge_box = badge.bounding_box()
+        assert badge_box['x'] > boxes[-1]['x'] + boxes[-1]['width']
+        assert abs(badge_box['y'] + badge_box['height'] / 2 - centers[0]) < 1
         metrics[name] = dict(button_heights=[b['height'] for b in boxes], row_height=cells.bounding_box()['height'])
         page.screenshot(path=f'/tmp/ocdj-library-match-{name}.png', full_page=True)
         # Scroll just the table to reach actions on mobile; keyboard focus follows.
