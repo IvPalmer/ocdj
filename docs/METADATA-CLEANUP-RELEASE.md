@@ -41,6 +41,12 @@ User-Agent and one request per second. Cleanup waits 1.1 seconds after its ISRC
 request, under its shared Huey lock. Existing Organize MusicBrainz enrichment
 is a separate caller and is not serialized by this new lock; simultaneous heavy
 Organize use may still receive rate-limit responses (bounded retries apply here).
+The [Apple Search API](https://performance-partners.apple.com/search-api) documents
+song search, JSON track identity fields, a result limit, and approximately 20 calls
+per minute. Cleanup also waits 3.1 seconds after each iTunes request under the
+same lock, including failures. Existing preview lookups are separate callers;
+the cooldowns bound cleanup traffic, not every catalog request from the app.
+Only an ISRC or artist/full-title query is sent, never notes or source URLs.
 No key, netrc, environment proxy/auth, redirect, audio, pagination or URL from
 provider results is followed. Each request has 5s connect/12s read timeouts,
 128 KiB response limit and a 20s streaming budget checked between chunks. This
@@ -60,7 +66,9 @@ Wired: mix pipeline final completion (including resumed jobs), recluster endpoin
 TrackID lookup success (now saves a completed job and adds `job_id` to its existing
 response), and both Shazam Wanted ingestion routes. Pipeline progress saves omit
 tracklist so in-flight human corrections survive. Publishing locks the job and
-preserves current manual rows; manual PATCH also locks. Manual rows survive rerun.
+preserves current manual rows; manual PATCH also locks. Manual rows survive rerun. Shazam ingestion retains
+original delivery keys from receipts for existing subjects, so a feed replay after
+cleanup or manual correction does not recreate the original incomplete item.
 Recognize-to-Wanted propagates manual protection and a saved ISRC anchor.
 
 Each accepted track row has a generated `cleanup_id` UUID. Array position is not
@@ -137,8 +145,8 @@ still bypass model capture.
 `GET /api/wanted/items/<id>/cleanup/` returns the original snapshot, evidence,
 proposed changes, status, attempts and timestamps. Recognition detail includes
 `cleanup` receipts. Django admin exposes read-only MetadataCleanup records with
-no add/change/delete action. These surfaces follow existing application access
-controls; this adds no public unauthenticated route or write/approval endpoint.
+no add/change/delete action. These surfaces use the same application/perimeter access controls as existing
+Wanted and recognition APIs; no separate write/approval endpoint is added.
 Ambiguous/wrong-tag proposals require a manual edit through existing metadata
 controls; proposals cannot themselves grant authority to write. A result delta
 is an applied change only if the receipt status is `applied`; superseded results
@@ -155,7 +163,10 @@ and live QA. Do not merge the inactive stack alongside this release migration.
 1. Back up the production database privately. Pause backend writes and the Huey
    consumer for the schema change; deploy compatible backend/worker images from
    the same reviewed release commit. Apply `manage.py migrate` before resuming
-   writes/consumer. Migration adds three Wanted fields and one receipt table;
+   writes/consumer. The backend image's existing startup script runs migrations;
+   the worker depends only on database health, so do not start it concurrently
+   before migration completion on this first rollout. Migration adds three
+   Wanted fields and one receipt table;
    the legacy-protection UPDATE can lock Wanted during migration. No legacy
    metadata values change, and no backfill event is emitted.
 2. Restart the existing Huey consumer so it registers the new tasks/periodic
@@ -185,6 +196,7 @@ or a reviewed adapter. No filesystem/audio tagging or automatic download change.
 without Django setup, project settings, secrets, DB or live HTTP. Integration
 uses GitHub Actions `Metadata cleanup fixture`: real PostgreSQL row locks,
 full backend test discovery, Wanted/Recognize migration drift, atomic rollback,
+legacy migration preservation, registered Huey outbox sweep,
 manual confirmations and stale instance preservation, idempotence, fenced leases,
 bounded retries, actual ingestion and API paths. The focused `instagram.test_cleanup` suite also runs explicitly against PostgreSQL
 in that workflow, covering accepted entry points, caption replay, separate later
@@ -192,3 +204,21 @@ events, human protection, stale/playback/ambiguous exclusions, outer rollback an
 a real unique-constraint error inside the optional callback savepoint. Local
 checks use no Django setup, DB, API or provider calls. Instagram fixture remains an
 independent existing CI check. Self-review only; parent supplies review/integration.
+
+The CI runner `tools/test_backend_fixtures.py` discovers from `backend` and applies
+`ROOT_URLCONF='dig.urls'` only to the existing `BeatportCaptureTests` class, matching
+that fixture's documented standalone root. Full discovery with project URLs at
+the release base otherwise produces eight Dig fixture errors (`/add/` vs mounted
+`/api/dig/add/`). No tests are excluded or skipped to hide that mismatch. All other
+classes retain normal project settings. Do not run this PostgreSQL runner locally.
+
+Release proof at runtime commit `55e4ef4556962763a7162fa6682135492fa0bbc7`:
+[Metadata cleanup fixture](https://github.com/IvPalmer/ocdj/actions/runs/42548921762)
+passed all 21 pure fixtures, Wanted/Recognize migration drift checks, and full
+PostgreSQL backend discovery (339 tests, 338 passed, one opt-in browser fixture
+skipped). That includes real duplicate-worker/manual-confirmation row-lock tests,
+actual pipeline completion, registered Huey sweep and legacy migration preservation.
+The separate existing Instagram fixture provides its browser/UI proof. None of
+these checks verifies the installed production images, provider catalog contents,
+physical playback or parent live QA. Documentation-only follow-up does not change
+the tested runtime implementation.

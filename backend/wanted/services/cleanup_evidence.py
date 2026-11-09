@@ -91,8 +91,13 @@ def collect_evidence(snapshot):
     term = ' '.join(x.strip() for x in (artist, title) if x.strip())
     if not title.strip() or len(term) > 512:
         return {'kind': 'not_queried', 'candidates': []}
-    payload = _get_json('https://itunes.apple.com/search',
-                        {'term': term, 'entity': 'song', 'limit': 3})
+    try:
+        payload = _get_json('https://itunes.apple.com/search',
+                            {'term': term, 'entity': 'song', 'limit': 3})
+    finally:
+        # Apple's primary docs specify approximately 20 calls per minute.
+        # The shared Huey lock plus cooldown bounds this cleanup consumer.
+        time.sleep(3.1)
     if (not isinstance(payload, dict) or not isinstance(payload.get('results'), list)
             or type(payload.get('resultCount')) is not int
             or payload['resultCount'] != len(payload['results'])
