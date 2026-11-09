@@ -135,16 +135,21 @@
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
+  container-type: inline-size;
+}
+
+.pipeline-table__header,
+.pipeline-table__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem minmax(19rem, 39%);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
 }
 
 .pipeline-table__header {
-  display: grid;
-  grid-template-columns: 2fr 2fr 100px 90px 120px;
-  gap: 12px;
-  padding: 10px 16px;
   background: var(--bg-surface);
+  border-radius: var(--radius) var(--radius) 0 0;
   border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
   font-weight: 600;
@@ -154,13 +159,8 @@
 }
 
 .pipeline-table__row {
-  display: grid;
-  grid-template-columns: 2fr 2fr 100px 90px 120px;
-  gap: 12px;
-  padding: 10px 16px;
   border-bottom: 1px solid var(--border-subtle);
   font-size: 13px;
-  align-items: center;
 }
 
 .pipeline-table__row:last-child {
@@ -171,28 +171,42 @@
   background: color-mix(in srgb, var(--accent-blue) 3%, transparent);
 }
 
-.col-file {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
+.pipeline-table .col-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
-.col-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.pipeline-table .col-source {
+  font-size: 11px;
   color: var(--text-secondary);
 }
 
-.col-source {
-  font-size: 11px;
-  color: var(--text-muted);
+.pipeline-table .col-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }
 
-.col-actions {
-  display: flex;
+.pipeline-table .track-playback {
+  flex-wrap: nowrap;
   gap: 4px;
+}
+
+.pipeline-table .btn-xs {
+  min-height: 30px;
+}
+
+@container (max-width: 680px) {
+  .pipeline-table__header { display: none; }
+  .pipeline-table__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+  .pipeline-table .col-actions { grid-column: 1 / -1; }
 }
 
 /* ── Buttons ── */
@@ -404,40 +418,22 @@
   }
 }
 
-.col-file {
+.pipeline-table .col-file {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
-.col-file__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-  font-size: 12px;
-}
+
+.col-file__name,
 .col-file__original {
-  font-size: 10px;
-  color: var(--text-muted);
-  opacity: 0.7;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.col-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.col-meta__main {
-  font-size: 13px;
-}
-.col-meta__sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.7;
-}
+
+.col-file__name { font-weight: 600; }
+.col-file__original { font-size: 11px; color: var(--text-secondary); }
 
 /* ── Mobile pass May 2026 — stack pipeline rows + header. */
 @media (max-width: 767px) {
@@ -450,12 +446,5 @@
   .organize-header__actions {
     flex-wrap: wrap;
   }
-  /* The hardcoded grid-template-columns at line 140 (2fr 2fr 100px 90px 120px)
-     does not survive a phone viewport. Force vertical stack. */
-  .organize-row,
-  .pipeline-row,
-  [class$='-row'] {
-    grid-template-columns: 1fr !important;
-    gap: var(--s-1) !important;
-  }
+
 }

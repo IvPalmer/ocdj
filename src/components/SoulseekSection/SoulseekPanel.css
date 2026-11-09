@@ -905,6 +905,8 @@
     gap: var(--s-3);
   }
   .slskd-status { align-self: flex-start; }
+  .dl-row--completed { flex-wrap: wrap; }
+  .dl-row--completed .dl-info { flex-basis: calc(100% - 36px); }
   .free-results-header {
     flex-direction: column;
     align-items: stretch;

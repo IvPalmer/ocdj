@@ -135,6 +135,24 @@ class PipelineServiceTestCase(TestCase):
         self.assertIsNone(discover_and_ingest(download.id))
         self.assertEqual(PipelineItem.objects.count(), 1)
 
+    def test_link_staged_soulseek_file_without_changing_existing_tags(self):
+        path = self.write_file('01_downloaded', 'Release', 'audio.flac')
+        item = PipelineItem.objects.create(original_filename='audio.flac', current_path=path,
+                                           artist='Edited artist', metadata_source='manual')
+        download = Download.objects.create(username='fixture', filename=r'Share\Release\audio.flac',
+                                           status='completed')
+        self.assertIsNone(discover_and_ingest(download.id, expected_size=1234))
+        item.refresh_from_db()
+        self.assertIsNone(item.download_id)
+        self.assertIsNone(discover_and_ingest(download.id, expected_size=5))
+        item.refresh_from_db()
+        download.refresh_from_db()
+        self.assertEqual(item.download_id, download.id)
+        self.assertEqual(item.artist, 'Edited artist')
+        self.assertEqual(item.metadata_source, 'manual')
+        self.assertEqual(download.local_path, path)
+        self.assertEqual(PipelineItem.objects.count(), 1)
+
     # process_pipeline_item's finally block closes DB connections — correct for its
     # real caller (a background thread after the HTTP response already returned),
     # but it kills the connection Django's TestCase reuses across the class, so it

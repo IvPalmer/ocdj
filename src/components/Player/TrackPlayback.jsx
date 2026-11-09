@@ -58,16 +58,21 @@ export function recognizedTrack(track, job, index) {
     description: preview ? 'Catalog preview' : 'Original mix · identified segment' }
 }
 
-export default function TrackPlayback({ track, unavailable = 'No browser-playable audio source supplied.', sourceOnly = false }) {
+export default function TrackPlayback({ track, unavailable = 'No browser-playable audio source supplied.', sourceOnly = false, archiveOnly = false }) {
   const player = usePlayer()
-  const indexed = useIndexedPlayback(track)
+  const indexed = useIndexedPlayback(archiveOnly && !track.archiveLibraryMatch ? { ...track, artist: '', title: '' } : track)
   const playable = sourceOnly && track.source ? track : indexed
   const label = [track.artist, track.title].filter(Boolean).join(' — ')
+  const current = track.pipelineId != null && player.items[player.index]?.pipelineId === track.pipelineId
   return <span className="track-controls">
     {!playable.source ? <small className="track-no-source">{unavailable}</small> : <span className="track-playback">
-      <button type="button" className="btn btn-xs" aria-label={`Play ${label}`} onClick={() => player.play(playable)}>Play</button>
+      <button type="button" className={current ? 'btn btn-xs btn-xs--active' : 'btn btn-xs'} aria-current={current || undefined} aria-label={`Play ${label}`} onClick={() => player.play(playable)}>Play</button>
       <button type="button" className="btn btn-xs" aria-label={`Queue ${label}`} onClick={() => player.enqueue(playable)}>Queue</button>
     </span>}
-    <LibraryMatch artist={track.artist} title={track.title} archiveMatch={track.archiveLibraryMatch} />
+    {current && <small className="track-playback-state">
+      {player.audible ? 'Playing' : player.playing ? 'Starting…' : 'Paused'}
+    </small>}
+    {(!archiveOnly || track.archiveLibraryMatch) &&
+      <LibraryMatch artist={track.artist} title={track.title} archiveMatch={track.archiveLibraryMatch} />}
   </span>
 }

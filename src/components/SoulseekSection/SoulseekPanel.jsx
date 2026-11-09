@@ -6,6 +6,7 @@ import {
   useCancelDownload, useClearDownloads, useDeleteDownload,
 } from '../../api/hooks'
 import BrowseModal from './BrowseModal'
+import TrackPlayback, { directSource } from '../Player/TrackPlayback'
 import './SoulseekPanel.css'
 
 const STATUS_LABELS = {
@@ -370,26 +371,40 @@ function SoulseekPanel() {
           {completedDownloads.length > 0 && (
             <div className="dl-group">
               <div className="dl-group-label">Completed ({completedDownloads.length})</div>
-              {completedDownloads.map(dl => (
-                <div key={dl.id} className="dl-row dl-row--completed">
-                  <span className="dl-icon">✓</span>
-                  <span className="dl-name">{dl.filename.split(/[/\\]/).pop()}</span>
-                  <span className="dl-user">from {dl.username}</span>
-                  {dl.untracked && (
-                    <span className="dl-untracked" title="Live from slskd — this app has no record of it">
-                      slskd
+              {completedDownloads.map(dl => {
+                const name = dl.filename.split(/[/\\]/).pop()
+                const file = dl.artifact
+                const archived = file?.archive_state === 'archived'
+                return (
+                  <div key={dl.id} className="dl-row dl-row--completed">
+                    <span className="dl-icon" aria-hidden="true">✓</span>
+                    <span className="dl-info">
+                      <span className="dl-name" title={name}>{name}</span>
+                      <span className="dl-meta">{file ? (archived ? 'Mac library' : 'Organize · VPS') : 'from ' + dl.username}</span>
                     </span>
-                  )}
-                  <button
-                    className="btn btn-xs btn-ghost dl-remove-btn"
-                    onClick={() => deleteDlMutation.mutate(dl.id)}
-                    disabled={deleteDlMutation.isPending}
-                    title="Remove from list"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+                    {file && <TrackPlayback sourceOnly archiveOnly track={{
+                      pipelineId: file.id, artist: file.artist, title: file.title || name,
+                      wantedId: dl.wanted_item, source: directSource(file),
+                      archiveLibraryMatch: file.archive_library_match,
+                      description: archived ? 'Soulseek download · Mac archive' : 'Soulseek download · VPS',
+                    }} unavailable={file.playback_unavailable || 'Audio unavailable'} />}
+                    {dl.untracked && (
+                      <span className="dl-untracked" title="Live from slskd — this app has no record of it">
+                        slskd
+                      </span>
+                    )}
+                    <button
+                      className="btn btn-xs btn-ghost dl-remove-btn"
+                      onClick={() => deleteDlMutation.mutate(dl.id)}
+                      disabled={deleteDlMutation.isPending}
+                      aria-label={`Remove ${name} from download history`}
+                      title="Remove from list"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
 

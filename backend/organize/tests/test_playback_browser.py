@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from library.models import LibraryTrack
 from organize.models import PipelineItem
+from soulseek.models import Download
 from .test_playback import PlaybackFixture
 
 
@@ -28,9 +29,14 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=archived_item.pk,
             artist='Retagged artist', title='Retagged title', format='aiff',
             file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'b' * 64)
+        download = Download.objects.create(username='fixture', filename='second.wav', status='completed')
+        second.download = download
+        second.save(update_fields=['download'])
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
-        with sync_playwright() as pw:
+        from unittest.mock import patch
+        with patch('soulseek.views.SlskdClient') as slskd, sync_playwright() as pw:
+            slskd.return_value.get_downloads.return_value = []
             for engine in ['chromium', 'webkit']:
                 with self.subTest(engine=engine):
                     browser = getattr(pw, engine).launch()
@@ -42,7 +48,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                         path = urlparse(request.request.url).path
                         if not request.request.url.startswith(self.live_server_url + '/'):
                             request.abort()
-                        elif path.startswith('/api/organize/'):
+                        elif path.startswith('/api/organize/') or path == '/api/soulseek/downloads/':
                             if request.request.method not in ('GET', 'HEAD'):
                                 writes.append(path)
                             if path.endswith('/audio/'):
@@ -93,6 +99,20 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     expect(archived).to_be_enabled()
                     archived.click()
                     expect(player.get_by_text('Queue (3)', exact=True)).to_be_visible()
+                    # Organize stays within the content width at both sizes.
+                    for width in (1200, 390):
+                        page.set_viewport_size({'width': width, 'height': 900})
+                        self.assertTrue(page.locator('.pipeline-table').evaluate("""table =>
+                            table.scrollWidth === table.clientWidth && [...table.querySelectorAll('button')].every(btn =>
+                              btn.getBoundingClientRect().right <= table.getBoundingClientRect().right)"""))
+                    page.set_viewport_size({'width': 1200, 'height': 900})
+                    page.get_by_role('link', name='Soulseek', exact=True).click()
+                    row = page.locator('.dl-row--completed')
+                    expect(row.get_by_text('Organize · VPS', exact=True)).to_be_visible()
+                    row.get_by_role('button', name='Play Fixture artist — Second tone', exact=True).click()
+                    page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
+                    expect(row.get_by_text('Playing', exact=True)).to_be_visible()
+                    expect(player.locator('audio')).to_have_attribute('src', f'/api/organize/pipeline/{second.pk}/audio/')
                     self.assertFalse(writes)
                     self.assertFalse(errors)
                     browser.close()

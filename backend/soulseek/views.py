@@ -10,6 +10,8 @@ from django.db import transaction
 from django.db.models import Count
 from django import db
 
+from organize.models import PipelineItem
+from organize.serializers import PipelineItemSerializer
 from wanted.models import WantedItem
 from .models import SearchQueueItem, SearchResult, Download, QualityPreset
 from .serializers import (
@@ -518,10 +520,10 @@ def downloads_status(request):
                 data['progress'] = 100
                 # Auto-trigger organize pipeline after commit so thread sees completed row
                 dl_id = dl.id
-                def _ingest(_id=dl_id):
+                def _ingest(_id=dl_id, _size=transfer.get('size')):
                     try:
                         from organize.services.pipeline import auto_ingest_download
-                        threading.Thread(target=auto_ingest_download, args=(_id,), daemon=True).start()
+                        threading.Thread(target=auto_ingest_download, args=(_id, _size), daemon=True).start()
                     except Exception as exc:
                         logger.warning(f"auto_ingest dispatch failed for {_id}: {exc}")
                 transaction.on_commit(_ingest)
@@ -644,6 +646,22 @@ def downloads_status(request):
         fn_key = dl.filename.lower()
         if dl.status in ('queued', 'downloading', 'completed'):
             download_indicators[fn_key] = dl.status
+
+    completed = {row['id']: row for row in enriched if row['status'] == 'completed' and not row.get('untracked')}
+    serializer = PipelineItemSerializer()
+    for item in PipelineItem.objects.filter(download_id__in=completed).order_by('id'):
+        row = completed[item.download_id]
+        if 'artifact' in row:
+            continue
+        row['artifact'] = {
+            'id': item.id,
+            'artist': item.artist,
+            'title': item.title,
+            'archive_state': item.archive_state,
+            'archive_library_match': serializer.get_archive_library_match(item),
+            'playback_url': serializer.get_playback_url(item),
+            'playback_unavailable': serializer.get_playback_unavailable(item),
+        }
 
     return Response({
         'downloads': enriched,
