@@ -781,6 +781,14 @@ export function useUpdatePipelineItem() {
   })
 }
 
+export function useReleaseCandidates() {
+  return useMutation({
+    mutationFn: ({ artist, title }) => api.get(
+      `/organize/release-candidates/?${new URLSearchParams({ artist, title })}`,
+    ),
+  })
+}
+
 export function useRetagItem() {
   const qc = useQueryClient()
   return useMutation({

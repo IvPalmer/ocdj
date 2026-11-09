@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import {
   usePipelineStats, usePipelineItems, useProcessPipeline,
   useProcessSingle, useRetryItem, useSkipStage, useRemovePipelineItem, useScanDownloads,
-  useUpdatePipelineItem, useRetagItem, useSendHome,
+  useUpdatePipelineItem, useRetagItem, useSendHome, useReleaseCandidates,
   useRefreshPublished, useRetryDrain,
   useConversionRules, useUpdateConversionRules,
 } from '../../api/hooks'
 import TrackPlayback, { directSource } from '../Player/TrackPlayback'
+import LibraryMatch from '../Player/LibraryMatch'
 import './OrganizePanel.css'
 
 const STAGES = [
@@ -288,6 +289,7 @@ function EditModal({ item, onClose }) {
   const updateItem = useUpdatePipelineItem()
   const retagItem = useRetagItem()
   const refreshPublished = useRefreshPublished()
+  const lookup = useReleaseCandidates()
 
   const locked = LOCKED_STATES.has(item.archive_state)
   const published = PUBLISHED_STATES.has(item.archive_state)
@@ -321,6 +323,12 @@ function EditModal({ item, onClose }) {
 
   const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }))
 
+  const query = { artist: form.artist.trim(), title: form.title.trim() }
+  const currentLookup = lookup.variables?.artist === query.artist && lookup.variables?.title === query.title
+  const useRelease = ({ album, label, catalog_number, year, track_number }) => {
+    setForm(prev => ({ ...prev, album, label, catalog_number, year, track_number }))
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal edit-modal" onClick={e => e.stopPropagation()}>
@@ -334,7 +342,10 @@ function EditModal({ item, onClose }) {
             <div className="edit-modal__note">
               {item.archive_state === 'draining'
                 ? 'This track is being drained to your Mac right now — it can\'t be edited until that finishes.'
-                : 'This track lives in your Mac library now; edit it there.'}
+                : 'This track is on your Mac. You can look up releases here and edit the local file.'}
+              {item.archive_state === 'archived' && item.archive_library_match && (
+                <LibraryMatch archiveMatch={item.archive_library_match} />
+              )}
             </div>
           )}
           {published && !locked && (
@@ -346,8 +357,9 @@ function EditModal({ item, onClose }) {
           <div className="edit-modal__fields">
             {EDITABLE_FIELDS.map(f => (
               <div key={f.key} className="form-group">
-                <label>{f.label}</label>
+                <label htmlFor={`organize-tag-${f.key}`}>{f.label}</label>
                 <input
+                  id={`organize-tag-${f.key}`}
                   value={form[f.key]}
                   onChange={e => set(f.key, e.target.value)}
                   placeholder={f.label}
@@ -356,6 +368,29 @@ function EditModal({ item, onClose }) {
               </div>
             ))}
           </div>
+          <section className="edit-modal__lookup" aria-label="Release lookup">
+            <button type="button" className="btn btn-sm"
+              disabled={!query.artist || !query.title || lookup.isPending}
+              onClick={() => lookup.mutate(query)}>
+              {lookup.isPending ? 'Looking up releases…' : 'Find releases'}
+            </button>
+            {currentLookup && lookup.isError &&
+              <p role="status">{errorText(lookup.error)}</p>}
+            {currentLookup && lookup.isSuccess && (lookup.data.releases.length ? (
+              <ul className="release-candidates">
+                {lookup.data.releases.map(release => (
+                  <li key={release.url}>
+                    <div>
+                      <a href={release.url} target="_blank" rel="noreferrer">{release.album}</a>
+                      <small>{[release.label, release.catalog_number, release.year, release.provider].filter(Boolean).join(' · ')}</small>
+                    </div>
+                    {!locked && <button type="button" className="btn btn-xs"
+                      onClick={() => useRelease(release)}>Use release</button>}
+                  </li>
+                ))}
+              </ul>
+            ) : <p role="status">No matching releases found. You can edit the fields above.</p>)}
+          </section>
           {applyError && (
             <div className="edit-modal__note edit-modal__note--error">{applyError}</div>
           )}
@@ -623,7 +658,7 @@ function OrganizePanel() {
                     className="btn btn-xs"
                     onClick={() => setEditingItem(item)}
                   >
-                    Edit
+                    Edit tags
                   </button>
                   {item.stage === 'downloaded' && (
                     <button

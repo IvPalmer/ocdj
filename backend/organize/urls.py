@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('pipeline/', views.pipeline_list, name='pipeline-list'),
+    path('release-candidates/', views.release_candidates, name='release-candidates'),
     path('pipeline/stats/', views.pipeline_stats, name='pipeline-stats'),
     path('pipeline/process/', views.pipeline_process_all, name='pipeline-process-all'),
     path('pipeline/scan/', views.pipeline_scan, name='pipeline-scan'),

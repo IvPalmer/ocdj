@@ -48,6 +48,10 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                         path = urlparse(request.request.url).path
                         if not request.request.url.startswith(self.live_server_url + '/'):
                             request.abort()
+                        elif path == '/api/organize/release-candidates/':
+                            request.fulfill(json={'releases': [{'album': 'Alternate release', 'label': 'Fixture label',
+                                'catalog_number': 'CAT-2', 'year': '2021', 'track_number': '2', 'provider': 'Discogs',
+                                'url': 'https://www.discogs.com/release/123'}]})
                         elif path.startswith('/api/organize/') or path == '/api/soulseek/downloads/':
                             if request.request.method not in ('GET', 'HEAD'):
                                 writes.append(path)
@@ -106,6 +110,15 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                             table.scrollWidth === table.clientWidth && [...table.querySelectorAll('button')].every(btn =>
                               btn.getBoundingClientRect().right <= table.getBoundingClientRect().right)"""))
                     page.set_viewport_size({'width': 1200, 'height': 900})
+                    first = page.locator('.pipeline-table__row').filter(has=page.get_by_role(
+                        'button', name='Play Fixture artist — Pipeline tone', exact=True))
+                    first.get_by_role('button', name='Edit tags').click()
+                    page.get_by_role('button', name='Find releases').click()
+                    page.get_by_role('button', name='Use release').click()
+                    expect(page.get_by_label('Album', exact=True)).to_have_value('Alternate release')
+                    expect(page.get_by_label('Title', exact=True)).to_have_value('Pipeline tone')
+                    expect(page.get_by_label('Catalog #', exact=True)).to_have_value('CAT-2')
+                    page.get_by_role('button', name='Cancel', exact=True).click()
                     page.get_by_role('link', name='Soulseek', exact=True).click()
                     row = page.locator('.dl-row--completed')
                     expect(row.get_by_text('Organize · VPS', exact=True)).to_be_visible()

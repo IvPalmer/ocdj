@@ -323,6 +323,22 @@ def pipeline_skip(request, pk):
     return Response({'message': f'Skipped to {item.stage}', 'stage': item.stage})
 
 
+@api_view(['GET'])
+def release_candidates(request):
+    """Read-only suggestions for the exact artist/title in the edit form."""
+    import requests
+    from .services.release_lookup import find_releases
+
+    artist = request.query_params.get('artist', '').strip()
+    title = request.query_params.get('title', '').strip()
+    if not (0 < len(artist) <= 500 and 0 < len(title) <= 500):
+        return Response({'error': 'Enter the artist and track title before looking up releases.'}, status=400)
+    try:
+        return Response({'releases': find_releases(artist, title)})
+    except requests.RequestException:
+        return Response({'error': 'Release catalogs unavailable. Try again shortly.'}, status=502)
+
+
 @api_view(['POST'])
 def pipeline_retag(request, pk):
     """Re-write audio tags from current metadata (after manual edit).
