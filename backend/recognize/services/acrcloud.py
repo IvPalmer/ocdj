@@ -201,6 +201,7 @@ def _parse_music_result(music):
         'title': music.get('title', ''),
         'artist': artist_name,
         'key': music.get('acrid', ''),
+        'isrc': (music.get('external_ids') or {}).get('isrc', ''),
         'album': album_name,
         'label': label,
         'shazam_url': '',

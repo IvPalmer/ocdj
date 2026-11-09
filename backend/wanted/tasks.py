@@ -39,3 +39,18 @@ def task_shazam_poll():
             return
         if result.get('error'):
             logger.warning('shazam poll: %s', result['error'])
+
+
+@db_task(retries=0)
+@lock_task('metadata-cleanup-catalog')
+def task_metadata_cleanup(cleanup_id):
+    from wanted.services.cleanup import process_cleanup
+    process_cleanup(cleanup_id)
+
+
+@db_periodic_task(crontab(minute='*'), retries=0)
+def task_metadata_cleanup_outbox():
+    """Bounded recovery for lost dispatch, worker death and transient failures."""
+    from wanted.services.cleanup import due_cleanups
+    for cleanup_id in due_cleanups().values_list('pk', flat=True)[:25]:
+        task_metadata_cleanup(cleanup_id)
