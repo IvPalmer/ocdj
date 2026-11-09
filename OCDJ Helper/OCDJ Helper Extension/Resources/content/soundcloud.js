@@ -27,6 +27,7 @@
   // Keep controls in the outer page, where the declared stylesheet and runtime
   // already live. Never inject scripts into frames or widen manifest access.
   const frames = new Map();
+  let framedControls;
   function injectFramedTrack() {
     for (const [frame, state] of frames) {
       if (!frame.isConnected) {
@@ -71,10 +72,11 @@
           if (previousDoc === doc && state.key === key && state.group?.isConnected) return;
           state.group?.remove();
           state.key = key;
-          if (!title || !artist) return;
+          if (!title || !artist || framedControls?.isConnected) return;
           const source_url = window.location.origin + path;
           const queue = OCDJ.createPlayButton({
             size: 'medium',
+            tooltip: `Queue "${artist} - ${title}" for listening`,
             onClick: () => OCDJ.sendToBackground('dig:queue-embed', {
               platform: 'soundcloud', artist, title, source_url,
               embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(source_url)}&auto_play=true&show_artwork=true`,
@@ -83,12 +85,15 @@
           });
           const wantlist = OCDJ.createDigButton({
             size: 'medium',
+            tooltip: `Add "${artist} - ${title}" to Wantlist`,
             onClick: () => OCDJ.sendToBackground('dig:add', {
               artist, title, source_url, source_site: 'soundcloud',
             }),
           });
           state.group = OCDJ.createButtonGroup(queue, wantlist);
-          frame.before(state.group);
+          state.group.classList.add('ocdj-sc-framed-controls');
+          framedControls = state.group;
+          document.body.append(state.group);
         };
         frames.set(frame, state);
         frame.addEventListener('load', state.refresh);

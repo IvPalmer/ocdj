@@ -235,3 +235,12 @@
   margin-left: 6px;
   vertical-align: middle;
 }
+
+/* Keep the framed track controls clear of SoundCloud's fixed player. */
+.ocdj-sc-framed-controls {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  z-index: 10000;
+  margin: 0;
+}
