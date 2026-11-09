@@ -263,8 +263,18 @@ class WorkspaceTests(TestCase):
         for i in range(251):
             data['posts'].append(dict(id=str(900000+i), permalink=f'https://www.instagram.com/p/fixture{i}/',
                 author='fixture', caption='', children=[dict(id=str(800000+i*10+j), kind='video') for j in range(5 if i < 210 else 4)]))
-        self.sync(data)
+        snapshot = self.sync(data).data
+        jpeg = self.thumbnail_item()['jpeg']
+        for offset in range(0, 256, 16):
+            response = self.thumbnail_batch([
+                dict(post_id=p['post_id'], jpeg=jpeg)
+                for p in snapshot['thumbnail_posts'][offset:offset+16]], snapshot['sync_token'])
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(all(r['status'] == 'available' for r in response.data['results']))
         workspace = self.client.get('/api/instagram/').data
+        self.assertEqual(workspace['connector_status'], 'offline')
+        self.assertTrue(all(p['thumbnail_url'] for p in workspace['posts']))
+        self.assertTrue(all(not m['playback_url'] for p in workspace['posts'] for m in p['media']))
         self.assertEqual(len(workspace['posts']), 256)
         self.assertEqual(sum(m['kind'] == 'video' for p in workspace['posts'] for m in p['media']), 1232)
         self.assertEqual(workspace['posts'][-1]['permalink'], data['posts'][-1]['permalink'])
