@@ -14,6 +14,7 @@ the miss every page render would re-ask two APIs the same dead question.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional, Tuple
 from unicodedata import normalize
@@ -33,6 +34,32 @@ def _same_name(expected: str, actual: str) -> bool:
     return ' '.join(normalize('NFC', expected).casefold().split()) == ' '.join(
         normalize('NFC', actual).casefold().split()
     )
+
+
+def search_itunes_catalog(artist: str, title: str) -> dict:
+    """One keyless search for explicit cleanup research; no fallbacks or retries.
+
+    Separate from preview selection: keep every row, even without preview audio.
+    Disable environment auth/proxies so this route never consults netrc credentials.
+    """
+    term = _clean(artist, title)
+    if not term or len(term) > 512:
+        raise ValueError('Invalid catalog query')
+    with requests.Session() as session:
+        session.trust_env = False
+        with session.get(
+            'https://itunes.apple.com/search',
+            params={'term': term, 'entity': 'song', 'limit': 3},
+            timeout=TIMEOUT, allow_redirects=False, stream=True,
+        ) as response:
+            if response.status_code != 200:
+                raise requests.HTTPError('Catalog HTTP failure')
+            body = bytearray()
+            for chunk in response.iter_content(chunk_size=8192):
+                body.extend(chunk)
+                if len(body) > 131072:
+                    raise ValueError('Catalog response exceeds limit')
+    return json.loads(body)
 
 
 def _itunes(artist: str, title: str, exact: bool) -> Optional[Tuple[str, str, str]]:
