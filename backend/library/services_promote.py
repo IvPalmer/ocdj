@@ -39,6 +39,8 @@ class PromoteResult:
 
 def promote_track(track) -> PromoteResult:
     """Copy a LibraryTrack file into the review folder."""
+    if track.metadata_only:
+        return PromoteResult(ok=False, source_path='', errors=['Mac snapshot records are metadata only.'])
     src = track.file_path
     if not src or not os.path.exists(src):
         return PromoteResult(
