@@ -10,7 +10,8 @@ import sys
 LABELS = {mode: 'dev.grooveops.ocdj-login-' + mode for mode in ('instagram', 'playback')}
 SOURCES = ('tools/instagram/foreground.py', 'tools/instagram/connector.py',
            'tools/instagram/mac_access.py', 'tools/mac_library/helper.py',
-           'tools/mac_library/reveal_map.py', 'tools/mac_login/restore.py')
+           'tools/mac_library/reveal_map.py', 'tools/mac_login/restore.py',
+           'backend/instagram/recognition.py')
 
 
 def install(home, source, python, token_file, root, local_map, ffmpeg, modes):

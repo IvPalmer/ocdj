@@ -61,6 +61,11 @@ class LoginTests(unittest.TestCase):
                                 cwd=base / 'code', capture_output=True, text=True,
                                 env={k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'DRAIN_TOKEN')})
         self.assertEqual(result.returncode, 0, result.stderr)
+        # The launcher imports lazily; exercise the staged child as well.
+        child = subprocess.run([sys.executable, 'tools/instagram/connector.py', '--help'],
+                               cwd=base / 'code', capture_output=True, text=True,
+                               env={k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'DRAIN_TOKEN')})
+        self.assertEqual(child.returncode, 0, child.stderr)
         with self.assertRaises(ValueError):
             self.stage()
         self.assertTrue((base / 'code/tools/mac_login/restore.py').exists())
