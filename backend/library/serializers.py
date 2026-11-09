@@ -5,11 +5,12 @@ from .models import LibraryTrack
 class LibraryTrackSerializer(serializers.ModelSerializer):
     filename = serializers.SerializerMethodField()
     file_path = serializers.SerializerMethodField()
+    playback_id = serializers.SerializerMethodField()
 
     class Meta:
         model = LibraryTrack
         fields = [
-            'id', 'file_path', 'filename',
+            'id', 'file_path', 'filename', 'playback_id',
             'artist', 'title', 'album', 'label', 'catalog_number',
             'genre', 'year',
             'format', 'bitrate', 'sample_rate', 'duration_seconds',
@@ -26,6 +27,10 @@ class LibraryTrackSerializer(serializers.ModelSerializer):
         if obj.metadata_only:
             return ''
         return obj.file_path.split('/')[-1] if obj.file_path else ''
+
+    def get_playback_id(self, obj):
+        from .matching import MAC_KEY
+        return obj.pk if obj.metadata_only and not obj.missing and MAC_KEY.fullmatch(obj.file_path) else None
 
 
 class LibraryTrackUpdateSerializer(serializers.Serializer):

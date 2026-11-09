@@ -15,7 +15,7 @@ The five-post fixture remains a synthetic demonstration; cursor tests also cover
 256 posts/1,232 video children over 22 synthetic pages. This is not live QA.
 
 ```sh
-python -m unittest tools.instagram.test_connector tools.instagram.test_foreground -v
+python -m unittest tools.instagram.test_connector tools.instagram.test_foreground tools.instagram.test_resident -v
 ```
 
 ## Explicit private Mac run
@@ -35,20 +35,22 @@ configuration; no public connector ingress or browser OAuth cookies are needed.
 
 The wrapper discovers the existing production backend container address, opens
 an SSH forward bound only to Mac `127.0.0.1`, verifies authenticated validation
-with a rejected empty sync, and invokes the unchanged `connector.py` with Chrome
+with a rejected empty sync, and invokes the adjacent `connector.py` with Chrome
 Profile 1. The local port is a forwarding socket, never a local DB/API. The bearer
 stays in process memory/environment; it is never a command-line argument.
 
-One invocation runs for **at most 1–3600 seconds including setup**, plus bounded
-cleanup (up to eight seconds for two child process groups). Default: 600 seconds.
-It may exit earlier after ten jobs or a session/transport failure. Ctrl-C,
-SIGTERM and terminal hangup stop it; it kills its own connector/ffmpeg and SSH
-process groups and removes its owned temporary media directory. Closing a terminal,
-sleep/reboot, expired login or a lost tunnel requires a new explicit invocation.
-No daemon, LaunchAgent, worker bootstrap, login change or automatic retry is
-installed. This operation provides a temporary online window, not continuous
-availability. The UI becomes offline three minutes after the last heartbeat;
-startup/exit messages are process state, not proof of a live Instagram session.
+The default invocation runs for **at most 1–3600 seconds including setup**,
+plus bounded child cleanup; default 600 seconds, possibly earlier after ten jobs.
+For continuous use in the existing authorized GUI login context, first run
+`python tools/instagram/foreground.py --preflight`, then replace `--seconds 600`
+with **`--resident`** above. Resident mode keeps one worker alive beyond ten jobs,
+refreshes the complete metadata hourly, backs off safe network reads/heartbeats,
+and can reconnect the existing tunnel without relaunching the worker. Mutations
+are never blindly replayed. See [the runbook](FOREGROUND.md) for exact limits,
+access gates, sleep/wake, fail-closed behavior and rollback. Ctrl-C/SIGTERM/HUP
+clean up owned process groups and temporary media. No LaunchAgent, permission
+change, new inbound service or automatic worker restart is installed. Sleep is
+offline time; stopped/ambiguous operations require an explicit new invocation.
 
 The raw connector's default work window is zero (sync and up to ten queued
 jobs). Its `--work-seconds` bounds idle waiting only and an active job may outlive
@@ -60,7 +62,13 @@ in the same user's temporary directory, but cannot detect independent raw runs.
 Instagram requests session. Cookies and CDN URLs remain in memory. The CDN
 session is separate and cookie-free. No raw browser cookie export is created.
 Only metadata, video bytes, and artist/title candidates go to OCDJ. Chrome
-Keychain/profile access must already be available to the Mac agent.
+Keychain/profile access must already be available in the chosen Mac context.
+Resident mode defaults to the no-UI native Keychain adapter, with no CLI
+fallback. Explicit foreground `--resident --allow-keychain-prompt` uses yt-dlp's
+existing macOS CLI helper once at startup; legacy bounded runs keep that helper.
+No hourly/wake refresh or transport retry extracts cookies again. Helper denial
+is sanitized as `keychain-access-required` and stops without fallback or retry.
+See [the runbook](FOREGROUND.md) for the operator gate and launch constraints.
 
 `imageio-ffmpeg` supplies the temporary standalone binary that avoids the
 broken Homebrew ffmpeg. Preflight runs `-version`. `INSTAGRAM_FFMPEG` can
@@ -151,8 +159,8 @@ minutes, and connector heartbeats/syncs also clean. A short 5-minute orphan
 grace protects in-flight uploads. No music library paths are read or changed.
 Production compose shares a dedicated `instagram_cache` volume between the
 backend and existing Huey worker. Cache eviction is safe; the next explicit
-Mac sync restores videos. Collection/review/wishlist state remains in PostgreSQL. There is no
-standing URL-refresh service: the UI explains how to rerun the connector.
+Mac sync restores videos. Collection/review/wishlist state remains in PostgreSQL. Opt-in Mac resident mode refreshes metadata hourly; no VPS URL-fetch service
+is added. Stopped connectors need an explicit restart.
 
 ## Required live pilot before merge
 

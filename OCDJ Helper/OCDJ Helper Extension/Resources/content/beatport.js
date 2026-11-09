@@ -1,5 +1,5 @@
-// Beatport track/release pages. Queue uses the existing YouTube search workflow;
-// the native Beatport embed is not integrated into the OCDJ player/CSP.
+// Beatport track/release pages. Use the official exact-ID preview player;
+// releases offer their individual tracks inside Beatport, never a search match.
 (() => {
   'use strict';
 
@@ -45,10 +45,17 @@
     const thumb = document.querySelector('meta[property="og:image"]')?.content || '';
     const queue = OCDJ.createPlayButton({
       size: 'medium',
-      tooltip: 'Find on YouTube and queue for listening',
-      onClick: () => OCDJ.sendToBackground('dig:queue-search', {
-        platform: 'beatport', artist, title, thumb, source_url,
-      }),
+      tooltip: match[1] === 'release' ? 'Queue exact release previews — choose a track in Beatport' : 'Queue exact Beatport preview',
+      onClick: () => {
+        // A SPA route can change before the observer has removed these controls.
+        if (window.location.origin + window.location.pathname !== source_url) {
+          return { error: 'Beatport source changed — wait for the current page' };
+        }
+        return OCDJ.sendToBackground('dig:queue-embed', {
+          platform: 'beatport', artist, title, thumb, source_url,
+          embedUrl: `https://embed.beatport.com/?id=${match[2]}&type=${match[1]}`,
+        });
+      },
     });
     const wantlist = OCDJ.createDigButton({
       size: 'medium',

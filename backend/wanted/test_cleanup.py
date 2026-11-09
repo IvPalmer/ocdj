@@ -322,6 +322,21 @@ class CleanupIntegrationTests(TestCase):
         self.assertEqual(job.tracklist[0]['title'], TITLE)
         self.assertEqual(receipt.snapshot['artist'], '')
 
+    def test_recognized_wrong_artist_and_prefixed_title_are_repaired(self):
+        original = {'artist': 'Wrong credit', 'title': f'Fixture Artist - {TITLE}'}
+        job = RecognizeJob.objects.create(
+            url='https://example.test/synthetic', status='completed', raw_results=raw(**original))
+        publish_recognition(job, [track(**original)])
+        receipt = MetadataCleanup.objects.get(job_id=job.pk)
+        process_cleanup(receipt.pk)
+        receipt.refresh_from_db()
+        job.refresh_from_db()
+        self.assertEqual(receipt.status, 'applied')
+        self.assertEqual(receipt.snapshot['artist'], original['artist'])
+        self.assertEqual(receipt.snapshot['title'], original['title'])
+        self.assertEqual(job.tracklist[0]['artist'], 'Fixture Artist')
+        self.assertEqual(job.tracklist[0]['title'], TITLE)
+
     def test_actual_pipeline_completion_captures_and_retains_raw_results(self):
         from contextlib import ExitStack
         from recognize.services.pipeline import _recognize_worker
@@ -384,17 +399,20 @@ class CleanupIntegrationTests(TestCase):
         self.assertEqual(MetadataCleanup.objects.filter(job_id=job.pk).count(), 1)
         self.assertEqual(job.tracklist[0]['artist'], 'Fixture Artist')
 
-    def test_wrong_recognized_artist_becomes_proposal(self):
+    def test_wrong_recognized_artist_with_unconfirmed_version_stays_proposed(self):
+        original = {'artist': 'Wrong tag', 'title': 'Night Signal (Club Mix)'}
         job = self.job()
-        job.raw_results = raw(artist='Wrong tag')
-        publish_recognition(job, [track(artist='Wrong tag')])
+        job.raw_results = raw(**original)
+        publish_recognition(job, [track(**original)])
         receipt = MetadataCleanup.objects.get(job_id=job.pk)
+        self.assertEqual(receipt.snapshot['isrc'], CODE)
         process_cleanup(receipt.pk)
         receipt.refresh_from_db()
         self.assertEqual(receipt.status, 'proposed')
         self.assertEqual(receipt.evidence['candidates'][0]['artist'], 'Fixture Artist')
         job.refresh_from_db()
-        self.assertEqual(job.tracklist[0]['artist'], 'Wrong tag')
+        self.assertEqual(job.tracklist[0]['artist'], original['artist'])
+        self.assertEqual(job.tracklist[0]['title'], original['title'])
 
     def test_lossy_cluster_and_missing_raw_anchor_never_authorize(self):
         for hits in [[], raw(title='Night Signal (Original Mix)'), raw(isrc=''),

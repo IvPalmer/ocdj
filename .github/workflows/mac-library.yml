@@ -4,6 +4,7 @@ on:
     paths:
       - 'backend/library/**'
       - 'tools/mac_library/**'
+      - 'src/components/Player/**'
       - '.github/workflows/mac-library.yml'
 jobs:
   snapshot:
@@ -32,6 +33,24 @@ jobs:
           python-version: '3.13'
       - run: mkdir -p "$PAPERCLIP_SCRATCH_DIR"
       - run: pip install -r backend/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: PYTHONPATH=backend python -m unittest library.test_snapshots library.test_matching -v
+      - run: PYTHONPATH=backend:. python -m unittest tools.mac_library.test_helper -v
       - run: python backend/manage.py makemigrations library --check --dry-run
       - run: python backend/manage.py test library --noinput
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: pip install playwright && python -m playwright install --with-deps chromium webkit
+      - run: npm ci && npm run build
+      - name: Indexed Mac audio player (synthetic API and audio only)
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 5189 > /tmp/mac-player-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5189/ > /dev/null; then break; fi
+            sleep 1
+          done
+          python tools/mac_library/test_player.py http://127.0.0.1:5189

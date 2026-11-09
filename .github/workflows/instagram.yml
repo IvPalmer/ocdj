@@ -43,7 +43,7 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: npm ci && npm run build
       - run: python backend/manage.py makemigrations instagram --check --dry-run
-      - run: python -m unittest tools.instagram.test_connector -v
+      - run: python -m unittest tools.instagram.test_connector tools.instagram.test_foreground tools.instagram.test_resident -v
       - run: python backend/manage.py test instagram library --noinput
       - name: Instagram and library UI (synthetic API responses only)
         run: |

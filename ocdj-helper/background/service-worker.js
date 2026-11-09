@@ -269,7 +269,20 @@ const messageHandlers = {
 
   'dig:queue-embed': async (data, sender) => {
     // Queue a native platform embed (Bandcamp, SoundCloud, Spotify, YouTube playlists)
-    const { platform, artist, title, embedUrl, thumb, source_url, tracks } = data;
+    let { platform, artist, title, embedUrl, thumb, source_url, tracks } = data;
+
+    if (platform === 'beatport') {
+      let source;
+      try { source = new URL(source_url); } catch { return { error: 'Exact Beatport source unavailable' }; }
+      const match = source.pathname.match(/^\/(?:[a-z]{2}\/)?(track|release)\/[^/]+\/([1-9]\d*)\/?$/);
+      if (source.protocol !== 'https:' || source.port || source.username || source.password ||
+          !['www.beatport.com', 'beatport.com'].includes(source.hostname) || !match) {
+        return { error: 'Exact Beatport source unavailable' };
+      }
+      // Derive from the source identity, never trust an arbitrary embed/preview URL.
+      embedUrl = `https://embed.beatport.com/?id=${match[2]}&type=${match[1]}`;
+      tracks = []; // Release track selection belongs to the exact official catalog.
+    }
 
     if (!embedUrl) return { error: 'No embed URL' };
 
@@ -290,7 +303,8 @@ const messageHandlers = {
     // Dedup by source URL or embed URL
     if (playerQueue.some(item =>
       (item.embedUrl && item.embedUrl === embedUrl) ||
-      (item.source_url && source_url && item.source_url === source_url)
+      (item.source_url && source_url && item.source_url === source_url &&
+        (platform !== 'beatport' || item.embedUrl === embedUrl))
     )) {
       return { queued: true, duplicate: true };
     }
@@ -307,6 +321,7 @@ const messageHandlers = {
   },
 
   'dig:queue-search': async (data, sender) => {
+    if (data.platform === 'beatport') return { error: 'Exact Beatport source required — refresh the Beatport page' };
     // Search YouTube for a track and queue the first result
     const { artist, title, thumb, source_url, platform } = data;
     const query = `${artist || ''} ${title || ''}`.trim();

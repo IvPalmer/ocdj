@@ -1,0 +1,26 @@
+name: Extension capture and exact queue fixtures
+on:
+  pull_request:
+    paths:
+      - 'ocdj-helper/**'
+      - 'OCDJ Helper/**'
+      - 'tools/extension-tests/**'
+      - '.github/workflows/extension.yml'
+permissions:
+  contents: read
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated DOM fixture dependency
+        run: npm install --prefix "$RUNNER_TEMP/ocdj-extension-fixtures" --no-audit --no-fund jsdom@26.1.0
+      - name: Execute capture, worker, and panel fixtures
+        run: OCDJ_TEST_JSDOM_PACKAGE="$RUNNER_TEMP/ocdj-extension-fixtures/package.json" node --test tools/extension-tests/*.test.mjs
+      - name: Check active JavaScript syntax and patch whitespace
+        run: |
+          find ocdj-helper 'OCDJ Helper/OCDJ Helper Extension/Resources' -name '*.js' -print0 | xargs -0 -n1 node --check
+          git diff --check

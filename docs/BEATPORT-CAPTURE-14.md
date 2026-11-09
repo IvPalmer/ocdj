@@ -1,5 +1,7 @@
 # Beatport manifest wiring — #14 / #20
 
+> Queue strategy superseded by [exact Beatport previews](BEATPORT-EXACT-QUEUE-14.md).
+
 This slice is stacked on release-prep PR #24, `419dbd9`, against
 `codex/14-safari-release-prep`. It supersedes only the earlier handoffs' statement
 that Beatport is intentionally undeclared. It prepares source; it does not prove
