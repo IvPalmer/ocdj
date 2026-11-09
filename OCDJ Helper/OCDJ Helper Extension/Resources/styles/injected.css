@@ -236,11 +236,13 @@
   vertical-align: middle;
 }
 
-/* Keep the framed track controls clear of SoundCloud's fixed player. */
+/* Compact recording actions beside the SoundCloud track heading. */
 .ocdj-sc-framed-controls {
-  position: fixed;
-  right: 16px;
-  bottom: 72px;
-  z-index: 10000;
-  margin: 0;
+  margin: 4px 8px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+h1:has(+ .ocdj-sc-framed-controls) {
+  display: inline;
 }

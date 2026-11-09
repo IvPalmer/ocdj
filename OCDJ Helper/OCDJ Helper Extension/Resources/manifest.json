@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OCDJ Dig",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Add tracks to your OCDJ Wanted List from Discogs, Bandcamp, YouTube, SoundCloud, Spotify, and Beatport",
   "permissions": [
     "storage",
@@ -78,6 +78,17 @@
         "styles/injected.css"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://soundcloud.com/n/*",
+        "https://www.soundcloud.com/n/*"
+      ],
+      "css": [
+        "styles/injected.css"
+      ],
+      "all_frames": true,
+      "run_at": "document_start"
     },
     {
       "matches": [

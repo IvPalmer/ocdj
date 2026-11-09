@@ -10,7 +10,7 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 350));
 for (const root of roots) {
   const manifest = JSON.parse(readFileSync(`${root}/manifest.json`));
   test(`${root}: Beatport declaration loads complete ordered resources on exact HTTPS hosts`, () => {
-    const declarations = manifest.content_scripts.filter(entry => entry.js.includes('content/beatport.js'));
+    const declarations = manifest.content_scripts.filter(entry => entry.js?.includes('content/beatport.js'));
     assert.equal(declarations.length, 1);
     assert.deepEqual(declarations[0], {
       matches: ['https://www.beatport.com/*', 'https://beatport.com/*'],
@@ -18,7 +18,7 @@ for (const root of roots) {
       css: ['styles/injected.css'], run_at: 'document_idle',
     });
     for (const entry of manifest.content_scripts) {
-      for (const file of [...entry.js, ...(entry.css || [])]) assert.ok(existsSync(`${root}/${file}`), file);
+      for (const file of [...(entry.js || []), ...(entry.css || [])]) assert.ok(existsSync(`${root}/${file}`), file);
     }
   });
 
@@ -62,7 +62,7 @@ for (const root of roots) {
       local: { get: (key, done) => done({ siteSettings: { beatport: enabled } }) },
       onChanged: { addListener: listener => { changeSettings = listener; } },
     } };
-    const entry = manifest.content_scripts.find(entry => entry.js.includes('content/beatport.js'));
+    const entry = manifest.content_scripts.find(entry => entry.js?.includes('content/beatport.js'));
     w.eval((entry?.js || []).map(file => readFileSync(`${root}/${file}`, 'utf8')).join('\n'));
     return { w, messages, settings: enabled => changeSettings({ siteSettings: { newValue: { beatport: enabled } } }, 'local'),
       close: async () => { await new Promise(resolve => setImmediate(resolve)); w.close(); } };

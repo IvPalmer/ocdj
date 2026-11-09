@@ -242,7 +242,7 @@ for (const root of roots) {
 
 for (const root of roots) {
   test(`${root}: same-origin SoundCloud frame uses canonical source and refreshes metadata`, async () => {
-    const f = fixture(root, 'soundcloud', 'https://soundcloud.com/artist/song', '<iframe src="/n/artist/song?embedded=crossfade"></iframe>');
+    const f = fixture(root, 'soundcloud', 'https://soundcloud.com/artist/song', '<div class="soundTitle"><span class="soundTitle__usernameText">Artist</span><div class="soundTitle__title"><span>First</span></div></div><iframe src="/n/artist/song?embedded=crossfade"></iframe>');
     try {
       const frame = f.w.document.querySelector('iframe');
       const doc = frame.contentDocument;
@@ -251,9 +251,14 @@ for (const root of roots) {
       doc.close();
       frame.dispatchEvent(new f.w.Event('load'));
       await pause();
-      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
-      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 0);
-      assert.ok(f.w.document.body.querySelector(':scope > .ocdj-sc-framed-controls'));
+      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 1);
+      assert.ok(doc.querySelector('h1 + .ocdj-sc-framed-controls'));
+      const styles = JSON.parse(readFileSync(`${root}/manifest.json`, 'utf8')).content_scripts
+        .find(entry => entry.matches.includes('https://soundcloud.com/n/*'));
+      assert.equal(styles.all_frames, true);
+      assert.deepEqual(styles.css, ['styles/injected.css']);
+      assert.equal(styles.js, undefined);
       const duplicate = f.w.document.createElement('iframe');
       duplicate.src = frame.src;
       f.w.document.body.append(duplicate);
@@ -262,37 +267,62 @@ for (const root of roots) {
       duplicate.contentDocument.close();
       duplicate.dispatchEvent(new f.w.Event('load'));
       await pause();
-      assert.equal(f.w.document.querySelectorAll('.ocdj-sc-framed-controls').length, 1);
-      duplicate.remove();
-      click(f.w, '.ocdj-play-btn'); click(f.w, '.ocdj-dig-btn');
+      assert.equal(doc.querySelectorAll('.ocdj-sc-framed-controls').length, 1);
+      assert.equal(duplicate.contentDocument.querySelectorAll('.ocdj-sc-framed-controls').length, 0);
+      f.w.eval(readFileSync(`${root}/content/soundcloud.js`, 'utf8'));
+      await pause();
+      assert.equal(doc.querySelectorAll('.ocdj-sc-framed-controls').length, 1);
+      assert.equal(duplicate.contentDocument.querySelectorAll('.ocdj-sc-framed-controls').length, 0);
+      click(frame.contentWindow, '.ocdj-play-btn'); click(frame.contentWindow, '.ocdj-dig-btn');
       assert.equal(f.messages[0].data.platform, 'soundcloud');
       assert.equal(f.messages[0].data.source_url, 'https://soundcloud.com/artist/song');
       assert.match(f.messages[0].data.embedUrl, /artist%2Fsong/);
       assert.equal(f.messages[1].data.title, 'First');
       assert.equal(f.messages[1].data.artist, 'Artist');
       assert.equal(f.messages[1].data.source_site, 'soundcloud');
-      const originalGroup = f.w.document.querySelector('.ocdj-btn-group');
+      const originalGroup = doc.querySelector('.ocdj-btn-group');
       doc.body.appendChild(doc.createElement('p'));
       await pause();
-      assert.equal(f.w.document.querySelector('.ocdj-btn-group'), originalGroup);
+      assert.equal(doc.querySelector('.ocdj-btn-group'), originalGroup);
       for (const title of ['Second', 'Third']) {
         doc.querySelector('h1').textContent = title;
         await pause();
-        assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
-        click(f.w, '.ocdj-dig-btn');
+        assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 1);
+        click(frame.contentWindow, '.ocdj-dig-btn');
         assert.equal(f.messages.at(-1).data.title, title);
       }
+      // A host remount can detach both heading and group without changing metadata.
+      doc.querySelector('section').innerHTML = '<h1>Third</h1><a href="/artist">Artist</a>';
+      await pause();
+      assert.ok(doc.querySelector('h1 + .ocdj-sc-framed-controls'));
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 1);
+      assert.equal(duplicate.contentDocument.querySelectorAll('.ocdj-btn-group').length, 0);
+      click(frame.contentWindow, '.ocdj-play-btn');
+      assert.equal(f.messages.at(-1).data.title, 'Third');
+      // Missing metadata removes controls until the real title returns.
+      doc.querySelector('h1').textContent = '';
+      await pause();
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 0);
+      doc.querySelector('h1').textContent = 'Third';
+      await pause();
+      const owner = f.w.document.querySelector('iframe[data-ocdj-sc-frame]');
+      assert.ok(owner);
+      // Whichever matching frame recovers first owns the sole pair.
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length +
+        duplicate.contentDocument.querySelectorAll('.ocdj-btn-group').length, 1);
+      duplicate.remove();
+      await pause();
       // Outer navigation must never leave controls for the old frame recording.
       f.w.history.pushState({}, '', '/artist/another-song');
       f.w.document.body.appendChild(f.w.document.createElement('p'));
       await pause();
-      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 0);
       f.w.history.back();
       await pause();
-      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 1);
       frame.remove();
       await pause();
-      assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+      assert.equal(doc.querySelectorAll('.ocdj-btn-group').length, 0);
     } finally { await f.close(); }
   });
   test(`${root}: unrelated SoundCloud frame never acquires recording controls`, async () => {
@@ -305,6 +335,7 @@ for (const root of roots) {
       frame.dispatchEvent(new f.w.Event('load'));
       await pause();
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 0);
+      assert.equal(frame.contentDocument.querySelectorAll('.ocdj-btn-group').length, 0);
     } finally { await f.close(); }
   });
 }
