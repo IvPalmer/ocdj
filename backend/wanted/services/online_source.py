@@ -42,10 +42,9 @@ def youtube_source(artist, title):
 
 
 def spotify_source(artist, title):
-    from requests import RequestException
-    from spotipy import Spotify
+    import requests
     from spotipy.cache_handler import MemoryCacheHandler
-    from spotipy.exceptions import SpotifyException, SpotifyOauthError
+    from spotipy.exceptions import SpotifyOauthError
     from spotipy.oauth2 import SpotifyClientCredentials
     from core.services.config import get_config
 
@@ -55,9 +54,16 @@ def spotify_source(artist, title):
     try:
         auth = SpotifyClientCredentials(client_id, secret, requests_timeout=3,
                                         cache_handler=MemoryCacheHandler())
-        spotify = Spotify(auth_manager=auth, requests_timeout=3, retries=0, status_retries=0)
-        results = spotify.search(q=f'artist:{artist} track:{title}', type='track', limit=5)
-    except (RequestException, SpotifyException, SpotifyOauthError, ValueError):
+        token = auth.get_access_token(as_dict=False)
+        response = requests.get(
+            'https://api.spotify.com/v1/search',
+            headers={'Authorization': f'Bearer {token}'},
+            params={'q': f'artist:{artist} track:{title}', 'type': 'track', 'limit': 5},
+            timeout=3,
+        )
+        response.raise_for_status()
+        results = response.json()
+    except (requests.RequestException, SpotifyOauthError, ValueError):
         logger.info('Wanted Spotify lookup unavailable')
         return ''
     artist_name, track_name = recording_name(artist), recording_name(title)
