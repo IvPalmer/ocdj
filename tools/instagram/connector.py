@@ -86,20 +86,39 @@ def parse_posts(items, thumbnail_urls=None):
     return {'collection_id': COLLECTION, 'posts': posts}, urls
 
 
-def instagram_session(profile):
+class CookieLogger:
+    # Upstream diagnostics can include local paths or exception contents.
+    def debug(self, *args, **kwargs): pass
+    info = warning = error = debug
+
+
+def instagram_session(profile, allow_keychain_prompt=False):
     from yt_dlp import cookies
-    # The upstream macOS helper spawns `security`, which can prompt. Replace
-    # only that helper during extraction, using the same key via no-UI API.
+    logger = CookieLogger()
+    # Select the helper once, at startup. Never fall back after a denial.
     if sys.platform == 'darwin':
         from unittest.mock import patch
-        try:
-            from .mac_access import keyring_password
-        except ImportError:  # direct script entry point
-            from mac_access import keyring_password
-        with patch.object(cookies, '_get_mac_keyring_password', keyring_password):
-            jar = cookies.extract_cookies_from_browser('chrome', profile=profile)
+        helper = getattr(cookies, '_get_mac_keyring_password', None)
+        if helper is None:
+            raise ConnectorError('keychain-access-required')
+        if not allow_keychain_prompt:
+            try:
+                from .mac_access import keyring_password
+            except ImportError:  # direct script entry point
+                from mac_access import keyring_password
+            helper = keyring_password
+        def password(browser, logger):
+            try:
+                value = helper(browser, logger)
+            except Exception:
+                raise ConnectorError('keychain-access-required') from None
+            if not value:
+                raise ConnectorError('keychain-access-required')
+            return value
+        with patch.object(cookies, '_get_mac_keyring_password', password):
+            jar = cookies.extract_cookies_from_browser('chrome', profile=profile, logger=logger)
     else:
-        jar = cookies.extract_cookies_from_browser('chrome', profile=profile)
+        jar = cookies.extract_cookies_from_browser('chrome', profile=profile, logger=logger)
     session = requests.Session()
     for cookie in jar:
         if cookie.domain.lstrip('.') == 'instagram.com' or cookie.domain.endswith('.instagram.com'):
@@ -107,6 +126,7 @@ def instagram_session(profile):
     session.headers.update({'X-IG-App-ID': '936619743392459',
                             'User-Agent': 'Mozilla/5.0', 'Referer': IG+'/'})
     if not session.cookies.get_dict().get('sessionid'):
+        session.close()
         raise ConnectorError('session-expired')
     del jar
     return session
@@ -339,19 +359,24 @@ from backend.instagram.recognition import recognize, explicit_candidates
 
 
 def run(args):
+    resident = getattr(args, 'resident', False)
+    allow_prompt = getattr(args, 'allow_keychain_prompt', False)
+    if allow_prompt and (not resident or args.fixture):
+        raise ConnectorError('keychain-prompt-requires-live-resident')
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token: raise ConnectorError('DRAIN_TOKEN missing')
     api = API(args.api, token)
-    resident = getattr(args, 'resident', False)
     if resident and args.fixture:
         raise ConnectorError('resident-fixture-disallowed')
     ffmpeg = ffmpeg_path() if args.fixture else None
+    session = None
     try:
         thumbnail_urls = {}
         if args.fixture:
             data = json.loads(Path(args.fixture).read_text()); urls = {}; session = None
         else:
-            session = instagram_session(args.profile)
+            # Legacy bounded runs retain yt-dlp's existing security CLI route.
+            session = instagram_session(args.profile, allow_keychain_prompt=not resident or allow_prompt)
             data, urls = read_collection(session, thumbnail_urls=thumbnail_urls)
         synced = api.post('sync/', data)
         mapping = synced['media']
@@ -443,7 +468,10 @@ def run(args):
                 api.post('heartbeat/', {'status': status})
         except Exception:
             pass  # Preserve original restriction, including when transport died.
-        raise ConnectorError(status) from None
+        raise ConnectorError(str(e) if str(e) == 'keychain-access-required' else status) from None
+    finally:
+        if session is not None:
+            session.close()
 
 
 if __name__ == '__main__':
@@ -452,6 +480,8 @@ if __name__ == '__main__':
     parser.add_argument('--profile', default='Profile 1')
     parser.add_argument('--fixture', help='Offline synthetic fixture, never live Instagram data')
     parser.add_argument('--resident', action='store_true', help='stay in this login session until stopped; no relaunch')
+    parser.add_argument('--allow-keychain-prompt', action='store_true',
+                        help='resident startup only: use existing yt-dlp macOS Keychain helper once')
     parser.add_argument('--work-seconds', type=int, default=0, choices=range(0, 3601))
     try:
         run(parser.parse_args())

@@ -10,13 +10,14 @@ connector and its existing protocol.
 
 ## Access gate and exact operator step
 
-The 2026-11-09 header-only preflight in the agent's background launch context
-returns exit 1, `Chrome-Profile-1-unreadable-in-this-launch-context`:
-`open(.../Google/Chrome/Profile 1/Cookies, 'rb').read(16)` raises
-`PermissionError` (`Operation not permitted`). No cookie contents, Keychain item,
-TCC database or credential configuration were read in this check. The latest
-operator handoff reports that the existing foreground context works; that is
-not proof this background process or the new resident mode has that authority.
+The parent reports a real foreground release-gate attempt in the authorized
+Codex context: the Chrome SQLite header was readable and private auth verified,
+then startup extraction stopped before sync with
+`keychain-existing-access-required`. The earlier bounded 900-second connector
+using yt-dlp's existing macOS `security` helper read the full collection in that
+context. This distinguishes native Python item access from the existing CLI
+identity; neither proves this new opt-in has passed live QA. An earlier
+background attempt could not read the Chrome header at all.
 
 Use the **same already-authorized GUI application and Python environment that
 ran the successful foreground connector**. If that was Apple Terminal, open
@@ -37,24 +38,28 @@ queries the database. If it fails, stop and report that context. Do not grant
 Full Disk Access, Automation, Accessibility, change file ownership/ACLs, copy
 cookies, or reset TCC. There is no validated permission repair in this PR.
 
-The Mac extraction adapter temporarily disables Keychain interaction **inside
-the connector process**, reads only the existing `Chrome Safe Storage`/`Chrome`
-item via Security.framework, restores the previous interaction policy and frees
-the native buffer. It replaces yt-dlp's prompting `security` helper only during
-extraction; it never falls back to that helper. Only Instagram cookies enter the
-in-memory request session. Missing prior item access, a locked Keychain, missing
-API or changed yt-dlp helper fail closed. No prompt, unlock or ACL modification
-is attempted. Native Python has its own Keychain caller identity: a previously
-working `/usr/bin/security` subprocess does **not** establish Python trust.
-The adapter's native success remains unverified; denial is a real blocker,
-not a reason to broaden trust to all Python programs.
+Resident mode defaults to no UI. The Mac extraction adapter temporarily
+disables Keychain interaction inside the connector process, reads only the
+existing `Chrome Safe Storage`/`Chrome` item via Security.framework, restores
+the previous interaction policy and frees the native buffer. It replaces
+yt-dlp's `security` helper only during extraction, with no fallback after denial.
 
-If the known GUI application still fails either gate, continuous operation is
-blocked pending a separately reviewed stable, signed app identity with access
-scoped to Chrome's existing item and profile. This PR does not install such an
-app or claim that macOS offers a per-file TCC grant for this Python process.
-The concrete least-privilege step available now is the existing authorized GUI
-context plus the preflight above; there is no permission-free bypass to invent.
+For an explicitly supervised foreground startup, `--resident --allow-keychain-prompt`
+selects yt-dlp's existing macOS `security find-generic-password` helper instead,
+once during startup. It may present the
+existing item's access prompt. Do not change TCC, ACLs, trust settings or select
+"Always Allow"; denial/cancellation stops this run. This code does not unlock,
+modify item permissions, or install an agent. Only Instagram cookies enter the
+in-memory request session; extraction diagnostics and helper exception details
+are suppressed. Helper failure reports only `keychain-access-required` (backend
+heartbeat remains `error`); missing login cookies report `session-expired`.
+
+The flag requires resident mode and cannot be used with `--preflight` or a
+synthetic connector `--fixture`. Without it, resident/background operation
+remains fail-closed/no-UI. Legacy bounded runs retain the existing yt-dlp CLI
+helper behavior. Both routes extract once: hourly/wake refresh, session expiry,
+network retries and tunnel reconnect never extract again or prompt. Any failure
+requires a new explicit invocation; there is no access retry or fallback.
 
 ## Start, observe and stop (parent/operator live QA only)
 
@@ -65,11 +70,13 @@ tracing off:
 (
   source "$HOME/.config/ocdj/drain.env"
   export DRAIN_TOKEN
-  python tools/instagram/foreground.py --resident
+  python tools/instagram/foreground.py --resident --allow-keychain-prompt
 )
 ```
 
-Keep the terminal tab open. Do not run another raw connector, old LaunchAgent
+The example explicitly opts into the startup prompt; omit
+`--allow-keychain-prompt` for the no-UI resident gate. Keep the terminal tab open.
+Do not run another raw connector, old LaunchAgent
 or wrapper alongside it. The existing private per-user singleton lock covers
 both wrapper modes. The bearer remains in memory/environment, never argv or
 logs; proxy environment variables are stripped. `private-auth-verified` proves
@@ -130,18 +137,21 @@ second heartbeat writer or change recognition timing/backend status semantics.
 python -m unittest tools.instagram.test_connector tools.instagram.test_foreground tools.instagram.test_resident -v
 ```
 
-61 DB-free synthetic tests cover the existing parser/thumbnail contracts,
+DB-free synthetic tests cover the existing parser/thumbnail contracts,
 more than ten jobs, idle residency, hourly and wake refresh, restriction stop,
 single-attempt ambiguous mutations, read/heartbeat retry budgets, same-worker
 transport recovery, auth failure, flap budget, native no-UI denial/restore/free
-with fake C functions, and process-group/temp cleanup. Existing real subprocess
+with fake C functions, startup flag gating, legacy helper selection, sanitized
+helper failures without fallback, single extraction across hourly/wake refresh,
+and process-group/temp cleanup in both resident modes. Existing real subprocess
 cleanup fixtures remain. No local Django/DB/API or real secrets/network are used.
 The Instagram Actions workflow runs these and existing PostgreSQL/Chromium
 integration fixtures on GitHub. Local system Python emits a pre-existing
 requests dependency-version warning; isolated Actions dependencies are separate.
 
 Parent owns review, merge, deployment and live QA. Still required: same-context
-header success, no-UI native Keychain/session success, complete collection sync,
+header success, Keychain/session success on the explicitly selected startup
+route, complete collection sync,
 selected private playback/recognition, more than ten jobs, hourly refresh,
 sleep/wake with no ambiguous mutation, restriction stop and manual restart,
 plus the existing private browser/media boundary checks. Native Keychain behavior
@@ -158,4 +168,4 @@ Implementation references: [yt-dlp cookie helper](https://github.com/yt-dlp/yt-d
 [Apple Keychain no-UI setting](https://developer.apple.com/documentation/security/seckeychainsetuserinteractionallowed(_:)),
 [Apple item lookup](https://developer.apple.com/documentation/security/seckeychainfindgenericpassword(_:_:_:_:_:_:_:_:)).
 The legacy SecKeychain APIs are deprecated; this adapter deliberately fails closed
-if unavailable instead of adding a dependency or prompting fallback.
+if unavailable instead of adding a dependency or an automatic prompting fallback.

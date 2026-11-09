@@ -72,12 +72,13 @@ class RetryTests(unittest.TestCase):
 
 
 class ResidentTests(unittest.TestCase):
-    def drive(self, claims=12, gap=15, restriction=False):
+    def drive(self, claims=12, gap=15, restriction=False, allow_prompt=False):
         self.claims, self.syncs, self.reads = 0, 0, 0
         self.clock = 0
         api, session = Mock(), Mock()
         args = SimpleNamespace(api='https://fixture.invalid', profile='Profile 1',
-                               fixture=None, work_seconds=0, resident=True)
+                               fixture=None, work_seconds=0, resident=True,
+                               allow_keychain_prompt=allow_prompt)
         def read(*args, **kwargs):
             self.reads += 1
             if restriction and self.reads == 2: raise c.ConnectorError('restricted')
@@ -94,13 +95,56 @@ class ResidentTests(unittest.TestCase):
         def sleep(seconds): self.clock += gap
         with patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic'}), \
              patch.object(c, 'API', return_value=api), \
-             patch.object(c, 'instagram_session', return_value=session), \
+             patch.object(c, 'instagram_session', return_value=session) as extract, \
              patch.object(c, 'read_collection', side_effect=read), \
              patch.object(c, 'read_comments', return_value=[{'id': '1', 'text': 'ID: Artist - Song'}]), \
              patch.object(c.time, 'sleep', side_effect=sleep), \
              patch.object(c.time, 'monotonic', side_effect=lambda: self.clock), \
              patch.object(c.time, 'time', side_effect=lambda: self.clock):
+            try:
+                c.run(args)
+            finally:
+                extract.assert_called_once_with('Profile 1', allow_keychain_prompt=allow_prompt)
+                session.close.assert_called_once()
+
+    def test_prompt_is_startup_only_across_hourly_and_wake_refresh(self):
+        with self.assertRaises(KeyboardInterrupt): self.drive(claims=242, allow_prompt=True)
+        self.assertEqual(self.syncs, 2)
+        with self.assertRaises(KeyboardInterrupt): self.drive(claims=1, gap=7200, allow_prompt=True)
+        self.assertEqual(self.syncs, 2)
+
+    def test_prompt_flag_rejected_before_access_without_live_resident(self):
+        for resident, fixture in [(False, None), (False, 'fixture.json'), (True, 'fixture.json')]:
+            with patch.object(c, 'instagram_session') as extract, patch.object(c, 'API') as api, \
+                 self.assertRaisesRegex(c.ConnectorError, 'keychain-prompt-requires-live-resident'):
+                c.run(SimpleNamespace(resident=resident, fixture=fixture, allow_keychain_prompt=True))
+            extract.assert_not_called()
+            api.assert_not_called()
+
+    def test_bounded_mode_keeps_existing_helper_and_closes_session(self):
+        args = SimpleNamespace(api='https://fixture.invalid', profile='Profile 1', fixture=None,
+                               work_seconds=0, resident=False)
+        session, api = Mock(), Mock()
+        api.post.side_effect = lambda endpoint, *a, **k: {'media': []} if endpoint == 'sync/' else None
+        with patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic'}), patch.object(c, 'API', return_value=api), \
+             patch.object(c, 'instagram_session', return_value=session) as extract, \
+             patch.object(c, 'read_collection', return_value=({'posts': []}, {})):
             c.run(args)
+        extract.assert_called_once_with('Profile 1', allow_keychain_prompt=True)
+        session.close.assert_called_once()
+
+    def test_keychain_denial_is_sanitized_and_stops_before_sync_without_retry(self):
+        args = SimpleNamespace(api='https://fixture.invalid', profile='Profile 1', fixture=None,
+                               work_seconds=0, resident=True, allow_keychain_prompt=True)
+        api = Mock()
+        with patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic'}), patch.object(c, 'API', return_value=api), \
+             patch.object(c, 'instagram_session', side_effect=c.ConnectorError('keychain-access-required')) as extract, \
+             patch.object(c.time, 'sleep') as sleep, \
+             self.assertRaisesRegex(c.ConnectorError, '^keychain-access-required$'):
+            c.run(args)
+        extract.assert_called_once()
+        sleep.assert_not_called()
+        api.post.assert_called_once_with('heartbeat/', {'status': 'error'})
 
     def test_more_than_ten_jobs_without_resync_or_restart(self):
         with self.assertRaises(KeyboardInterrupt): self.drive()
@@ -202,6 +246,12 @@ class SupervisorTests(unittest.TestCase):
                 fg.preflight()
 
     def test_resident_wrapper_uses_same_cleanup_and_single_child(self):
+        for allow_prompt in (False, True):
+            for interrupted in (False, True):
+                with self.subTest(allow_prompt=allow_prompt, interrupted=interrupted):
+                    self.check_resident_wrapper(allow_prompt, interrupted)
+
+    def check_resident_wrapper(self, allow_prompt, interrupted):
         with tempfile.TemporaryDirectory() as directory:
             cookie = Path(directory) / 'Cookies'; cookie.write_bytes(b'SQLite format 3\x00')
             processes = []
@@ -216,13 +266,31 @@ class SupervisorTests(unittest.TestCase):
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
                  patch.object(fg, 'stop') as stop, \
-                 patch.object(fg, 'supervise', side_effect=KeyboardInterrupt) as supervisor:
-                with self.assertRaises(KeyboardInterrupt): fg.run(600, resident=True)
+                 patch.object(fg, 'supervise', side_effect=KeyboardInterrupt if interrupted else None,
+                              return_value=1) as supervisor:
+                if interrupted:
+                    with self.assertRaises(KeyboardInterrupt):
+                        fg.run(600, resident=True, allow_keychain_prompt=allow_prompt)
+                else:
+                    self.assertEqual(fg.run(600, resident=True, allow_keychain_prompt=allow_prompt), 1)
             self.assertEqual(len(processes), 2)
             self.assertIn('--resident', processes[1][0])
+            self.assertEqual('--allow-keychain-prompt' in processes[1][0], allow_prompt)
             self.assertEqual(supervisor.call_args.args[2], float('inf'))
             self.assertEqual(stop.call_args_list[-2:], [call(processes[1][1]), call(processes[0][1])])
             self.assertFalse(Path(processes[1][2]['env']['TMPDIR']).exists())
+
+    def test_prompt_flag_requires_resident_before_any_access(self):
+        with patch.object(fg, 'preflight') as preflight, \
+             self.assertRaisesRegex(fg.RunError, '^keychain-prompt-requires-resident$'):
+            fg.run(600, allow_keychain_prompt=True)
+        preflight.assert_not_called()
+        for flags in [['--allow-keychain-prompt'], ['--preflight', '--allow-keychain-prompt']]:
+            with patch('sys.argv', ['foreground.py'] + flags), patch('sys.stderr', new_callable=io.StringIO), \
+                 patch.object(fg, 'preflight') as preflight, self.assertRaises(SystemExit) as error:
+                fg.main()
+            self.assertEqual(error.exception.code, 2)
+            preflight.assert_not_called()
 
 
     def test_transport_retry_reuses_port_without_worker_relaunch(self):
@@ -295,7 +363,8 @@ class MacAccessTests(unittest.TestCase):
         cookies = SimpleNamespace(_get_mac_keyring_password=original)
         def extract(*args, **kwargs):
             self.assertEqual(args, ('chrome',))
-            self.assertEqual(kwargs, {'profile': 'Profile 1'})
+            self.assertEqual(kwargs['profile'], 'Profile 1')
+            self.assertIsInstance(kwargs['logger'], c.CookieLogger)
             self.assertEqual(cookies._get_mac_keyring_password('Chrome', Mock()), b'synthetic')
             return []
         cookies.extract_cookies_from_browser = Mock(side_effect=extract)
@@ -311,9 +380,51 @@ class MacAccessTests(unittest.TestCase):
     def test_missing_upstream_adapter_fails_closed(self):
         cookies = SimpleNamespace(extract_cookies_from_browser=Mock())
         with patch.dict('sys.modules', {'yt_dlp': SimpleNamespace(cookies=cookies)}), \
-             patch.object(c.sys, 'platform', 'darwin'), self.assertRaises(AttributeError):
+             patch.object(c.sys, 'platform', 'darwin'), \
+             self.assertRaisesRegex(c.ConnectorError, '^keychain-access-required$'):
             c.instagram_session('Profile 1')
         cookies.extract_cookies_from_browser.assert_not_called()
+
+    def test_opt_in_uses_existing_helper_once_and_filters_cookies(self):
+        original = Mock(return_value=b'synthetic-key')
+        cookies = SimpleNamespace(_get_mac_keyring_password=original)
+        def extract(*args, **kwargs):
+            self.assertEqual(cookies._get_mac_keyring_password('Chrome', kwargs['logger']), b'synthetic-key')
+            return [requests.cookies.create_cookie('sessionid', 'synthetic', domain='.instagram.com'),
+                    requests.cookies.create_cookie('other', 'synthetic', domain='fixture.invalid')]
+        cookies.extract_cookies_from_browser = Mock(side_effect=extract)
+        with patch.dict('sys.modules', {'yt_dlp': SimpleNamespace(cookies=cookies)}), \
+             patch.object(c.sys, 'platform', 'darwin'), patch.object(mac_access, 'keyring_password') as native:
+            session = c.instagram_session('Profile 1', allow_keychain_prompt=True)
+        self.assertEqual(session.cookies.get_dict(), {'sessionid': 'synthetic'})
+        session.close()
+        original.assert_called_once()
+        native.assert_not_called()
+        cookies.extract_cookies_from_browser.assert_called_once()
+        self.assertIs(cookies._get_mac_keyring_password, original)
+
+    def test_helper_denials_do_not_leak_retry_or_fall_back_and_restore_patch(self):
+        for allow_prompt in (False, True):
+            for failure in (None, RuntimeError('synthetic-secret')):
+                original = Mock(return_value=None, side_effect=failure)
+                cookies = SimpleNamespace(_get_mac_keyring_password=original)
+                def extract(*args, **kwargs):
+                    kwargs['logger'].warning('synthetic-secret')
+                    return cookies._get_mac_keyring_password('Chrome', kwargs['logger'])
+                cookies.extract_cookies_from_browser = Mock(side_effect=extract)
+                with patch.dict('sys.modules', {'yt_dlp': SimpleNamespace(cookies=cookies)}), \
+                     patch.object(c.sys, 'platform', 'darwin'), \
+                     patch.object(mac_access, 'keyring_password', side_effect=failure,
+                                  return_value=None) as native, \
+                     patch('sys.stdout', new_callable=io.StringIO) as output, \
+                     patch('sys.stderr', new_callable=io.StringIO) as error, \
+                     self.assertRaisesRegex(c.ConnectorError, '^keychain-access-required$'):
+                    c.instagram_session('Profile 1', allow_keychain_prompt=allow_prompt)
+                self.assertEqual(original.call_count, int(allow_prompt))
+                self.assertEqual(native.call_count, int(not allow_prompt))
+                self.assertEqual(output.getvalue() + error.getvalue(), '')
+                cookies.extract_cookies_from_browser.assert_called_once()
+                self.assertIs(cookies._get_mac_keyring_password, original)
 
     def test_synthetic_key_is_freed_and_prior_policy_restored(self):
         security = Mock()

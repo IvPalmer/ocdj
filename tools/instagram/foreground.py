@@ -178,7 +178,9 @@ def preflight():
     print('Profile-1-header-readable; Keychain/session not tested', flush=True)
 
 
-def run(duration, resident=False):
+def run(duration, resident=False, allow_keychain_prompt=False):
+    if allow_keychain_prompt and not resident:
+        raise RunError('keychain-prompt-requires-resident')
     deadline = float('inf') if resident else time.monotonic() + duration
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token:
@@ -235,7 +237,8 @@ def run(duration, resident=False):
                 child = subprocess.Popen(
                     [sys.executable, str(Path(__file__).with_name('connector.py')),
                      '--api', f'http://127.0.0.1:{port}', '--profile', 'Profile 1',
-                     '--work-seconds', str(duration)] + (['--resident'] if resident else []),
+                     '--work-seconds', str(duration)] + (['--resident'] if resident else [])
+                    + (['--allow-keychain-prompt'] if allow_keychain_prompt else []),
                     env=env, start_new_session=True, stderr=subprocess.DEVNULL)
                 if resident:
                     # connect() updates the owned tunnel; supervision uses a
@@ -261,16 +264,20 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--resident', action='store_true', help='explicit login-session resident; no install/relaunch')
     modes.add_argument('--preflight', action='store_true', help='header-only access check; no token, SSH or extraction')
+    parser.add_argument('--allow-keychain-prompt', action='store_true',
+                        help='resident startup only: permit existing yt-dlp macOS Keychain helper')
     parser.add_argument('--seconds', type=seconds, default=600,
                         help='hard run deadline including setup, 1–3600 (default 600)')
     args = parser.parse_args()
+    if args.allow_keychain_prompt and not args.resident:
+        parser.error('--allow-keychain-prompt requires --resident')
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGHUP, interrupted)
     try:
         if args.preflight:
             preflight()
             return 0
-        return run(args.seconds, resident=args.resident)
+        return run(args.seconds, resident=args.resident, allow_keychain_prompt=args.allow_keychain_prompt)
     except KeyboardInterrupt:
         print('stopped: operator-interrupt; no restart', flush=True)
         return 130
