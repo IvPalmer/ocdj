@@ -318,6 +318,11 @@ function SoulseekPanel() {
           {clearDlMutation.error?.data?.error || 'Could not clear downloads. Refresh and try again.'}
         </p>
       )}
+      {deleteDlMutation.isError && (
+        <p role="alert">
+          {deleteDlMutation.error?.data?.error || 'Could not remove this transfer. Refresh and try again.'}
+        </p>
+      )}
 
       {/* ── Downloads Section ── */}
       {allDownloads.length > 0 && (
@@ -370,20 +375,19 @@ function SoulseekPanel() {
                   <span className="dl-icon">✓</span>
                   <span className="dl-name">{dl.filename.split(/[/\\]/).pop()}</span>
                   <span className="dl-user">from {dl.username}</span>
-                  {dl.untracked ? (
+                  {dl.untracked && (
                     <span className="dl-untracked" title="Live from slskd — this app has no record of it">
                       slskd
                     </span>
-                  ) : (
-                    <button
-                      className="btn btn-xs btn-ghost dl-remove-btn"
-                      onClick={() => deleteDlMutation.mutate(dl.id)}
-                      disabled={deleteDlMutation.isPending}
-                      title="Remove from list"
-                    >
-                      ✕
-                    </button>
                   )}
+                  <button
+                    className="btn btn-xs btn-ghost dl-remove-btn"
+                    onClick={() => deleteDlMutation.mutate(dl.id)}
+                    disabled={deleteDlMutation.isPending}
+                    title="Remove from list"
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
@@ -407,7 +411,6 @@ function SoulseekPanel() {
                   <button
                     className="btn btn-xs btn-ghost dl-remove-btn"
                     onClick={() => deleteDlMutation.mutate(dl.id)}
-                    onClickCapture={undefined}
                     disabled={deleteDlMutation.isPending}
                     title="Remove from list"
                   >
@@ -579,8 +582,9 @@ function QueueItemRow({
                       className={`expand-result-item${dlStatus ? ' er-item--downloaded' : ''}${r.is_locked ? ' er-item--locked' : ''}`}
                     >
                       <span className="er-score">{r.match_score}%</span>
-                      <span className="er-file" title={r.filename}>
-                        {r.filename.split(/[/\\]/).pop()}
+                      <span className="er-file">
+                        {r.is_locked && <span className="er-lock" title="Peer requires access to this file">Locked</span>}
+                        <span className="er-file-name" title={r.filename}>{r.filename.split(/[/\\]/).pop()}</span>
                       </span>
                       <span className="er-size">{formatSize(r.file_size)}</span>
                       <span className="er-format">{r.file_extension?.toUpperCase()}</span>
@@ -588,9 +592,6 @@ function QueueItemRow({
                         {r.bitrate ? `${r.bitrate}k` : r.bit_depth ? `${r.bit_depth}bit` : ''}
                       </span>
                       <span className="er-user">
-                        {r.is_locked && (
-                          <span className="er-lock" title="Locked — peer requires privileged access">🔒</span>
-                        )}
                         {r.username}
                         {r.free_upload_slots && <span className="free-slot"> free</span>}
                       </span>

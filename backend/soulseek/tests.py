@@ -9,7 +9,7 @@ from django.test import TestCase, SimpleTestCase
 from rest_framework.test import APIClient
 
 from organize.models import PipelineItem
-from .models import Download, SearchQueueItem
+from .models import Download, SearchQueueItem, SearchResult
 from .services import SlskdClient
 
 
@@ -25,6 +25,19 @@ class HistoryClientTests(SimpleTestCase):
             params={'remove': 'true'}, timeout=30,
         )
         client.session.delete.return_value.raise_for_status.assert_called_once()
+
+    def test_enqueue_and_cancel_encode_url_like_peer(self):
+        client = SlskdClient()
+        client.session = Mock()
+        client.session.post.return_value.text = ''
+        client.session.delete.return_value.status_code = 204
+        peer = 'https://fixture.invalid'
+        url = client._url('/transfers/downloads/https%3A%2F%2Ffixture.invalid')
+        client.download(peer, 'song.flac')
+        client.cancel_download(peer, 'id', remove=True)
+        client.session.post.assert_called_once_with(url, json=[{'filename': 'song.flac'}], timeout=30)
+        client.session.delete.assert_called_once_with(f'{url}/id', params={'remove': 'true'}, timeout=30)
+        client.session.put.assert_not_called()
 
     def test_missing_history_is_idempotent_but_other_errors_propagate(self):
         client = SlskdClient()
@@ -83,6 +96,25 @@ class ClearDownloadsTests(TestCase):
 
     def clear(self, mode):
         return self.client.post('/api/soulseek/downloads/clear/', {'mode': mode}, format='json')
+
+    def test_history_does_not_hide_an_active_retry_of_same_file(self):
+        dl, _ = self.add('failed', 'Completed, TimedOut')
+        self.transfers.append({'id': 'retry', 'filename': dl.filename, 'state': 'Queued, Remotely'})
+        self.assertEqual(self.client.delete(f'/api/soulseek/downloads/{dl.pk}/').status_code, 409)
+        self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
+        self.peer.session.delete.assert_not_called()
+
+    def test_cancel_resolves_missing_transfer_id_and_preserves_row_on_failure(self):
+        dl, tid = self.add('queued', 'Queued, Remotely')
+        dl.slskd_id = ''
+        dl.save(update_fields=['slskd_id'])
+        with patch.object(self.peer, 'cancel_download', side_effect=[requests.Timeout(), None]) as cancel:
+            for code in (502, 200):
+                result = self.client.post('/api/soulseek/downloads/cancel/', {'download_id': dl.pk}, format='json')
+                self.assertEqual(result.status_code, code)
+                dl.refresh_from_db()
+                self.assertEqual(dl.status, 'queued' if code == 502 else 'cancelled')
+                cancel.assert_called_with('peer', tid, remove=True)
 
     def test_both_groups_refetch_retry_preserve_active_audio_and_pipeline(self):
         complete, ct = self.add('completed', 'Completed, Succeeded')
@@ -149,6 +181,31 @@ class ClearDownloadsTests(TestCase):
         self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
         self.assertEqual(self.removed, [])
 
+    def test_remove_single_untracked_timeout_preserves_other_rows_and_audio(self):
+        _, timed_out = self.add('failed', 'Completed, TimedOut', tracked=False)
+        self.add('failed', 'Completed, TimedOut', tracked=False)
+        self.add('queued', 'Queued, Remotely', tracked=False)
+        payload = {'download_id': f'slskd:peer:{timed_out}'}
+        for _ in range(2):
+            self.assertEqual(self.client.delete('/api/soulseek/downloads/remove/', payload, format='json').status_code, 204)
+        self.assertEqual(self.removed, [timed_out])
+        self.assertEqual(len(self.transfers), 2)
+        self.assertEqual(self.audio.read_bytes(), b'fixture audio must survive clearing')
+
+    def test_remove_tracked_terminal_transfer_checks_live_state(self):
+        dl, tid = self.add('failed', 'InProgress')
+        url = f'/api/soulseek/downloads/{dl.pk}/'
+        self.assertEqual(self.client.delete(url).status_code, 409)
+        self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
+        self.transfers[0]['state'] = 'Completed, TimedOut'
+        self.fail_ids.add(tid)
+        self.assertEqual(self.client.delete(url).status_code, 502)
+        self.assertTrue(Download.objects.filter(pk=dl.pk).exists())
+        self.fail_ids.clear()
+        self.assertEqual(self.client.delete(url).status_code, 204)
+        self.assertEqual(self.removed, [tid])
+        self.assertFalse(Download.objects.filter(pk=dl.pk).exists())
+
     def test_local_only_rows_and_invalid_mode(self):
         self.add('completed')
         self.add('failed')
@@ -179,3 +236,22 @@ class ClearDownloadsTests(TestCase):
         for mode in [[], {}, None, 123]:
             self.assertEqual(self.clear(mode).status_code, 400)
         self.peer.session.delete.assert_not_called()
+
+
+class SearchLockTests(TestCase):
+    def test_search_keeps_lock_per_file_in_both_response_shapes(self):
+        from .views import _run_search_for_queue_item
+        item = SearchQueueItem.objects.create(raw_query='fixture')
+        peer = Mock()
+        peer.search.return_value = {'id': 'fixture-search'}
+        peer.get_search.return_value = {'state': 'Completed', 'responses': [{
+            'username': 'fixture-peer',
+            'files': [{'filename': 'open.flac'}, {'filename': 'flagged.flac', 'isLocked': True}],
+            'lockedFiles': [{'filename': 'private.flac'}],
+        }]}
+        with patch('soulseek.views.SlskdClient', return_value=peer), \
+             patch('soulseek.views.time.sleep'), patch('soulseek.views.db.connections.close_all'), \
+             patch('soulseek.views.score_result', return_value=100):
+            _run_search_for_queue_item(item.pk)
+        self.assertEqual(dict(SearchResult.objects.filter(queue_item=item).values_list('filename', 'is_locked')),
+                         {'open.flac': False, 'flagged.flac': True, 'private.flac': True})
