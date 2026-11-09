@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 from unittest import skipUnless
 
 from django.test import LiveServerTestCase
-from playwright.sync_api import expect, sync_playwright
 
 from organize.models import PipelineItem
 from .test_playback import PlaybackFixture
@@ -15,9 +14,11 @@ from .test_playback import PlaybackFixture
 @skipUnless(os.getenv('ORGANIZE_BROWSER_TEST'), 'CI browser fixture only')
 class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
     def test_normal_organize_play_queue_navigation_seek(self):
+        from playwright.sync_api import expect, sync_playwright
+
         second = PipelineItem.objects.create(original_filename='second.wav',
             current_path=str(self.path), artist='Fixture artist', title='Second tone', stage='ready')
-        missing = PipelineItem.objects.create(original_filename='missing.wav',
+        PipelineItem.objects.create(original_filename='missing.wav',
             current_path=str(self.downloads / 'missing.wav'), title='Missing tone')
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
