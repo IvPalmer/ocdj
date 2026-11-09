@@ -84,6 +84,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     }""", self.url)
                     self.assertEqual(result, [206, f'bytes 100-199/{self.path.stat().st_size}', 100])
                     page.get_by_role('link', name='Organize', exact=True).click()
+                    page.get_by_role('button', name='Show archived (1)', exact=True).click()
                     archived = page.get_by_role('button', name='Queue Fixture artist — Archived tone', exact=True)
                     expect(archived).to_be_enabled()
                     archived.click()
