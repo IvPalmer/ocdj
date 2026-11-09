@@ -42,6 +42,12 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                                 headers={'Authorization': 'Bearer fixture-test-token'}, timeout=10)
                             self.assertEqual(response.status_code, 200, response.text)
                             return response.json()
+                        import base64
+                        from instagram.test_thumbnails import sample_jpeg
+                        snapshot = livepost('connector/sync/', data)
+                        livepost('connector/thumbnails/', dict(sync_token=snapshot['sync_token'], thumbnails=[
+                            dict(post_id=p['post_id'], jpeg=base64.b64encode(sample_jpeg()).decode('ascii'))
+                            for p in snapshot['thumbnail_posts']]))
                         def db_call(fn):
                             # Playwright's sync API runs an event loop on this thread.
                             def run():
@@ -62,9 +68,17 @@ class BrowserFixtureTests(StaticLiveServerTestCase):
                             grid = page.get_by_role('navigation', name='Saved posts')
                             cards = grid.get_by_role('button')
                             expect(cards).to_have_count(5)
-                            expect(grid.locator('video')).to_have_count(1)
+                            expect(grid.locator('video')).to_have_count(0)
+                            expect(grid.locator('img')).to_have_count(5)
+                            for image in grid.locator('img').all():
+                                expect(image).to_have_attribute('loading', 'lazy')
+                                image.scroll_into_view_if_needed()
+                                image.evaluate('(img) => img.decode()')
+                                self.assertTrue(image.evaluate('(img) => img.naturalWidth > 0'))
+                            first_thumbnail = grid.locator('img').first.get_attribute('src')
                             cards.nth(1).click()
                             expect(cards.nth(1)).to_have_attribute('aria-current', 'true')
+                            expect(grid.locator('img').first).to_have_attribute('src', first_thumbnail)
                             expect(page.locator('.ig-player video')).to_have_attribute('aria-label', 'Post 2, video 1')
                             cards.first.click()
                             page.get_by_role('button', name='List', exact=True).click()

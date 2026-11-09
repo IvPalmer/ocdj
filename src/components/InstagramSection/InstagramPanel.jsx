@@ -9,6 +9,11 @@ import './InstagramPanel.css'
 const filters = ['all', 'pending', 'identified', 'reviewed', 'wishlist', 'error']
 const matches = (m, filter) => filter === 'all' || (filter === 'reviewed' ? m.reviewed : filter === 'wishlist' ? m.wanted_matches_current : filter === 'pending' ? ['pending', 'running'].includes(m.status) && !m.reviewed : m.status === filter)
 
+function PostThumbnail({ src }) {
+  const [failed, setFailed] = useState(false)
+  return failed ? <span>Instagram</span> : <img src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+}
+
 function Editor({ media, act, busy }) {
   const player = usePlayer()
   const [artist, setArtist] = useState(media.artist)
@@ -138,10 +143,9 @@ export default function InstagramPanel() {
           <nav className={postView === 'grid' ? 'ig-queue ig-grid' : 'ig-queue'} aria-label="Saved posts">
             {visiblePosts.map(p => {
               const postVideos = p.media.filter(m => m.kind === 'video')
-              const cover = postView === 'grid' && p.id === post?.id && postVideos.find(m => m.playback_url)
               return <button key={p.id} aria-current={post.id === p.id ? 'true' : undefined} onClick={() => choosePost(p.id)}>
                 {postView === 'grid' && <span className="ig-cover" aria-hidden="true">
-                  {cover ? <video preload="metadata" muted playsInline src={`${cover.playback_url}#t=0.1`} /> : <span>Instagram</span>}
+                  {p.thumbnail_url ? <PostThumbnail key={p.thumbnail_url} src={p.thumbnail_url} /> : <span>Instagram</span>}
                 </span>}
                 <span className="ig-post-info">
                   <span className="ig-post-number">{String(posts.indexOf(p)+1).padStart(2, '0')}</span>

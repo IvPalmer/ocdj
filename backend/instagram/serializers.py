@@ -72,3 +72,19 @@ class Completion(StrictInput):
         if (data['status'] == 'identified') != bool(data['candidates']):
             raise serializers.ValidationError('Identified requires candidates; other results must be empty')
         return data
+
+
+class ThumbnailInput(StrictInput):
+    post_id = serializers.RegexField(r'^\d{1,40}$')
+    jpeg = serializers.CharField(max_length=174764, trim_whitespace=False)
+
+
+class ThumbnailBatch(StrictInput):
+    sync_token = serializers.CharField(max_length=512)
+    thumbnails = ThumbnailInput(many=True, min_length=1, max_length=16)
+
+    def validate_thumbnails(self, items):
+        ids = [item['post_id'] for item in items]
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError('Duplicate post IDs')
+        return items
