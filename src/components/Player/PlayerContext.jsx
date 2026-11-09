@@ -6,20 +6,27 @@ export function playerReducer(state, action) {
   switch (action.type) {
     case 'add': {
       const items = [...state.items, action.track]
-      return { items, index: action.play || state.index < 0 ? items.length - 1 : state.index,
+      return { ...state, items, index: action.play || state.index < 0 ? items.length - 1 : state.index,
+        audible: action.play ? false : state.audible,
         playing: action.play || state.playing }
     }
-    case 'select': return { ...state, index: action.index, playing: true }
-    case 'playing': return { ...state, playing: action.value }
+    case 'select': return action.index === state.index && state.playing ? state
+      : { ...state, index: action.index, playing: true, audible: false }
+    case 'playing': return { ...state, playing: action.value, audible: false }
+    case 'source-playing':
+      return state.items[state.index]?.queueId === action.queueId &&
+        (state.playing !== action.value || state.audible !== action.value)
+        ? { ...state, playing: action.value, audible: action.value } : state
     case 'next': return state.index < state.items.length - 1
-      ? { ...state, index: state.index + 1, playing: true } : { ...state, playing: false }
-    case 'previous': return state.index > 0 ? { ...state, index: state.index - 1, playing: true } : state
+      ? { ...state, index: state.index + 1, playing: true, audible: false }
+      : { ...state, playing: false, audible: false }
+    case 'previous': return state.index > 0 ? { ...state, index: state.index - 1, playing: true, audible: false } : state
     default: return state
   }
 }
 
 export function PlayerProvider({ children }) {
-  const [state, dispatch] = useReducer(playerReducer, { items: [], index: -1, playing: false })
+  const [state, dispatch] = useReducer(playerReducer, { items: [], index: -1, playing: false, audible: false })
   const sequence = useRef(0)
   const add = (track, play) => {
     if (!track.source) return

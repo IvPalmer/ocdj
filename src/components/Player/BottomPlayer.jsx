@@ -4,18 +4,19 @@ import { useAddToQueue, useCreateWantedItem } from '../../api/hooks'
 import { usePlayer } from './PlayerContext'
 import EmbedSource from './EmbedSource'
 import MacAudioSource from './MacAudioSource'
+import WantedOnlineSource from './WantedOnlineSource'
 import './BottomPlayer.css'
 
 function AudioSource({ track, playing, onPlaying, onEnded, onError }) {
   const audio = useRef(null)
   useEffect(() => {
     let active = true
-    if (playing) audio.current.play().catch(() => { if (active) onError() })
+    if (playing) audio.current.play().catch(error => { if (active) onError(error) })
     else audio.current.pause()
     return () => { active = false }
   }, [playing, track])
   return <audio ref={audio} controls preload="none" src={track.source.url} aria-label="Shared track audio"
-    onPlay={() => onPlaying(true)} onPause={() => onPlaying(false)} onEnded={onEnded} onError={onError} />
+    onPlaying={() => onPlaying(true)} onPause={() => onPlaying(false)} onEnded={onEnded} onError={onError} />
 }
 
 export default function BottomPlayer() {
@@ -46,10 +47,10 @@ export default function BottomPlayer() {
       if (!media.closest('.bottom-player')) media.pause()
     })
   }, [player.playing, track?.queueId])
-  const fail = () => { setError(track?.source.kind === 'mac'
+  const fail = message => { setError(typeof message === 'string' ? message : track?.source.kind === 'mac'
     ? 'Mac audio unavailable, expired, or playback blocked. Start the private Mac connector, then press Play to retry.'
     : 'Audio source unavailable or playback blocked. Press Play to retry.'); player.pause() }
-  const onPlaying = value => player.dispatch({ type: 'playing', value })
+  const onPlaying = value => player.dispatch({ type: 'source-playing', queueId: track.queueId, value })
   const onEnded = () => {
     ended.current = player.index === player.items.length - 1
     player.dispatch({ type: 'next' })
@@ -79,7 +80,7 @@ export default function BottomPlayer() {
         <button disabled={!track} aria-label={player.playing ? 'Pause playback' : 'Play playback'} onClick={() => {
           if (error || ended.current) setAttempt(value => value + 1)
           ended.current = false
-          setError(''); onPlaying(!player.playing)
+          setError(''); player.dispatch({ type: 'playing', value: !player.playing })
         }}>{player.playing ? 'Pause' : 'Play'}</button>
         <button disabled={player.index >= player.items.length - 1} aria-label="Next track" onClick={onEnded}>Next</button>
       </div>
@@ -95,7 +96,9 @@ export default function BottomPlayer() {
       </details>
     </div>
     {track && (track.source.kind === 'mac'
-      ? <MacAudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail, AudioSource, EmbedSource }} />
+      ? <MacAudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail, AudioSource, EmbedSource, WantedOnlineSource }} />
+      : track.source.kind === 'wanted'
+      ? <WantedOnlineSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail, AudioSource, EmbedSource }} />
       : track.source.kind === 'audio'
       ? <AudioSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail }} />
       : <EmbedSource key={`${track.queueId}:${attempt}`} {...{ track, playing: player.playing, onPlaying, onEnded, onError: fail }} />)}

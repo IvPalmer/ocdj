@@ -93,6 +93,10 @@ def ingest(items) -> dict:
             note_bits.append(f"on {raw['device']}")
         if raw.get('isrc'):
             note_bits.append(f"ISRC {raw['isrc']}")
+        notes = ' · '.join(note_bits)
+        spotify_id = raw.get('spotify_id')
+        if isinstance(spotify_id, str) and re.fullmatch(r'[A-Za-z0-9]{22}', spotify_id):
+            notes = '\n'.join(filter(None, [notes, f'https://open.spotify.com/track/{spotify_id}']))
 
         item = WantedItem.objects.create(
             artist=artist,
@@ -100,7 +104,7 @@ def ingest(items) -> dict:
             release_name=(raw.get('album') or '').strip()[:500],
             source=source,
             identified_via='shazam',
-            notes=' · '.join(note_bits),
+            notes=notes,
             status='identified',
             cleanup_isrc=raw.get('isrc', ''),
         )
@@ -149,7 +153,7 @@ def sync_from_spotify(seed: bool = False) -> dict:
     while True:
         page = sp.playlist_items(
             playlist['id'], limit=100, offset=offset,
-            fields='items(added_at,track(name,artists(name),album(name),external_ids)),next',
+            fields='items(added_at,track(id,name,artists(name),album(name),external_ids)),next',
         )
         for it in page.get('items') or []:
             track = (it or {}).get('track') or {}
@@ -161,6 +165,7 @@ def sync_from_spotify(seed: bool = False) -> dict:
                 'title': track.get('name', ''),
                 'album': (track.get('album') or {}).get('name', ''),
                 'isrc': (track.get('external_ids') or {}).get('isrc', ''),
+                'spotify_id': track.get('id') or '',
                 'device': 'Shazam → Spotify',
             })
         if not page.get('next'):

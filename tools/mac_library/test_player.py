@@ -147,7 +147,7 @@ with sync_playwright() as playwright:
         assert len(prepares) == before and not preview_requests
         mode[0] = 'offline'
         controls('Fixture artist — Wanted preview').click()
-        expect(player.get_by_role('status')).to_have_text('Using fallback · Catalog preview')
+        expect(player.get_by_text('Catalog preview', exact=True)).to_be_visible()
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
         assert len(preview_requests) == 1
         expect(player.get_by_role('button', name='In Wanted')).to_be_disabled()
@@ -155,7 +155,8 @@ with sync_playwright() as playwright:
         # No exact Mac match keeps normal Wanted preview behavior and never prepares.
         match_status[0] = 'no_indexed_match'
         visit('/wanted')
-        expect(page.get_by_text('No catalog preview found.')).to_be_visible()
+        controls('Fixture artist — Wanted checked').click()
+        expect(player.get_by_role('alert')).to_have_text('No playable recording found for this track.')
         before = len(prepares)
         controls('Fixture artist — Wanted preview').click()
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")

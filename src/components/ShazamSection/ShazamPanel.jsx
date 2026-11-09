@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useAddToQueue } from '../../api/hooks'
-import WantedPlayback from '../Player/WantedPlayback'
+import WantedPlayback, { WantedPlaybackStatus } from '../Player/WantedPlayback'
 import StatusBadge from '../shared/StatusBadge'
 import { useState } from 'react'
 import './ShazamPanel.css'
@@ -18,7 +18,7 @@ function timeAgo(iso) {
 function whenShazamed(notes) {
   // The reader writes "shazamed <date> · on <device>"; show the date it caught
   // rather than when the row happened to be created.
-  const m = /shazamed ([^·]+)/.exec(notes || '')
+  const m = /shazamed ([^·\n]+)/.exec(notes || '')
   return m ? m[1].trim() : ''
 }
 
@@ -139,7 +139,7 @@ export default function ShazamPanel() {
                     <WantedPlayback item={item} />
                   </td>
                   <td className="shazam-td-artist">{item.artist || '—'}</td>
-                  <td className="shazam-td-title">{item.title || '—'}</td>
+                  <td className="shazam-td-title">{item.title || '—'}<WantedPlaybackStatus id={item.id} /></td>
                   <td className="shazam-td-when mono">{whenShazamed(item.notes)}</td>
                   <td>
                     <StatusBadge status={item.status} />

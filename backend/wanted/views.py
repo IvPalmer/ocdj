@@ -15,7 +15,8 @@ from .serializers import (
     ImportOperationSerializer, ImportOperationListSerializer,
     TriggerImportSerializer, ConfirmImportSerializer,
 )
-from .services.preview import find_preview
+from .services.preview import find_exact_preview
+from .services.online_source import find_online_source
 from .services.shazam import ingest as ingest_shazam, sync_from_spotify
 from drain.auth import require_drain_token
 from .services import (
@@ -79,12 +80,19 @@ class WantedItemViewSet(viewsets.ModelViewSet):
                              'provider': item.preview_provider,
                              'cached': True})
 
-        url, provider = find_preview(item.artist, item.title)
+        url, provider, _ = find_exact_preview(item.artist, item.title)
         item.preview_url = url
         item.preview_provider = provider
         item.preview_checked = timezone.now()
         item.save(update_fields=['preview_url', 'preview_provider', 'preview_checked'])
         return Response({'url': url, 'provider': provider, 'cached': False})
+
+    @action(detail=True, methods=['get'], url_path='online-source')
+    def online_source(self, request, pk=None):
+        item = self.get_object()
+        url, provider = find_online_source(item.artist, item.title,
+                                          skip_youtube=request.query_params.get('skip') == 'youtube')
+        return Response({'url': url, 'provider': provider})
 
     @action(detail=False, methods=['post'])
     def bulk_add(self, request):
