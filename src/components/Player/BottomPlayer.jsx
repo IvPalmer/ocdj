@@ -25,11 +25,15 @@ export default function BottomPlayer() {
   const [attempt, setAttempt] = useState(0)
   const ended = useRef(false)
   useEffect(() => {
+    let frame
     const observer = new ResizeObserver(() => {
-      document.documentElement.style.setProperty('--player-height', `${container.current.offsetHeight}px`)
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        document.documentElement.style.setProperty('--player-height', `${container.current.offsetHeight}px`)
+      })
     })
     observer.observe(container.current)
-    return () => { observer.disconnect(); document.documentElement.style.removeProperty('--player-height') }
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); document.documentElement.style.removeProperty('--player-height') }
   }, [])
   const [error, setError] = useState('')
   const [actionMessage, setActionMessage] = useState('')
