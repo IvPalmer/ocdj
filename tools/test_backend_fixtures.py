@@ -8,9 +8,10 @@ import os
 from pathlib import Path
 import sys
 
-backend = Path(__file__).resolve().parents[1] / 'backend'
+root = Path(__file__).resolve().parents[1]
+backend = root / 'backend'
 os.chdir(backend)
-sys.path.insert(0, str(backend))
+sys.path[:0] = [str(backend), str(root)]
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'djtools_project.settings')
 
 import django

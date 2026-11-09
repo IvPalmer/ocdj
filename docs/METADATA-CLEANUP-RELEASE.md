@@ -81,30 +81,63 @@ writes. Shazam and ACRCloud adapters now retain their ISRC field. Old saved raw
 results without ISRC need a corroborated explicit artist credit to apply. Recognition application compares the
 entire saved track row by stable UUID under the job lock, preserving other rows.
 
-**Not all recognition is covered.** No `backend/instagram/*` file is changed.
-For the other agent/parent, the exact proposal-only integration boundary is:
+### Accepted Instagram events (integration review lane)
 
-```python
-from wanted.services.cleanup import capture_external_identification
+This lane starts from synthetic merge `b5df6db`: caption head #49
+`c0fc8ad27e9ccfc369e78a6b5a8a132d19257f84` and cleanup head #50
+`461a995f8c2dbf2b03a83842c431aba2a8a2ee19`. Both were unmerged prerequisites;
+the integration PR targets `vps-deploy` for review, not deployment. #49 itself
+includes its Instagram evidence prerequisite. #50 has advanced since that
+snapshot; those later changes are not silently included here. Reconcile the
+reviewed prerequisite heads before any eventual release.
 
-capture_external_identification(
-    event_id=accepted_event_uuid,  # durable UUID; reuse on retry of this event
-    artist=media.artist,
-    title=media.title,
-    evidence={"source": "caption"},  # small safe structured provenance only
-)
-```
+Normal `media_action` caption/catalog acceptance, fenced connector `complete`,
+and fenced cached-worker `recognize_cached` completion now call the existing
+`capture_external_identification(*, event_id, artist, title, evidence)` contract.
+Only a single successful candidate actually accepted into empty, unreviewed media
+metadata creates an event. Candidates retained for review against human metadata,
+multiple candidates, no-match/error, stale leases, and playback-only completion
+create none. Existing edit, review, lease and queue rules remain authoritative.
+There is no new writer to Instagram metadata and no cleanup evaluator/provider
+change. Tentative audio identifications always have an empty ISRC and protected,
+proposal-only receipts; caption/catalog matches do not acquire an ISRC either.
 
-Call inside the accepted-write transaction after caption acceptance in
-`media_action`, accepted fenced connector `complete`, and accepted cached-worker
-completion in `recognize_cached`. Generate and retain the event UUID with that
-accepted event in the owning adapter; a later accepted identification gets a new
-UUID. Do not pass cookies, private URLs, comments, captions, audio or raw provider
-payloads. Reusing an event for changed evidence is rejected. External receipts
-are protected and proposal-only; this module has no Instagram writer. Until the
-parent wires that boundary, Instagram recognition is uncovered; only its ordinary
-Wanted creation is centrally captured. Cratemate cover/release candidates,
-Organize file-tagging and arbitrary raw SQL/bulk_create are not covered.
+An opaque UUID is retained as `recognition.cleanup_event` on the accepted media
+result. Caption replay of that same accepted full artist/title and provenance
+reuses the UUID; a later newly accepted identification receives a new UUID.
+Connector duplicate completion is rejected by the existing lease fence, and
+cached-task redelivery exits once the queue is cleared. No UUID is derived from
+private source IDs, array positions, raw payloads or a claimed canonical identity.
+Evidence contains only allowlisted `source`, `route` and `certainty` strings.
+Captions, comments, record text, private URLs, lease tokens, audio and raw results
+never cross the cleanup boundary. The media's existing recognition evidence is
+otherwise retained according to the existing Instagram review behavior.
+
+**Transaction requirement:** all three callers hold the existing media row lock
+and invoke capture after the accepted save inside its transaction. The helper
+rejects use outside an atomic block. UUID persistence precedes the optional
+callback; the callback runs in a nested savepoint. A successful receipt and
+accepted metadata roll back together, and dispatch occurs only after commit.
+A callback/import/DB exception rolls back only that savepoint, including any
+partial receipt and dispatch registration; acceptance, review and playback remain
+usable. Logs contain a fixed message, never exception text.
+
+**Failure tradeoff:** optional capture failure commits acceptance and its UUID
+without a receipt. Repeating the same caption acceptance can retry that UUID.
+Completed connector/cached events are not automatically replayed or swept by this
+adapter: guaranteed recovery there would require a separate owning outbox and is
+outside this focused lane. This is intentionally best-effort capture on callback
+failure, not an exactly-once delivery claim. Once a receipt exists, the existing
+cleanup outbox handles dispatch/research failures. No existing media backfill or
+new scheduled work is added.
+
+Cratemate `identify`/`lookup` persist album guesses and optional enriched releases,
+including partial artist/album results and raw tracklists, without a separate
+accepted per-track identity/event boundary. Organize enriches, edits and publishes
+file tags, not a separate accepted fingerprint-recognition event. Neither is wired
+to track cleanup here; speculative raw results would overstate recording identity.
+Ordinary Wanted creation remains centrally captured. Arbitrary SQL/bulk_create
+still bypass model capture.
 
 ## Private review and audit
 
@@ -164,7 +197,11 @@ uses GitHub Actions `Metadata cleanup fixture`: real PostgreSQL row locks,
 full backend test discovery, Wanted/Recognize migration drift, atomic rollback,
 legacy migration preservation, registered Huey outbox sweep,
 manual confirmations and stale instance preservation, idempotence, fenced leases,
-bounded retries, actual ingestion and API paths. Instagram fixture remains an
+bounded retries, actual ingestion and API paths. The focused `instagram.test_cleanup` suite also runs explicitly against PostgreSQL
+in that workflow, covering accepted entry points, caption replay, separate later
+events, human protection, stale/playback/ambiguous exclusions, outer rollback and
+a real unique-constraint error inside the optional callback savepoint. Local
+checks use no Django setup, DB, API or provider calls. Instagram fixture remains an
 independent existing CI check. Self-review only; parent supplies review/integration.
 
 The CI runner `tools/test_backend_fixtures.py` discovers from `backend` and applies
