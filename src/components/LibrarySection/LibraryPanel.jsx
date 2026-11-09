@@ -1,3 +1,4 @@
+import TrackPlayback, { directSource } from '../Player/TrackPlayback'
 import { useState } from 'react'
 import {
   useLibraryTracks, useLibraryStats, useScanLibrary, useUpdateLibraryTrack, usePromoteTrack,
@@ -244,6 +245,8 @@ function LibraryPanel() {
                   <span className="col-duration">{formatDuration(track.duration_seconds)}</span>
                   <span className="col-size">{formatSize(track.file_size_bytes)}</span>
                   <span className="col-actions" onClick={e => e.stopPropagation()}>
+                    <TrackPlayback track={{ ...track, source: directSource(track), description: 'Library audio' }} unavailable="Library file indexed; no browser audio stream is exposed." />
+
                     <button
                       className="btn btn-xs"
                       onClick={() => setEditingTrack(track)}

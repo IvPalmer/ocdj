@@ -1,36 +1,22 @@
-# Instagram pilot connector
+# Instagram collection connector
 
 Native OCDJ workspace at `/instagram`. The fixed Track Downloads collection
-`18117783274346248` imports **five newest saved posts in response order**, with
+`18117783274346248` imports the **complete saved collection in response order**, with
 all carousel children (up to Instagram's 20 per post). Images are navigable but
 not included in the recognition denominator. Reviewed is local state only.
 
-## Local verification
+## Verification (VPS-only runtime)
 
-From repository root, create the Python environment and install both application
-and optional browser QA dependencies:
-
-```sh
-python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.txt -r tools/instagram/qa-requirements.txt
-npm ci
-npm run build
-```
-
-Use an isolated PostgreSQL cluster/database, with `POSTGRES_HOST`,
-`POSTGRES_PORT`, `POSTGRES_USER`, and `POSTGRES_DB` pointing at that cluster.
-Set `HUEY_DB_PATH` to a writable scratch file. Then:
+`RUNTIME.md` prohibits starting a local DB/API. Run `npm ci && npm run build`
+and the DB-free connector tests locally. The GitHub `Instagram fixture` workflow
+provides isolated PostgreSQL, frontend build, migration consistency, backend and
+Chromium fixtures; it never connects to Instagram. No local server is needed.
+The five-post fixture remains a synthetic demonstration; cursor tests also cover
+256 posts/1,232 video children over 22 synthetic pages. This is not live QA.
 
 ```sh
-.venv/bin/python backend/manage.py test instagram --noinput
-.venv/bin/python -m unittest tools.instagram.test_connector -v
-PYTHONPATH=. INSTAGRAM_BROWSER_TEST=1 .venv/bin/python backend/manage.py test instagram --noinput
+python -m unittest tools.instagram.test_connector -v
 ```
-
-The optional Chromium test requires `CHROME` and `PAPERCLIP_SCRATCH_DIR` (for
-screenshots). It uses a temporary test DB and Django test server, synthetic
-video and deterministic fixture recognition. It never connects to Instagram or
-claims live Shazam QA. `fixture.json` has 5 posts, 18 videos and one image.
 
 ## Explicit Mac run
 
@@ -43,10 +29,10 @@ python tools/instagram/connector.py --api https://YOUR-OCDJ-ORIGIN --profile 'Pr
 ```
 
 No daemon, LaunchAgent, scheduled login or credentials are installed. A run
-syncs the collection, uploads bounded videos, then polls for recognition jobs
-for the specified window (0–3600 seconds). A job in progress finishes before
+syncs the complete metadata snapshot, then polls for selected-media/recognition jobs
+for the specified window (0–3600 seconds). At most ten jobs run per invocation; a job in progress finishes before
 exit. Run again to refresh playback after expiry or process later requests.
-The default window is zero: sync/upload and drain queued work, then exit.
+The default window is zero: metadata sync and up to ten queued jobs, then exit.
 
 `yt-dlp` reads Chrome cookies on Mac; only Instagram domains enter the
 Instagram requests session. Cookies and CDN URLs remain in memory. The CDN
@@ -57,7 +43,8 @@ Keychain/profile access must already be available to the Mac agent.
 `imageio-ffmpeg` supplies the temporary standalone binary that avoids the
 broken Homebrew ffmpeg. Preflight runs `-version`. `INSTAGRAM_FFMPEG` can
 explicitly select another working executable without altering Homebrew.
-Recognition uses **Shazam only**, with 20-second samples starting at 0/30/60s;
+Recognition first checks explicit caption IDs and bounded comment suggestions,
+then uses Shazam with 20-second samples starting at 0/30/60s;
 transport/decoding failures become `error`, successful empty results become
 `no-match`. Distinct artist/title candidates are retained. No ACRCloud calls.
 
@@ -66,12 +53,15 @@ or CDN fetches. It stops on login expiry, restriction, or rate limit rather
 than repeatedly probing Instagram; the next explicit run is the retry. Error
 output deliberately omits exception bodies, cookies and signed URLs.
 
-Offline demonstration (use an isolated local OCDJ instance, never production):
+Offline demonstration (CI or authorized isolated VPS QA only, never local DB/API
+or production):
 
 ```sh
 python tools/instagram/connector.py --api http://127.0.0.1:8002 --fixture tools/instagram/fixture.json --work-seconds 600
 ```
 
+Only fixture mode uploads synthetic tone videos eagerly. Live mode imports
+metadata, then downloads/uploads only explicitly requested selected media.
 This uploads synthetic tone videos and labels the whole workspace as fixture.
 Recognition of fixture jobs is simulated and clearly marked by the banner.
 
@@ -152,3 +142,28 @@ resync to prove persistence. Check offline/session-expired/rate-limited status
 and the actual oauth2-proxy/origin/media boundary using the matrix above. Attach live evidence separately from
 fixture screenshots. Last reviewer merges after checks; production deployment
 is a separate operator decision.
+
+## Full metadata and selected sources
+
+The cursor walk is capped at 120 pages/2,000 unique posts, preserving first-seen
+saved order. Missing/repeated cursors while more pages remain fail the run before
+sync, preserving the previous snapshot. Every post uses the same native model/UI.
+There is no separate link index. Selected image children use the same private
+cache, while only video children can be recognized.
+
+`POST /api/instagram/media/{id}/playback/` requests a source. Claims include an
+explicit action, parent source ID and position. The connector refreshes one post
+for a signed CDN URL rather than rereading the entire collection per job. No
+signed URL is persisted. Public browser routes still require the existing OAuth
+boundary; connector bearer calls require the already authorized private tunnel.
+
+Cached video recognition dispatches to the existing VPS Huey worker and uses the
+same bounded ffmpeg/Shazam function as the connector. This needs no manual play
+or live Mac. Uncached private source access still needs an explicit authorized Mac
+run. A stopped connector is offline after the existing heartbeat timeout; this
+change installs no scheduler or standing service.
+
+See [the recognition contract](../../docs/instagram-recognition-contract.md) for
+source evidence, #16 integration gates, live verification blockers and remaining
+#13 library/player work. Neither this README nor a successful fixture run grants
+release authorization.

@@ -26,7 +26,7 @@ class PostInput(StrictInput):
 class SyncInput(StrictInput):
     collection_id = serializers.ChoiceField(choices=[COLLECTION_ID])
     fixture = serializers.BooleanField(default=False)
-    posts = PostInput(many=True, min_length=0, max_length=5)
+    posts = PostInput(many=True, min_length=0, max_length=2000)
 
     def validate(self, data):
         posts = [p['id'] for p in data['posts']]
@@ -47,8 +47,24 @@ class Candidate(StrictInput):
     title = serializers.CharField(max_length=500)
 
 
+class EvidenceRecord(StrictInput):
+    source = serializers.ChoiceField(choices=['caption', 'comment'])
+    comment_id = serializers.RegexField(r'^\d{0,40}$', allow_blank=True)
+    text = serializers.CharField(max_length=1100)
+    candidate = Candidate()
+
+
+class RecognitionEvidence(StrictInput):
+    source = serializers.ChoiceField(choices=['caption', 'comment', 'shazam'])
+    certainty = serializers.ChoiceField(choices=['explicit', 'tentative'])
+    comments = serializers.ChoiceField(choices=['not-read', 'partial', 'unavailable'])
+    outcome = serializers.ChoiceField(choices=['identified', 'no-match', 'error'])
+    records = EvidenceRecord(many=True, max_length=10, default=list)
+
+
 class Completion(StrictInput):
     token = serializers.CharField(max_length=64)
+    recognition = RecognitionEvidence(required=False)
     status = serializers.ChoiceField(choices=['identified', 'no-match', 'error'])
     candidates = Candidate(many=True, max_length=10, default=list)
 

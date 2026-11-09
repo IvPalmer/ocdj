@@ -44,9 +44,43 @@ class WorkspaceTests(TestCase):
             'token': job['token'], 'status': status,
             'candidates': candidates if candidates is not None else [{'artist': 'A', 'title': 'B'}]}, format='json')
 
-    def upload(self, body=b'\x00\x00\x00\x18ftypisom' + b'x'*100, filename='../../escape.mp4', mime='video/mp4'):
+    def upload(self, body=b'\x00\x00\x00\x18ftypisom' + b'x'*100, filename='../../escape.mp4', mime='video/mp4', token=''):
         return self.worker.post(f'/api/instagram/connector/media/{self.media.pk}/upload/',
-                                {'file': SimpleUploadedFile(filename, body, content_type=mime)})
+                                {'file': SimpleUploadedFile(filename, body, content_type=mime)},
+                                HTTP_X_INSTAGRAM_LEASE=token)
+
+    def test_stale_upload_cannot_replace_live_cache(self):
+        self.sync(dict(self.data, fixture=False))
+        self.assertEqual(self.upload().status_code, 409)
+        self.action('playback')
+        stale = self.claim().data
+        Media.objects.filter(pk=self.media.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
+        current = self.claim().data
+        self.assertEqual(self.upload(token=current['token']).status_code, 200)
+        self.media.refresh_from_db()
+        original = self.media.cache_key
+        self.assertEqual(self.upload(token=stale['token']).status_code, 409)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.cache_key, original)
+        self.assertTrue(cache.path(original).is_file())
+        self.assertEqual(self.complete(current, 'no-match', []).status_code, 200)
+        self.assertEqual(self.upload(token=current['token']).status_code, 409)
+
+    def test_upload_rechecks_lease_after_writing_file(self):
+        self.sync(dict(self.data, fixture=False))
+        self.action('recognize')
+        job = self.claim().data
+        store = cache.store
+        def expire_after_store(upload):
+            key = store(upload)
+            Media.objects.filter(pk=self.media.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
+            return key
+        before = set(cache.root().iterdir())
+        with patch.object(cache, 'store', side_effect=expire_after_store):
+            self.assertEqual(self.upload(token=job['token']).status_code, 409)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.cache_key, '')
+        self.assertEqual(set(cache.root().iterdir()) - before - {cache.root()/'.upload-lock'}, set())
 
     def test_preview_rejects_unrecognized_track(self):
         url = f'/api/instagram/media/{self.media.pk}/candidate-preview/'
@@ -223,3 +257,117 @@ class WorkspaceTests(TestCase):
     def test_images_cannot_queue(self):
         image = Media.objects.get(kind='image')
         self.assertEqual(self.action('recognize', image.pk).status_code, 400)
+
+    def test_complete_collection_uses_native_models_and_keeps_order(self):
+        data = copy.deepcopy(self.data)
+        for i in range(251):
+            data['posts'].append(dict(id=str(900000+i), permalink=f'https://www.instagram.com/p/fixture{i}/',
+                author='fixture', caption='', children=[dict(id=str(800000+i*10+j), kind='video') for j in range(5 if i < 210 else 4)]))
+        self.sync(data)
+        workspace = self.client.get('/api/instagram/').data
+        self.assertEqual(len(workspace['posts']), 256)
+        self.assertEqual(sum(m['kind'] == 'video' for p in workspace['posts'] for m in p['media']), 1232)
+        self.assertEqual(workspace['posts'][-1]['permalink'], data['posts'][-1]['permalink'])
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.pk, workspace['posts'][0]['media'][0]['id'])
+
+    def test_caption_id_recognizes_without_mac_or_playback(self):
+        self.media.post.caption = '1. Fixture Artist - Track (Dub Mix)\n2. Other - Another'
+        self.media.post.save()
+        response = self.action('recognize')
+        self.assertEqual(response.data['status'], 'identified')
+        self.assertEqual(response.data['title'], 'Track (Dub Mix)')
+        self.assertEqual(response.data['recognition']['source'], 'caption')
+        self.assertEqual(response.data['recognition']['certainty'], 'explicit')
+        self.assertFalse(response.data['reviewed'])
+        self.assertEqual(self.claim().status_code, 204)
+
+    def test_selected_playback_claim_does_not_overwrite_recognition(self):
+        self.media.artist = 'Human'; self.media.title = 'Correction'; self.media.reviewed = True
+        self.media.status = 'identified'; self.media.save()
+        self.action('playback')
+        job = self.claim().data
+        self.assertEqual(job['action'], 'playback')
+        self.assertEqual(job['post_instagram_id'], self.media.post.instagram_id)
+        self.assertEqual(self.complete(job, 'no-match', []).status_code, 200)
+        self.media.refresh_from_db()
+        self.assertFalse(self.media.playback_requested)
+        self.assertEqual((self.media.artist, self.media.title, self.media.status), ('Human', 'Correction', 'identified'))
+
+    def test_recognize_during_playback_lease_stays_queued(self):
+        self.action('playback'); job = self.claim().data
+        self.action('recognize')
+        self.complete(job, 'no-match', [])
+        self.media.refresh_from_db()
+        self.assertTrue(self.media.queued)
+        self.assertEqual(self.media.status, 'pending')
+        self.assertEqual(self.claim().data['action'], 'recognize')
+
+    def test_cached_recognition_runs_on_server_and_fences_manual_edits(self):
+        from .tasks import recognize_cached
+        async def match(*args): return [{'artist': 'Fixture', 'title': 'Source audio'}]
+        self.upload()
+        with patch('instagram.tasks.recognize_cached') as enqueue:
+            with self.captureOnCommitCallbacks(execute=True): self.action('recognize')
+            enqueue.assert_called_once_with(self.media.pk)
+        with patch('instagram.recognition.recognize', side_effect=match):
+            recognize_cached.call_local(self.media.pk)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.status, 'identified')
+        self.assertEqual(self.media.recognition['source'], 'shazam')
+        self.assertFalse(self.media.queued)
+        self.action('recognize')
+        # Simulate a correction arriving while the worker is outside its DB
+        # transaction. The fixture callback runs outside asyncio's ORM guard.
+        def concurrent(coroutine):
+            coroutine.close()
+            Media.objects.filter(pk=self.media.pk).update(lease_token='', queued=False, artist='Human', title='Edited')
+            return [{'artist': 'Stale', 'title': 'Candidate'}]
+        with patch('asyncio.run', side_effect=concurrent):
+            recognize_cached.call_local(self.media.pk)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.artist, 'Human')
+
+    def test_cached_failure_is_error_not_no_match(self):
+        from .tasks import recognize_cached
+        self.upload(); self.action('recognize')
+        with patch('instagram.recognition.recognize', side_effect=RuntimeError('fixture error')):
+            recognize_cached.call_local(self.media.pk)
+        self.media.refresh_from_db()
+        self.assertEqual(self.media.status, 'error')
+        self.assertEqual(self.media.recognition['outcome'], 'error')
+
+    def test_images_load_in_native_private_view_and_cannot_recognize(self):
+        image = Media.objects.get(kind='image')
+        self.assertEqual(self.action('playback', image.pk).status_code, 200)
+        job = self.claim().data
+        self.assertEqual(job['id'], image.pk)
+        response = self.worker.post(f'/api/instagram/connector/media/{image.pk}/upload/',
+            {'file': SimpleUploadedFile('source.jpg', b'\xff\xd8\xff' + b'x'*100, content_type='image/jpeg')},
+            HTTP_X_INSTAGRAM_LEASE=job['token'])
+        self.assertEqual(response.status_code, 200)
+        self.complete(job, 'no-match', [])
+        response = self.client.get(f'/api/instagram/media/{image.pk}/stream/')
+        self.assertEqual(response['Content-Type'], 'image/jpeg')
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertEqual(b''.join(response.streaming_content)[:3], b'\xff\xd8\xff')
+
+    def test_explicit_playback_retry_refreshes_missing_fresh_cache(self):
+        self.upload(); self.media.refresh_from_db()
+        original_url = self.client.get('/api/instagram/').data['posts'][0]['media'][0]['playback_url']
+        cache.path(self.media.cache_key).unlink()
+        self.assertEqual(self.action('playback').status_code, 200)
+        job = self.claim().data
+        self.assertEqual(job['action'], 'playback')
+        self.assertEqual(self.upload(token=job['token']).status_code, 200)
+        refreshed_url = self.client.get('/api/instagram/').data['posts'][0]['media'][0]['playback_url']
+        self.assertNotEqual(original_url, refreshed_url)
+
+    def test_recognition_candidates_do_not_replace_unreviewed_correction(self):
+        self.client.patch(f'/api/instagram/media/{self.media.pk}/',
+            {'artist': 'Human', 'title': 'Correction'}, format='json')
+        self.action('recognize')
+        self.complete(self.claim().data, candidates=[{'artist': 'New', 'title': 'Candidate'}])
+        self.media.refresh_from_db()
+        self.assertEqual((self.media.artist, self.media.title), ('Human', 'Correction'))
+        self.assertEqual(self.media.candidates, [{'artist': 'New', 'title': 'Candidate'}])

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../api/client'
 import { useAddToQueue } from '../../api/hooks'
-import usePreviewPlayer from '../shared/usePreviewPlayer'
+import WantedPlayback from '../Player/WantedPlayback'
 import StatusBadge from '../shared/StatusBadge'
 import { useState } from 'react'
 import './ShazamPanel.css'
@@ -28,7 +28,6 @@ export default function ShazamPanel() {
   const qc = useQueryClient()
   const [queuingId, setQueuingId] = useState(null)
   const addToQueue = useAddToQueue()
-  const { toggle: togglePreview, playingId, loadingId } = usePreviewPlayer()
 
   const { data: status } = useQuery({
     queryKey: ['shazam-status'],
@@ -134,18 +133,10 @@ export default function ShazamPanel() {
           </thead>
           <tbody>
             {items.map(item => {
-              const noPreview = item.preview_checked && !item.preview_url
               return (
                 <tr key={item.id} className={DONE.has(item.status) ? 'shazam-row--done' : ''}>
                   <td className="shazam-td-play">
-                    <button
-                      className={`btn btn-xs${playingId === item.id ? ' btn-xs--active' : ''}`}
-                      onClick={() => togglePreview(item)}
-                      disabled={loadingId === item.id || noPreview}
-                      title={noPreview ? 'No preview — not in iTunes or Deezer' : 'Play 30s preview'}
-                    >
-                      {loadingId === item.id ? '…' : playingId === item.id ? '■' : noPreview ? '—' : '▶'}
-                    </button>
+                    <WantedPlayback item={item} />
                   </td>
                   <td className="shazam-td-artist">{item.artist || '—'}</td>
                   <td className="shazam-td-title">{item.title || '—'}</td>

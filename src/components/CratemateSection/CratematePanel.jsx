@@ -1,3 +1,4 @@
+import TrackPlayback, { recognizedTrack } from '../Player/TrackPlayback'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import './CratematePanel.css'
@@ -607,6 +608,7 @@ function Tracklist({ tracks }) {
           )
           return (
             <li key={i} className={`cratemate-track${isDirect ? ' cratemate-track--direct' : isSearch ? ' cratemate-track--search' : ''}`}>
+              <TrackPlayback track={recognizedTrack({ ...t, title: t.title || t.name }, { url: isDirect ? url : '', tracklist: [] }, i)} unavailable="No direct audio source; catalog/search links do not stream audio." />
               {url ? (
                 <a href={url} target="_blank" rel="noopener noreferrer" className="cratemate-track-link">
                   {titleNode}
