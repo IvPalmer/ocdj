@@ -207,7 +207,7 @@ def download(url, dest, *, image_only=False):
         if r.status_code in (301, 302, 303, 307, 308, 401, 403, 429):
             raise ConnectorError({401: 'session-expired', 429: 'rate-limited'}.get(r.status_code, 'restricted'))
         mime = r.headers.get('Content-Type', '').split(';')[0]
-        allowed = ['image/jpeg', 'image/png'] if image_only else ['video/mp4', 'image/jpeg', 'image/png']
+        allowed = ['image/jpeg', 'image/png', 'image/webp'] if image_only else ['video/mp4', 'image/jpeg', 'image/png']
         if r.status_code != 200 or mime not in allowed:
             raise ConnectorError('error')
         if image_only and (r.headers.get('Content-Encoding', 'identity') != 'identity'
@@ -238,7 +238,7 @@ def thumbnail_jpeg(raw):
     if len(raw) > IMAGE_BYTES:
         raise ConnectorError('error')
     try:
-        with Image.open(BytesIO(raw), formats=['JPEG', 'PNG']) as image:
+        with Image.open(BytesIO(raw), formats=['JPEG', 'PNG', 'WEBP']) as image:
             if image.width * image.height > IMAGE_PIXELS or getattr(image, 'n_frames', 1) != 1:
                 raise ConnectorError('error')
             image.thumbnail((320, 320))

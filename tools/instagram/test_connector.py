@@ -348,6 +348,32 @@ class ThumbnailDownloadTests(unittest.TestCase):
              self.assertRaises(ConnectorError):
             self.download(self.response())
 
+    def test_capture_converts_single_frame_webp_from_cdn_to_jpeg(self):
+        from io import BytesIO
+        from PIL import Image
+        from tools.instagram import connector as c
+
+        source = ThumbnailTests.image(fmt='WEBP')
+        response = self.response(source, mime='image/webp')
+        with patch('tools.instagram.connector.socket.getaddrinfo',
+                   return_value=[(2, 1, 6, '', ('8.8.8.8', 443))]), \
+             patch('tools.instagram.connector.requests.get', return_value=response):
+            jpeg = c.capture_thumbnail('https://s.cdninstagram.com/poster')
+        with Image.open(BytesIO(jpeg)) as image:
+            self.assertEqual((image.format, image.size), ('JPEG', (320, 240)))
+
+    def test_conversion_rejects_animated_webp(self):
+        from io import BytesIO
+        from PIL import Image
+        from tools.instagram import connector as c
+
+        first = Image.new('RGB', (4, 4), 'red')
+        second = Image.new('RGB', (4, 4), 'blue')
+        source = BytesIO()
+        first.save(source, format='WEBP', save_all=True, append_images=[second], duration=100)
+        with self.assertRaises(c.ConnectorError):
+            c.thumbnail_jpeg(source.getvalue())
+
     def test_low_level_transport_errors_become_sanitized_per_image_failures(self):
         from urllib3.exceptions import ProtocolError
         from tools.instagram import connector as c
