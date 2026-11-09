@@ -5,11 +5,7 @@
   'use strict';
 
   function init() {
-    inject();
-    // YouTube is a SPA — re-inject on navigation
-    document.addEventListener('yt-navigate-finish', () => {
-      setTimeout(inject, 500);
-    });
+    OCDJ.observePage(inject);
   }
 
   function inject() {

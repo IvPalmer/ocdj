@@ -4,20 +4,12 @@
 (() => {
   'use strict';
 
-  let lastUrl = '';
-
   function init() {
-    inject();
-    // SoundCloud is a SPA — watch for URL changes
-    OCDJ.observeDOM(() => {
-      if (window.location.href !== lastUrl) {
-        lastUrl = window.location.href;
-        setTimeout(inject, 500);
-      }
-    });
+    OCDJ.observePage(inject);
   }
 
   function inject() {
+    injectFramedTrack();
     const path = window.location.pathname;
 
     // Skip non-content pages
@@ -29,6 +21,85 @@
     } else if (path.match(/^\/[^/]+\/[^/]+$/) && !path.includes('/sets')) {
       injectTrackPage();
     }
+  }
+
+  // New SoundCloud layouts render the recording in a same-origin /n/ frame.
+  // Keep controls in the outer page, where the declared stylesheet and runtime
+  // already live. Never inject scripts into frames or widen manifest access.
+  const frames = new Map();
+  function injectFramedTrack() {
+    for (const [frame, state] of frames) {
+      if (!frame.isConnected) {
+        state.observer?.disconnect();
+        clearTimeout(state.timer);
+        state.group?.remove();
+        frame.removeEventListener('load', state.refresh);
+        frames.delete(frame);
+      }
+    }
+    document.querySelectorAll('iframe').forEach(frame => {
+      if (!frames.has(frame)) {
+        const state = {};
+        state.refresh = () => {
+          state.observer?.disconnect();
+          clearTimeout(state.timer);
+          state.timer = null;
+          let doc;
+          try { doc = frame.contentDocument; } catch { /* inaccessible frame */ }
+          const previousDoc = state.doc;
+          state.doc = doc;
+          const url = doc && new URL(doc.URL);
+          const path = window.location.pathname.replace(/\/$/, '');
+          if (!url || url.origin !== window.location.origin ||
+              url.pathname.replace(/\/$/, '') !== '/n' + path ||
+              !/^\/[^/]+\/[^/]+$/.test(path)) {
+            state.group?.remove();
+            return;
+          }
+          state.observer = new MutationObserver(() => {
+            if (state.timer) return;
+            state.timer = setTimeout(state.refresh, 250);
+          });
+          state.observer.observe(doc, { childList: true, subtree: true,
+            characterData: true, attributes: true, attributeFilter: ['href', 'content'] });
+          const heading = doc.querySelector('h1');
+          const title = heading?.textContent.trim();
+          const profilePath = '/' + path.split('/')[1];
+          const artist = [...(heading?.parentElement?.querySelectorAll('a[href]') || [])]
+            .find(link => link.pathname.replace(/\/$/, '') === profilePath)?.textContent.trim();
+          const key = path + '|' + artist + '|' + title;
+          if (previousDoc === doc && state.key === key && state.group?.isConnected) return;
+          state.group?.remove();
+          state.key = key;
+          if (!title || !artist) return;
+          const source_url = window.location.origin + path;
+          const queue = OCDJ.createPlayButton({
+            size: 'medium',
+            onClick: () => OCDJ.sendToBackground('dig:queue-embed', {
+              platform: 'soundcloud', artist, title, source_url,
+              embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(source_url)}&auto_play=true&show_artwork=true`,
+              thumb: doc.querySelector('meta[property="og:image"]')?.content || '',
+            }),
+          });
+          const wantlist = OCDJ.createDigButton({
+            size: 'medium',
+            onClick: () => OCDJ.sendToBackground('dig:add', {
+              artist, title, source_url, source_site: 'soundcloud',
+            }),
+          });
+          state.group = OCDJ.createButtonGroup(queue, wantlist);
+          frame.before(state.group);
+        };
+        frames.set(frame, state);
+        frame.addEventListener('load', state.refresh);
+      }
+      // Also refresh when the outer SPA URL changes without a frame load.
+      const state = frames.get(frame);
+      if (state.page !== window.location.href || !state.group?.isConnected) {
+        state.page = window.location.href;
+        state.refresh();
+      }
+    });
   }
 
   // ── Metadata Extraction ─────────────────────────────────────
@@ -71,7 +142,8 @@
   function injectTrackPage() {
     const actionsBar =
       document.querySelector('.soundActions .sc-button-group') ||
-      document.querySelector('.listenEngagement .soundActions');
+      document.querySelector('.listenEngagement .soundActions') ||
+      document.querySelector('.soundTitle');
 
     if (!actionsBar || OCDJ.isInjected(actionsBar)) return;
 
@@ -153,7 +225,8 @@
   function injectSetPage() {
     const header =
       document.querySelector('.soundActions .sc-button-group') ||
-      document.querySelector('.listenEngagement .soundActions');
+      document.querySelector('.listenEngagement .soundActions') ||
+      document.querySelector('.soundTitle');
 
     if (header && !OCDJ.isInjected(header)) {
       const { artist, title, uploaderName } = extractMeta();

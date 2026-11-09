@@ -10,7 +10,7 @@ class DigAddSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     source_url = serializers.CharField(required=False, allow_blank=True, default='')
     source_site = serializers.ChoiceField(
-        choices=['discogs', 'bandcamp', 'youtube', 'soundcloud', 'spotify'],
+        choices=['discogs', 'bandcamp', 'youtube', 'soundcloud', 'spotify', 'beatport'],
         required=True,
     )
 
