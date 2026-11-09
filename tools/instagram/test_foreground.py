@@ -83,7 +83,7 @@ class ForegroundTests(unittest.TestCase):
     def test_run_cleans_temp_directory_and_children_on_interrupt(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_cookie = Path(directory) / 'Cookies'
-            fake_cookie.write_bytes(b'SQLite format 3')
+            fake_cookie.write_bytes(b'SQLite format 3\x00')
             processes, child_envs = [], []
             real_popen = subprocess.Popen
             def spawn(command, **kwargs):
@@ -99,6 +99,7 @@ class ForegroundTests(unittest.TestCase):
                 return process
             with patch.dict(os.environ, {'DRAIN_TOKEN': 'fixture-secret', 'HTTP_PROXY': 'http://invalid'}), \
                  patch.object(fg, 'COOKIE_DB', fake_cookie), \
+                 patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
                  patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
