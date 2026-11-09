@@ -1,0 +1,37 @@
+name: Metadata cleanup fixture
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'tools/test_metadata_cleanup.py'
+      - 'tools/test_backend_fixtures.py'
+      - '.github/workflows/metadata-cleanup.yml'
+  workflow_dispatch:
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SECRET_KEY: synthetic-ci-only
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fixture
+      POSTGRES_DB: postgres
+      HUEY_DB_PATH: /tmp/cleanup-qa/huey.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r backend/requirements.txt
+      - run: python tools/test_metadata_cleanup.py
+      - run: python backend/manage.py makemigrations wanted recognize --check --dry-run
+      - run: python tools/test_backend_fixtures.py

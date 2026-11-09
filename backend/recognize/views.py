@@ -2,6 +2,7 @@ import logging
 from datetime import timedelta
 
 from django.db.models import Sum
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -105,6 +106,10 @@ def add_to_wanted(request, pk):
         if exists:
             continue
 
+        from wanted.models import MetadataCleanup
+        receipt = MetadataCleanup.objects.filter(
+            subject_key=f"recognize:{job.pk}:{track.get('cleanup_id', '')}", job_id=job.pk,
+        ).first()
         WantedItem.objects.create(
             artist=artist,
             title=title,
@@ -112,6 +117,8 @@ def add_to_wanted(request, pk):
             label=track.get('label', ''),
             source=source,
             notes=f"From mix: {job.title or job.url}",
+            cleanup_isrc=receipt.snapshot.get('isrc', '') if receipt else '',
+            metadata_protected=bool(track.get('manual')),
         )
         created_count += 1
 
@@ -140,10 +147,11 @@ def resume_job(request, pk):
 
 
 @api_view(['POST'])
+@transaction.atomic
 def rerun_job(request, pk):
     """Re-run recognition on a completed or failed job from scratch."""
     try:
-        job = RecognizeJob.objects.get(pk=pk)
+        job = RecognizeJob.objects.select_for_update().get(pk=pk)
     except RecognizeJob.DoesNotExist:
         return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -155,7 +163,7 @@ def rerun_job(request, pk):
 
     # Reset job state for a fresh run
     job.status = 'pending'
-    job.tracklist = []
+    job.tracklist = [t for t in job.tracklist if t.get('manual')]
     job.raw_results = []
     job.description_tracks = []
     job.segments_total = 0
@@ -173,6 +181,7 @@ def rerun_job(request, pk):
 
 
 @api_view(['PATCH'])
+@transaction.atomic
 def update_track(request, pk, idx):
     """Manual override for a single track in a completed job's tracklist.
 
@@ -181,7 +190,7 @@ def update_track(request, pk, idx):
     future re-cluster pass leaves it alone.
     """
     try:
-        job = RecognizeJob.objects.get(pk=pk)
+        job = RecognizeJob.objects.select_for_update().get(pk=pk)
     except RecognizeJob.DoesNotExist:
         return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -274,7 +283,8 @@ def recluster_job(request, pk):
 
     job.tracklist = tracklist
     job.tracks_found = len(tracklist)
-    job.save()
+    from wanted.services.cleanup import publish_recognition
+    publish_recognition(job, tracklist)
 
     serializer = RecognizeJobSerializer(job)
     return Response(serializer.data)
@@ -294,12 +304,23 @@ def trackid_lookup(request):
     if not result:
         return Response({'found': False})
 
+    # Give this formerly response-only path a durable job and occurrence IDs.
+    # Catalog/TrackID metadata is proposal-only without raw recording anchors.
+    from wanted.services.cleanup import publish_recognition
+    with transaction.atomic():
+        job = RecognizeJob.objects.create(
+            url=url, title=result.get('title', ''), status='completed', engine='trackid',
+            duration_seconds=result.get('duration_seconds') or None,
+        )
+        publish_recognition(job, result.get('tracklist', []))
+
     return Response({
         'found': True,
+        'job_id': job.pk,
         'title': result.get('title', ''),
         'duration_seconds': result.get('duration_seconds', 0),
         'trackid_status': result.get('trackid_status', ''),
-        'tracklist': result.get('tracklist', []),
+        'tracklist': job.tracklist,
         'track_count': len(result.get('tracklist', [])),
     })
 

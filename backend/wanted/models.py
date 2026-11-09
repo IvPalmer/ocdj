@@ -1,4 +1,5 @@
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 
 
 class WantedSource(models.Model):
@@ -60,6 +61,9 @@ class WantedItem(models.Model):
 
     artist = models.CharField(max_length=500, blank=True)
     title = models.CharField(max_length=500, blank=True)
+    cleanup_isrc = models.CharField(max_length=12, blank=True, editable=False)
+    metadata_revision = models.PositiveBigIntegerField(default=0, editable=False)
+    metadata_protected = models.BooleanField(default=False, editable=False)
     release_name = models.CharField(max_length=500, blank=True, help_text='Album or EP name')
     catalog_number = models.CharField(max_length=100, blank=True, help_text='e.g. WARP123')
     label = models.CharField(max_length=255, blank=True)
@@ -100,6 +104,55 @@ class WantedItem(models.Model):
 
     class Meta:
         ordering = ['-added']
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._loaded_metadata = {k: v for k, v in zip(field_names, values)
+                                     if k in ('artist', 'title', 'cleanup_isrc')}
+        return instance
+
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        self._loaded_metadata = {k: self.__dict__[k] for k in ('artist', 'title', 'cleanup_isrc')
+                                 if k in self.__dict__}
+
+    def save(self, *args, **kwargs):
+        # Central create boundary includes API/imports/Dig/Shazam/admin and the
+        # existing Instagram wishlist without editing the other agent's files.
+        # Raw SQL, bulk_create and QuerySet.update deliberately bypass save().
+        from .services.cleanup_evidence import clean_isrc
+        self.cleanup_isrc = clean_isrc(self.cleanup_isrc)
+        with transaction.atomic():
+            creating = self._state.adding
+            if not creating:
+                current = type(self).objects.select_for_update().get(pk=self.pk)
+                fields = kwargs.get('update_fields')
+                # Existing background callers sometimes save a stale whole
+                # instance. Values they never edited must not undo cleanup or
+                # a human correction committed since that instance was read.
+                if fields is None:
+                    loaded = getattr(self, '_loaded_metadata', {})
+                    for field, value in loaded.items():
+                        if getattr(self, field) == value:
+                            setattr(self, field, getattr(current, field))
+                metadata_edit = any((fields is None or field in fields)
+                                    and getattr(self, field) != getattr(current, field)
+                                    for field in ('artist', 'title', 'cleanup_isrc'))
+                if metadata_edit or getattr(self, '_protect_metadata', False):
+                    self.metadata_protected = True
+                    self.metadata_revision = current.metadata_revision + 1
+                    if fields is not None:
+                        kwargs['update_fields'] = set(fields) | {'metadata_protected', 'metadata_revision'}
+                else:
+                    self.metadata_protected = current.metadata_protected
+                    self.metadata_revision = current.metadata_revision
+            super().save(*args, **kwargs)
+            if creating:
+                from .services.cleanup import capture_wanted
+                capture_wanted(self)
+        self._protect_metadata = False
+        self._loaded_metadata = {k: getattr(self, k) for k in ('artist', 'title', 'cleanup_isrc')}
 
     def __str__(self):
         parts = []
@@ -157,3 +210,23 @@ class ImportOperation(models.Model):
 
     def __str__(self):
         return f"{self.get_import_type_display()} import ({self.status})"
+
+
+class MetadataCleanup(models.Model):
+    """Private immutable observation + processing receipt; subject deletion retains audit.
+
+    IDs identify occurrences, never canonical recordings. No public write API.
+    Snapshot is written only at insertion; attempts/evidence/result are worker-owned.
+    """
+    subject_key = models.CharField(max_length=200, unique=True)
+    wanted_id = models.PositiveBigIntegerField(null=True, blank=True)
+    job_id = models.PositiveBigIntegerField(null=True, blank=True)
+    snapshot = models.JSONField()
+    evidence = models.JSONField(default=dict)
+    result = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, default='queued')
+    attempts = models.PositiveSmallIntegerField(default=0)
+    lease = models.UUIDField(null=True)
+    available_at = models.DateTimeField(default=timezone.now, db_index=True)
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)

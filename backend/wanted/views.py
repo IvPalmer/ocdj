@@ -51,6 +51,14 @@ class WantedItemViewSet(viewsets.ModelViewSet):
     search_fields = ['artist', 'title', 'notes']
     ordering_fields = ['added', 'updated', 'artist', 'title', 'status']
 
+    @action(detail=True, methods=['get'])
+    def cleanup(self, request, pk=None):
+        from .models import MetadataCleanup
+        from .serializers import MetadataCleanupSerializer
+        item = self.get_object()
+        receipt = MetadataCleanup.objects.filter(subject_key=f'wanted:{item.pk}').first()
+        return Response(MetadataCleanupSerializer(receipt).data if receipt else None)
+
     @action(detail=True, methods=['post'])
     def preview(self, request, pk=None):
         """Resolve (and cache) a 30s preview for this track.

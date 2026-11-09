@@ -58,6 +58,7 @@ async def _recognize_all(segments, progress_counter, timeout=REQUEST_TIMEOUT, re
                 'title': track.get('title', ''),
                 'artist': track.get('subtitle', ''),
                 'key': track.get('key', ''),
+                'isrc': track.get('isrc', ''),
                 'shazam_url': track.get('url', ''),
                 'apple_music_url': _extract_apple_music_url(track),
                 'album': _extract_metadata(track, 'Album'),
