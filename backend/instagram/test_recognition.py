@@ -93,6 +93,62 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(provider.call_count, 2)
         self.assertEqual(provider.call_args_list[0].args[1]['query'], 'catno:"FIX001" AND label:"Fixture Label"')
 
+    def test_normal_caption_release_codes_use_exact_provider_validation(self):
+        for caption in ['#FIX001 is in-stock', '[FIX001] Fixture Label',
+                        'FIX001 is up on Bandcamp today.', '#fix001 is out now!',
+                        '[FIX001] Fixture Label\n#FIX001',
+                        '#FIX001 is available now\nLabel: Fixture Label']:
+            with self.subTest(caption=caption):
+                (candidates, records), provider = self.resolve(caption=caption)
+                self.assertEqual(candidates, [CANDIDATE])
+                self.assertIn('Catalog: FIX001;', records[0]['text'])
+                self.assertIn('catno:"FIX001"', provider.call_args_list[0].args[1]['query'])
+                wrong = release_fixture()
+                wrong['label-info'][0]['catalog-number'] = 'OTHER002'
+                self.assertEqual(self.resolve(wrong, caption)[0], ([], []))
+
+    def test_normal_caption_varied_public_code_shapes(self):
+        for code, caption in [('PULSE004', '#PULSE004 is in-stock'),
+                              ('SOFTBEATS007', '[SOFTBEATS007] Synthetic Label'),
+                              ('NVA007', 'NVA007 is up on Bandcamp today.')]:
+            with self.subTest(code=code):
+                detail = release_fixture()
+                detail['label-info'][0]['catalog-number'] = code
+                (candidates, _), provider = self.resolve(detail, caption)
+                self.assertEqual(candidates, [CANDIDATE])
+                self.assertEqual(provider.call_args_list[0].args[1]['query'], 'catno:"' + code + '"')
+
+    def test_normal_caption_ambiguous_or_nonrelease_codes_need_audio(self):
+        for caption in ['#FIX001', 'Love #FIX001 tonight', '#TECHNO2026 #DANCE2026',
+                        '#FIX001 is in-stock\n[OTHER002] Other Label',
+                        '[FIX001] Fixture Label\n#OTHER002',
+                        'FIX001 is up on Bandcamp today. OTHER002 too.',
+                        '#FIX001 is in-stock?', '#FIX001 is not in-stock',
+                        'https://example.test/FIX001 is in-stock',
+                        '@FIX001 is in-stock', '#FIX001extra is in-stock',
+                        '[F1] Fixture Label', '[FIX1234567] Fixture Label',
+                        '[VERYLONGPREFIX001] Fixture Label',
+                        'Great release today\n#FIX001', 'We played FIX001 yesterday']:
+            with self.subTest(caption=caption), patch(f'{MODULE}._release_json') as provider:
+                self.assertEqual(release_candidates(caption, 0, 1), ([], []))
+                provider.assert_not_called()
+
+    def test_normal_caption_code_does_not_associate_unproven_carousel_track(self):
+        detail = release_fixture()
+        second = copy.deepcopy(detail['media'][0]['tracks'][0])
+        second['number'] = 'A2'
+        second['title'] = second['recording']['title'] = 'Another Fixture (Original Mix)'
+        detail['media'][0]['tracks'].append(second)
+        detail['media'][0]['track-count'] = 2
+        for caption in ['#FIX001 is in-stock', '[FIX001] Fixture Label',
+                        'FIX001 is up on Bandcamp today.']:
+            for count in [0, 1, 2, 3]:
+                with self.subTest(caption=caption, count=count):
+                    self.assertEqual(self.resolve(detail, caption, count=count)[0], ([], []))
+            self.assertEqual(self.resolve(detail, caption + '\nTrack: A1', count=2)[0], ([], []))
+            result, _ = self.resolve(detail, caption + '\nCarousel: tracklist order', count=2, position=1)
+            self.assertEqual(result[0], [{'artist': 'Fixture Artist', 'title': second['title']}])
+
     def test_title_only_invalid_or_conflicting_catalog_does_not_call_provider(self):
         for caption in ['Release: Artist - Album EP', 'Catalog: 1234', 'Catalog: FIX001\nCatalog: OTHER002',
                         'Catalog: FIX001\nTrack: A1']:

@@ -79,6 +79,35 @@ def explicit_candidates(caption, position, comments=(), *, media_count=None):
     return (candidates if len(candidates) == 1 else []), records
 
 
+def _caption_release_code(caption):
+    """Conservative fallback for common release posts without a Catalog field.
+
+    A leading bracket is an explicit catalog position. Bare codes/hashtags
+    need an immediate release predicate; generic tags alone prove nothing.
+    Any other catalog-shaped token makes the caption ambiguous.
+    """
+    import re
+
+    token = r'[a-zA-Z]{2,12}[0-9]{2,6}'
+    codes = {m[0].upper() for m in re.finditer(
+        r'(?<![\w/@.-])' + token + r'(?![\w-])', caption)}
+    if len(codes) != 1:
+        return ''
+    code = codes.pop()
+    for line in caption.splitlines():
+        line = line.strip()
+        if '?' in line:
+            continue
+        bracket = re.match(r'^\[(' + token + r')\](?:\s|$)', line)
+        prose = re.match(
+            r'^#?(' + token + r')\s+(?:is\s+)?'
+            r'(?:in[- ]stock|out\s+now|available\s+now|up\s+on\s+bandcamp)\b', line, re.I)
+        match = bracket or prose
+        if match and match[1].upper() == code:
+            return code
+    return ''
+
+
 def release_candidates(caption, position, media_count):
     """Resolve an explicit catalog code, never a release title as a recording.
 
@@ -104,7 +133,7 @@ def release_candidates(caption, position, media_count):
             if key in fields and fields[key] != value:
                 return [], []
             fields[key] = value
-    code = fields.get('catalog', '')
+    code = fields.get('catalog') or _caption_release_code(caption[:10000])
     if not re.fullmatch(r'(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9 ._-]{2,60}', code):
         return [], []
     if media_count < 1 or (fields.get('track') and media_count != 1):
