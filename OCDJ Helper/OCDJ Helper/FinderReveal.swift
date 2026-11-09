@@ -27,6 +27,7 @@ struct FinderReveal {
         let collection_id: String
         let root: String
         let tracks: [String: String]
+        let review_fingerprints: [String: [String]]?
     }
 
     enum Failure: Error {
@@ -127,6 +128,13 @@ struct FinderReveal {
         defer { close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { throw Failure.staleFile }
+        if reviewArchive {
+            let modified = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
+            let changed = Int64(info.st_ctimespec.tv_sec) * 1_000_000_000 + Int64(info.st_ctimespec.tv_nsec)
+            let fingerprint = [String(info.st_dev), String(info.st_ino), String(info.st_size),
+                               String(modified), String(changed)]
+            guard map.review_fingerprints?[request.id] == fingerprint else { throw Failure.staleFile }
+        }
         return URL(fileURLWithPath: path)
     }
 }

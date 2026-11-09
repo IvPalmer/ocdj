@@ -68,6 +68,20 @@ class HelperTests(unittest.TestCase):
             with helper.source(self.data, self.collection, self.opaque):
                 self.audio.write_bytes(b'changed')
 
+    def test_review_archive_rejects_replacement_at_same_path(self):
+        relative = Path('ID3/_review/track.wav')
+        path = self.root / relative
+        path.parent.mkdir(parents=True)
+        path.write_bytes(self.audio.read_bytes())
+        self.data['tracks'][self.opaque] = str(relative)
+        self.data['review_fingerprints'] = {self.opaque: helper.review_fingerprint(path.stat())}
+        with helper.source(self.data, self.collection, self.opaque):
+            pass
+        path.unlink()
+        path.write_bytes(b'replacement')
+        with self.assertRaises(helper.Refused), helper.source(self.data, self.collection, self.opaque):
+            pass
+
     def test_actual_transcode_uses_synthetic_audio(self):
         from mutagen.mp3 import MP3
         output = self.base / 'audio.mp3'
