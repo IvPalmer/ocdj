@@ -648,7 +648,7 @@ function OrganizePanel() {
                   {item.metadata_source && <span className="col-source">{item.metadata_source}</span>}
                 </span>
                 <span className="col-actions">
-                  <TrackPlayback sourceOnly track={{
+                  <TrackPlayback sourceOnly archiveOnly track={{
                     pipelineId: item.id, artist: item.artist, title: item.title || currentName,
                     wantedId: item.wanted_item, source: directSource(item),
                     archiveLibraryMatch: item.archive_library_match,

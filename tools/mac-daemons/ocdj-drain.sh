@@ -2,7 +2,7 @@
 # ocdj-drain.sh — Mac-side drain daemon.
 #
 # Fetches publishable tracks from ocdj.grooveops.dev, rsyncs from VPS, verifies
-# sha256, idempotently adds to Music.app via osascript, confirms with the API
+# SHA-256, places them in the Mac review folder, and confirms with the API
 # so the VPS can delete its copy.
 #
 # Invoked by a user LaunchAgent every 5 minutes (see dev.grooveops.ocdj-drain.plist).
@@ -165,6 +165,63 @@ api_confirm() {
     "${DRAIN_API_URL}/${id}/confirm/" >/dev/null 2>&1
 }
 
+# Publish from a private temporary copy on the destination volume. A hard
+# link makes the complete file visible in one step and cannot replace a path.
+place_review_file() {
+  /usr/bin/python3 - "$MUSIC_IMPORT_DIR" "$@" <<'PYTHON'
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import sys
+import tempfile
+
+
+def matches(path, expected):
+    if path.is_symlink() or not path.is_file():
+        return False
+    digest = hashlib.sha256()
+    with path.open("rb") as audio:
+        for chunk in iter(lambda: audio.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == expected
+
+
+directory, source, filename, item_id, sha = sys.argv[1:]
+review = Path(directory)
+if filename != Path(filename).name or filename in ("", ".", ".."):
+    sys.exit("invalid review filename")
+canonical = review / filename
+suffix = f" [OCDJ {item_id}-{sha[:12]}]{canonical.suffix}"
+name_max = os.pathconf(review, "PC_NAME_MAX")
+stem_limit = name_max - len(os.fsencode(suffix))
+stem = os.fsencode(canonical.stem)[:stem_limit].decode("utf-8", errors="ignore")
+alternate = review / (stem + suffix)
+targets = (canonical, alternate)
+
+# Look for an earlier delivery at either name before creating another copy.
+for target in targets:
+    if matches(target, sha):
+        print(target)
+        sys.exit(0)
+
+with tempfile.NamedTemporaryFile(dir=review, prefix=".ocdj-") as staged:
+    shutil.copyfile(source, staged.name)
+    if not matches(Path(staged.name), sha):
+        sys.exit("review copy failed SHA-256 verification")
+    for target in targets:
+        try:
+            os.link(staged.name, target)
+        except FileExistsError:
+            if not matches(target, sha):
+                continue
+        print(target)
+        break
+    else:
+        sys.exit("both review filenames are occupied by different content")
+PYTHON
+}
+
 drain_one() {
   local id=$1
   local filename=$2
@@ -208,42 +265,10 @@ drain_one() {
     return 1
   fi
 
-  # Land the file in MUSIC_IMPORT_DIR (the user's _Review triage folder).
-  # DO NOT add to Music.app — iTunes only receives tracks the user has
-  # manually promoted to the real library (~/Music/Musicas/Electronic/).
-  # The _Review folder is a staging area; adding from here would pollute
-  # iTunes Match + any Rekordbox/Traktor syncs that watch the library.
-  local import_path="${MUSIC_IMPORT_DIR}/${filename}"
-  if [[ -e "$import_path" ]]; then
-    # A file already there is usually this same track, delivered on an earlier
-    # cycle whose confirm never landed. Failing on that is wrong twice over: the
-    # track *is* on the Mac, and after five attempts the item parks in
-    # archive_state=failed with its copy stranded on the VPS forever — which is
-    # exactly what happened to three tracks on 2026-08-29, unnoticed for two
-    # days. Compare content: same bytes means delivered, so confirm instead.
-    local existing_sha
-    existing_sha=$(shasum -a 256 "$import_path" 2>/dev/null | cut -d' ' -f1)
-    if [[ -n "$existing_sha" && "$existing_sha" == "$sha" ]]; then
-      log "drain: already delivered id=$id (identical file in _Review) — confirming"
-      if api_confirm "$id" "_REVIEW_LANDED" "$claim_token"; then
-        log "drain: DONE id=$id (was already there)"
-        rm -rf "$staging_track_dir"
-        return 0
-      fi
-      log "drain: confirm failed id=$id — will retry next cycle"
-      rm -rf "$staging_track_dir"
-      return 1
-    fi
-    # Different content under the same name is a genuine collision. Never
-    # overwrite: the operator prunes and renames by hand in this folder.
-    log "drain: target exists with DIFFERENT content, refusing overwrite id=$id path=$import_path"
-    api_fail "$id" "different file already at target name in MUSIC_IMPORT_DIR" "$claim_token"
-    rm -rf "$staging_track_dir"
-    return 1
-  fi
-  if ! mv "$local_path" "$import_path" 2>&1; then
-    log "drain: mv to MUSIC_IMPORT_DIR failed id=$id"
-    api_fail "$id" "mv to import dir failed" "$claim_token"
+  local import_path
+  if ! import_path=$(place_review_file "$local_path" "$filename" "$id" "$sha" 2>>"$LOG_FILE"); then
+    log "drain: could not place file in review id=$id"
+    api_fail "$id" "could not place verified file in MUSIC_IMPORT_DIR" "$claim_token"
     rm -rf "$staging_track_dir"
     return 1
   fi
@@ -255,8 +280,7 @@ drain_one() {
   # Confirm with VPS — it deletes its copy on success.
   if ! api_confirm "$id" "$persistent_id" "$claim_token"; then
     log "drain: confirm API failed id=$id — will retry next cycle"
-    # Do NOT mark fail; we added to Music already. Next cycle's idempotent query
-    # will find it and re-confirm without duplicating.
+    # The file is already in review. The next cycle can confirm the same bytes.
     return 1
   fi
 
