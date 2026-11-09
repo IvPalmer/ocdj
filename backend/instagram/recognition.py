@@ -104,7 +104,13 @@ def release_candidates(caption, position, media_count):
             if key in fields and fields[key] != value:
                 return [], []
             fields[key] = value
-    code = fields.get('catalog', '')
+    # Bracketed catalog codes and catalog hashtags are common release captions.
+    # Keep this lexical: provider identity/track association still decides.
+    codes = re.findall(r'(?:\[|(?<!\w)#)([A-Z]{2,}[A-Z0-9._-]*[0-9][A-Z0-9._-]*)(?:\]|\b)', caption[:10000])
+    codes = set(codes + ([fields['catalog']] if fields.get('catalog') else []))
+    if len(codes) != 1:
+        return [], []
+    code = codes.pop()
     if not re.fullmatch(r'(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9 ._-]{2,60}', code):
         return [], []
     if media_count < 1 or (fields.get('track') and media_count != 1):
@@ -163,7 +169,10 @@ def release_candidates(caption, position, media_count):
         # Evidence fits the existing private record schema; no migration or hook.
         record = {'source': 'caption', 'comment_id': '', 'candidate': candidate,
                   'text': ('Catalog: ' + code + '; https://musicbrainz.org/release/' + release_id +
-                           '; track ' + str(track.get('number', '')) + '; recording ' + recording['id'])[:1100]}
+                           '; track ' + str(track.get('number', '')) + '; recording ' + recording['id'] +
+                           '; association: ' + ('explicit Track selector' if selector else
+                               'single-track video' if media_count == 1 else
+                               'declared carousel tracklist order; slide ' + str(position + 1)))[:1100]}
         return [candidate], [record]
     except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
         return [], []

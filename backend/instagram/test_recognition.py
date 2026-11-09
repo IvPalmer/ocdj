@@ -93,6 +93,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(provider.call_count, 2)
         self.assertEqual(provider.call_args_list[0].args[1]['query'], 'catno:"FIX001" AND label:"Fixture Label"')
 
+    def test_bracket_and_hashtag_catalog_cues_use_same_exact_lookup(self):
+        for caption in ['Fixture release [FIX001]\nTrack: A1', '#FIX001\nTrack: A1']:
+            result, provider = self.resolve(caption=caption)
+            self.assertEqual(result[0], [CANDIDATE])
+            self.assertEqual(provider.call_args_list[0].args[1]['query'], 'catno:"FIX001"')
+
     def test_title_only_invalid_or_conflicting_catalog_does_not_call_provider(self):
         for caption in ['Release: Artist - Album EP', 'Catalog: 1234', 'Catalog: FIX001\nCatalog: OTHER002',
                         'Catalog: FIX001\nTrack: A1']:
@@ -156,3 +162,43 @@ class ReleaseTests(unittest.TestCase):
         response.iter_content.return_value = [b'x' * (512 * 1024 + 1)]
         with patch('requests.get', return_value=response), patch(f'{MODULE}._PROVIDER_NEXT', 0):
             self.assertEqual(_release_json('', {}), {})
+
+
+class CommentFallbackTests(unittest.TestCase):
+    def test_existing_connector_uses_audio_for_ambiguous_cues_but_not_one_explicit_id(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from tools.instagram import connector as c
+        for comments, use_audio in [
+                ([{'id': '1', 'text': 'ID: Artist - Track (Dub Mix)'},
+                  {'id': '2', 'text': 'ID: Artist - Track (Radio Edit)'}], True),
+                ([{'id': '1', 'text': 'Release: Artist - Album EP'}], True),
+                ([{'id': '1', 'text': 'ID: Artist - Track?'}], True),
+                ([{'id': '1', 'text': 'ID: Artist - Track (Dub Mix)'}], False)]:
+            with self.subTest(comments=comments):
+                api = Mock()
+                jobs = iter([{'id': 7, 'position': 0, 'post_instagram_id': '100', 'token': 'fixture', 'action': 'recognize'}, None])
+                def post(endpoint, *args, **kwargs):
+                    if endpoint == 'sync/': return {'media': []}
+                    if endpoint == 'claim/': return next(jobs, None)
+                    return {'ok': True}
+                api.post.side_effect = post
+                def download(url, path):
+                    path.write_bytes(b'synthetic-only')
+                    return 'video/mp4'
+                with patch.dict('os.environ', {'DRAIN_TOKEN': 'synthetic-only'}), \
+                        patch.object(c, 'API', return_value=api), \
+                        patch.object(c, 'instagram_session'), \
+                        patch.object(c, 'read_collection', return_value=({'posts': []}, {})), \
+                        patch.object(c, 'read_comments', return_value=comments), \
+                        patch.object(c, 'read_source', return_value='https://example.test/fixture'), \
+                        patch.object(c, 'download', side_effect=download) as transport, \
+                        patch.object(c, 'ffmpeg_path', return_value='fixture-ffmpeg'), \
+                        patch.object(c, 'recognize', new_callable=AsyncMock, return_value=[CANDIDATE]) as shazam:
+                    c.run(SimpleNamespace(api='https://example.test', profile='fixture', fixture=None, work_seconds=0))
+                self.assertEqual(transport.call_count, int(use_audio))
+                self.assertEqual(shazam.await_count, int(use_audio))
+                completion = next(call.args[1] for call in api.post.call_args_list if call.args[0] == 'media/7/complete/')
+                self.assertEqual(completion['status'], 'identified')
+                self.assertEqual(completion['recognition']['source'], 'shazam' if use_audio else 'comment')
+                self.assertEqual(completion['recognition']['comments'], 'partial')
