@@ -116,6 +116,9 @@ with sync_playwright() as playwright:
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
         stage[0] = 'soft navigation to Wanted after Library queue'
         page.get_by_role('link', name='Wanted', exact=True).click()
+        # Soft navigation may report the prior document's network-idle state
+        # before React mounts the Wanted queries. Resolve both before reloading.
+        expect(page.locator('td.td-library .track-library-match--matched')).to_have_count(2)
         page.wait_for_load_state('networkidle')
         expect(player.get_by_text('Queue (2)', exact=True)).to_be_visible()
         # Shared controls have exactly one pair of actions; Finder is always last.
