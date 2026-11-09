@@ -3,6 +3,7 @@ from huey import crontab
 from huey.contrib.djhuey import db_periodic_task, db_task
 from . import cache
 from .cache import cleanup
+from .cleanup import capture_accepted_identification
 
 
 @db_periodic_task(crontab(minute='*/30'))
@@ -59,6 +60,9 @@ def recognize_cached(pk):
         m.status = status; m.candidates = candidates; m.queued = False
         m.recognition = dict(source='shazam', certainty='tentative', outcome=status, comments='not-read')
         m.lease_token = ''; m.lease_until = None; m.lease_action = ''
-        if len(candidates) == 1 and not m.reviewed and not (m.artist or m.title):
+        accepted = len(candidates) == 1 and not m.reviewed and not (m.artist or m.title)
+        if accepted:
             m.artist = candidates[0]['artist']; m.title = candidates[0]['title']
         m.save()
+        if accepted:
+            capture_accepted_identification(m, route='cached', accepted=True)

@@ -22,6 +22,7 @@ from .models import Collection, Post, Media
 from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion, ThumbnailBatch
 from . import cache, thumbnails
 from .recognition import explicit_candidates, release_candidates
+from .cleanup import capture_accepted_identification
 
 
 def collection():
@@ -74,6 +75,8 @@ def candidate_preview(request, pk):
 @api_view(['PATCH', 'POST'])
 def media_action(request, pk, action='edit'):
     prepared = None
+    accepted = False
+    previous = None
     if action == 'recognize' and request.method == 'POST':
         source = get_object_or_404(Media.objects.select_related('post'), pk=pk, active=True, post__active=True)
         if source.kind == 'video' and not source.queued:
@@ -107,12 +110,14 @@ def media_action(request, pk, action='edit'):
                 if prepared and prepared[:3] == (m.post.caption, m.position, children):
                     candidates, records = prepared[3:5]
 
+                previous = (m.artist, m.title, m.recognition)
                 if candidates:
                     m.candidates = candidates; m.status = 'identified'
                     m.recognition = dict(source='caption', certainty='explicit', outcome='identified',
                                          comments='not-read', records=records)
                     if not m.reviewed and len(candidates) == 1 and not (m.artist or m.title):
                         m.artist = candidates[0]['artist']; m.title = candidates[0]['title']
+                        accepted = True
                 else:
                     m.queued = True; m.status = 'pending'; m.recognition = {}
                     if m.cache_key and m.cache_until and m.cache_until > timezone.now():
@@ -133,6 +138,8 @@ def media_action(request, pk, action='edit'):
         else:
             return Response(status=405)
         m.save()
+        if action == 'recognize' and previous is not None:
+            capture_accepted_identification(m, route='caption', accepted=accepted, previous=previous)
     return Response(child_json(m))
 
 
@@ -206,6 +213,7 @@ def current_lease(m, token):
 def complete(request, pk):
     s = Completion(data=request.data); s.is_valid(raise_exception=True)
     d = s.validated_data
+    accepted = False
     with transaction.atomic():
         m = get_object_or_404(Media.objects.select_for_update(), pk=pk)
         if not current_lease(m, d['token']):
@@ -216,11 +224,14 @@ def complete(request, pk):
                                  outcome=d['status'], comments='not-read'))
             if len(m.candidates) == 1 and not m.reviewed and not (m.artist or m.title):
                 m.artist = m.candidates[0]['artist']; m.title = m.candidates[0]['title']
+                accepted = True
         if m.lease_action == 'playback' or (m.cache_key and m.cache_until and m.cache_until > timezone.now()):
             m.playback_error = m.playback_requested and d['status'] == 'error'
             m.playback_requested = False
         m.lease_token = ''; m.lease_until = None; m.lease_action = ''
         m.save()
+        if accepted:
+            capture_accepted_identification(m, route='connector', accepted=True)
         if m.queued and m.cache_key and m.cache_until and m.cache_until > timezone.now():
             from .tasks import recognize_cached
             transaction.on_commit(lambda: recognize_cached(m.pk))
