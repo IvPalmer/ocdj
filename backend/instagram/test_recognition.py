@@ -29,7 +29,7 @@ class ExplicitTests(unittest.TestCase):
         self.assertEqual(records[1]['comment_id'], '12')
 
     def test_questions_prose_and_comment_numbering_do_not_identify(self):
-        for text in ['great night - thanks', 'ID: Artist - Track?', '1. Artist - Track', 'Release: Artist - Album EP']:
+        for text in ['great night - thanks', 'ID: Artist - Track?', 'ID: Artist - Track (?)', 'ID: Artist - Track? anyone', '1. Artist - Track', 'Release: Artist - Album EP']:
             with self.subTest(text=text):
                 self.assertEqual(explicit_candidates('', 0, [{'id': '1', 'text': text}])[0], [])
 
