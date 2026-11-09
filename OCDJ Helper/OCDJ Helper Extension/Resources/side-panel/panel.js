@@ -180,6 +180,9 @@
       placeholder.style.display = 'flex';
       document.getElementById('beatport-preview-note').hidden = true;
       isPlaying = false;
+      nowPlayingTitle.textContent = 'Beatport source unavailable';
+      nowPlayingRelease.textContent = [release.artist, release.title].filter(Boolean).join(' — ');
+      renderQueue();
       return;
     }
 
@@ -479,6 +482,7 @@
       currentVideoIndex = 0;
       iframe.src = '';
       iframe.style.display = 'none';
+      placeholder.textContent = 'Queue a release to start listening';
       placeholder.style.display = 'flex';
 
       playerContainer.className = '';
@@ -508,6 +512,7 @@
     currentVideoIndex = 0;
     iframe.src = '';
     iframe.style.display = 'none';
+    placeholder.textContent = 'Queue a release to start listening';
     placeholder.style.display = 'flex';
     playerContainer.className = '';
     document.getElementById('beatport-preview-note').hidden = true;

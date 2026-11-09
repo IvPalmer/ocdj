@@ -171,6 +171,10 @@ for (const root of roots) {
       assert.equal(f.w.document.querySelector('#embed-player').style.display, 'none');
       assert.match(f.w.document.querySelector('#player-placeholder').textContent, /Exact Beatport source unavailable/);
       assert.equal(f.w.document.querySelector('#beatport-preview-note').hidden, true);
+      assert.equal(f.w.document.querySelector('#now-playing-title').textContent, 'Beatport source unavailable');
+      f.w.document.querySelector('#btn-clear-queue').click();
+      await settle();
+      assert.equal(f.w.document.querySelector('#player-placeholder').textContent, 'Queue a release to start listening');
     } finally { f.close(); }
   });
 
