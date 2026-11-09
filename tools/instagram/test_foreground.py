@@ -99,6 +99,7 @@ class ForegroundTests(unittest.TestCase):
                 return process
             with patch.dict(os.environ, {'DRAIN_TOKEN': 'fixture-secret', 'HTTP_PROXY': 'http://invalid'}), \
                  patch.object(fg, 'COOKIE_DB', fake_cookie), \
+                 patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
                  patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
