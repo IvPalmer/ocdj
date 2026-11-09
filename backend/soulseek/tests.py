@@ -241,7 +241,7 @@ class ClearDownloadsTests(TestCase):
 class SearchLockTests(TestCase):
     def test_search_keeps_lock_per_file_in_both_response_shapes(self):
         from .views import _run_search_for_queue_item
-        item = SearchQueueItem.objects.create(raw_query='fixture')
+        item = SearchQueueItem.objects.create(raw_query='fixture', status='searching')
         peer = Mock()
         peer.search.return_value = {'id': 'fixture-search'}
         peer.get_search.return_value = {'state': 'Completed', 'responses': [{
@@ -255,3 +255,42 @@ class SearchLockTests(TestCase):
             _run_search_for_queue_item(item.pk)
         self.assertEqual(dict(SearchResult.objects.filter(queue_item=item).values_list('filename', 'is_locked')),
                          {'open.flac': False, 'flagged.flac': True, 'private.flac': True})
+
+
+class SearchCancellationTests(TestCase):
+    def test_cancel_while_polling_deletes_peer_search_and_fences_late_results(self):
+        from .views import _run_search_for_queue_item
+        item = SearchQueueItem.objects.create(raw_query='fixture', status='searching')
+        old = SearchResult.objects.create(queue_item=item, filename='previous.flac', username='peer')
+        original_start = item.updated
+        client = APIClient()
+        peer = Mock()
+        peer.search.return_value = {'id': 'fixture-search'}
+
+        def cancel_then_retry(_seconds):
+            result = client.post(f'/api/soulseek/queue/{item.pk}/cancel-search/', {}, format='json')
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['status'], 'found')
+            item.status = 'searching'
+            item.save(update_fields=['status', 'updated'])
+
+        with patch('soulseek.views.SlskdClient', return_value=peer), \
+             patch('soulseek.views.time.sleep', side_effect=cancel_then_retry), \
+             patch('soulseek.views.db.connections.close_all'):
+            _run_search_for_queue_item(item.pk, original_start)
+        item.refresh_from_db()
+        self.assertEqual(item.status, 'searching')
+        self.assertNotEqual(item.updated, original_start)
+        self.assertEqual(list(item.search_results.values_list('pk', flat=True)), [old.pk])
+        peer.delete_search.assert_called_once_with('fixture-search')
+        peer.get_search.assert_not_called()
+
+    def test_cancel_stale_search_restores_wanted_without_losing_metadata(self):
+        from wanted.models import WantedItem
+        wanted = WantedItem.objects.create(artist='Fixture artist', title='Fixture track', status='searching')
+        item = SearchQueueItem.objects.create(wanted_item=wanted, status='searching')
+        result = APIClient().post(f'/api/soulseek/queue/{item.pk}/cancel-search/', {}, format='json')
+        self.assertEqual(result.status_code, 200)
+        wanted.refresh_from_db()
+        self.assertEqual(wanted.status, 'pending')
+        self.assertEqual(wanted.artist, 'Fixture artist')

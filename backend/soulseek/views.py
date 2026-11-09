@@ -26,10 +26,13 @@ logger = logging.getLogger(__name__)
 
 # ── Background search worker ────────────────────────────────
 
-def _run_search_for_queue_item(queue_item_id):
+def _run_search_for_queue_item(queue_item_id, started=None):
     """Run slskd search in background thread. Updates SearchQueueItem status when done."""
     try:
-        qi = SearchQueueItem.objects.get(id=queue_item_id)
+        qi = SearchQueueItem.objects.filter(pk=queue_item_id, status='searching').first()
+        if qi is None or (started is not None and qi.updated != started):
+            return
+        attempt = SearchQueueItem.objects.filter(pk=queue_item_id, status='searching', updated=qi.updated)
 
         # Build query — simplify even raw text so hyphens/accents/punctuation
         # don't tank slsk recall.
@@ -44,15 +47,17 @@ def _run_search_for_queue_item(queue_item_id):
                 label=qi.label,
             )
         if not queries:
-            qi.status = 'failed'
-            qi.error_message = 'No valid search query could be generated'
-            qi.save()
+            _fail_search(attempt, 'No valid search query could be generated')
             return
 
         client = SlskdClient()
         all_results = []
+        completed_queries = 0
 
         for query in queries[:2]:
+            if not attempt.exists():
+                return
+            search_id = None
             try:
                 search_response = client.search(query)
                 search_id = search_response.get('id')
@@ -62,6 +67,8 @@ def _run_search_for_queue_item(queue_item_id):
                 # Poll for completion — slskd searchTimeout is 15s, so 30s max
                 for _ in range(6):
                     time.sleep(5)
+                    if not attempt.exists():
+                        return
                     search_data = client.get_search(search_id, include_responses=False)
                     if not search_data:
                         break
@@ -72,7 +79,10 @@ def _run_search_for_queue_item(queue_item_id):
                 # Extract results — `files` are freely available, `lockedFiles`
                 # are gated to privileged peers. Keep both so the UI can show
                 # the 🔒 indicator instead of hiding them silently.
+                if not attempt.exists():
+                    return
                 search_data = client.get_search(search_id) or {}
+                completed_queries += 1
                 for response in search_data.get('responses', []):
                     username = response.get('username', '')
                     upload_speed = response.get('uploadSpeed', 0)
@@ -86,17 +96,21 @@ def _run_search_for_queue_item(queue_item_id):
                                 '_is_locked': key == 'lockedFiles' or file_data.get('isLocked') is True,
                             })
 
-                try:
-                    client.delete_search(search_id)
-                except Exception:
-                    pass
-
                 if len(all_results) > 10:
                     break
 
-            except Exception as e:
-                logger.error(f"Search failed for query '{query}': {e}")
-                continue
+            except Exception:
+                logger.warning('Soulseek search request failed for queue item %s', queue_item_id)
+            finally:
+                if search_id:
+                    try:
+                        client.delete_search(search_id)
+                    except Exception:
+                        pass
+
+        if not completed_queries:
+            _fail_search(attempt, 'Soulseek did not complete the search. Try again.')
+            return
 
         # Filter + score
         all_results = filter_results(all_results)
@@ -130,65 +144,71 @@ def _run_search_for_queue_item(queue_item_id):
 
         scored.sort(key=lambda x: x['match_score'], reverse=True)
 
-        # Store results — delete old ones first, then bulk insert
-        SearchResult.objects.filter(queue_item=qi).delete()
-        SearchResult.objects.bulk_create([
-            SearchResult(
-                queue_item=qi,
-                wanted_item=qi.wanted_item,
-                username=r['username'],
-                filename=r['filename'],
-                file_size=r['size'],
-                file_extension=r['extension'],
-                bitrate=r.get('bitrate'),
-                bit_depth=r.get('bit_depth'),
-                sample_rate=r.get('sample_rate'),
-                match_score=r['match_score'],
-                upload_speed=r.get('upload_speed'),
-                queue_length=r.get('queue_length'),
-                free_upload_slots=r.get('free_slots', False),
-                is_locked=r.get('is_locked', False),
-            )
-            for r in scored[:50]
-        ])
+        with transaction.atomic():
+            qi = attempt.select_for_update().first()
+            if qi is None:
+                return
+            # Store results — delete old ones first, then bulk insert
+            SearchResult.objects.filter(queue_item=qi).delete()
+            SearchResult.objects.bulk_create([
+                SearchResult(
+                    queue_item=qi,
+                    wanted_item=qi.wanted_item,
+                    username=r['username'],
+                    filename=r['filename'],
+                    file_size=r['size'],
+                    file_extension=r['extension'],
+                    bitrate=r.get('bitrate'),
+                    bit_depth=r.get('bit_depth'),
+                    sample_rate=r.get('sample_rate'),
+                    match_score=r['match_score'],
+                    upload_speed=r.get('upload_speed'),
+                    queue_length=r.get('queue_length'),
+                    free_upload_slots=r.get('free_slots', False),
+                    is_locked=r.get('is_locked', False),
+                )
+                for r in scored[:50]
+            ])
 
-        # Update queue item
-        qi.refresh_from_db()
-        qi.search_count += 1
-        qi.last_searched = timezone.now()
-        if scored:
-            qi.best_match_score = scored[0]['match_score']
-            qi.status = 'found'
-        else:
-            qi.best_match_score = 0
-            qi.status = 'not_found'
-        qi.save()
-
-        # Also update linked WantedItem if present
-        if qi.wanted_item:
-            try:
-                wi = qi.wanted_item
-                wi.search_count = qi.search_count
-                wi.last_searched = qi.last_searched
-                wi.best_match_score = qi.best_match_score
-                wi.status = 'found' if scored else 'not_found'
-                wi.save()
-            except Exception:
-                pass
-
-        logger.info(f"Search complete for '{qi}': {len(scored)} results")
-
-    except Exception as e:
-        logger.error(f"Background search failed for queue item {queue_item_id}: {e}")
-        try:
-            qi = SearchQueueItem.objects.get(id=queue_item_id)
-            qi.status = 'failed'
-            qi.error_message = str(e)[:500]
+            # Update queue item
+            qi.search_count += 1
+            qi.last_searched = timezone.now()
+            if scored:
+                qi.best_match_score = scored[0]['match_score']
+                qi.status = 'found'
+            else:
+                qi.best_match_score = 0
+                qi.status = 'not_found'
             qi.save()
-        except Exception:
-            pass
+
+            if qi.wanted_item_id:
+                WantedItem.objects.filter(pk=qi.wanted_item_id, status='searching').update(
+                    search_count=qi.search_count, last_searched=qi.last_searched,
+                    best_match_score=qi.best_match_score, status=qi.status,
+                )
+
+        logger.info("Soulseek search %s complete: %s results", queue_item_id, len(scored))
+
+    except Exception:
+        logger.exception("Background search failed for queue item %s", queue_item_id)
+        if 'attempt' in locals():
+            _fail_search(attempt, 'Search failed. Try again.')
     finally:
         db.connections.close_all()
+
+
+def _fail_search(attempt, message):
+    with transaction.atomic():
+        qi = attempt.select_for_update().first()
+        if qi is None:
+            return
+        qi.status = 'failed'
+        qi.error_message = message
+        qi.save(update_fields=['status', 'error_message', 'updated'])
+        if qi.wanted_item_id:
+            WantedItem.objects.filter(pk=qi.wanted_item_id, status='searching').update(
+                status='failed', error_message=message,
+            )
 
 
 # ── Search Queue ViewSet ─────────────────────────────────────
@@ -255,6 +275,22 @@ class SearchQueueViewSet(viewsets.ModelViewSet):
             SearchQueueItemSerializer(created, many=True).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=['post'], url_path='cancel-search')
+    def cancel_search(self, request, pk=None):
+        with transaction.atomic():
+            qi = SearchQueueItem.objects.select_for_update().filter(pk=pk).first()
+            if qi is None:
+                return Response({'error': 'Queue item not found'}, status=404)
+            if qi.status == 'searching':
+                qi.status = 'found' if qi.search_results.exists() else 'pending'
+                qi.error_message = ''
+                qi.save(update_fields=['status', 'error_message', 'updated'])
+                if qi.wanted_item_id:
+                    WantedItem.objects.filter(pk=qi.wanted_item_id, status='searching').update(
+                        status=qi.status, error_message='',
+                    )
+        return Response({'status': qi.status})
 
     @action(detail=False, methods=['post'], url_path='clear')
     def clear_queue(self, request):
@@ -365,28 +401,23 @@ def search(request):
     if not qi:
         return Response({'error': 'Could not resolve search target'}, status=400)
 
-    # Skip if already searching
-    if qi.status == 'searching':
-        return Response({
-            'status': 'already_searching',
-            'queue_item_id': qi.id,
-        })
-
-    # Mark as searching — atomic so queue/wanted status never diverge
     with transaction.atomic():
+        qi = SearchQueueItem.objects.select_for_update().filter(pk=qi.id).first()
+        if qi is None:
+            return Response({'error': 'Queue item not found'}, status=404)
+        if qi.status == 'searching':
+            return Response({'status': 'already_searching', 'queue_item_id': qi.id})
         qi.status = 'searching'
         qi.error_message = ''
-        qi.save()
-        if qi.wanted_item:
-            qi.wanted_item.status = 'searching'
-            qi.wanted_item.error_message = ''
-            qi.wanted_item.save()
+        qi.save(update_fields=['status', 'error_message', 'updated'])
+        if qi.wanted_item_id:
+            WantedItem.objects.filter(pk=qi.wanted_item_id).update(status='searching', error_message='')
 
     # Fire background thread after commit so it sees the 'searching' row
     def _start_search():
         threading.Thread(
             target=_run_search_for_queue_item,
-            args=(qi.id,),
+            args=(qi.id, qi.updated),
             daemon=True,
         ).start()
 

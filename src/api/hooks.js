@@ -172,6 +172,17 @@ export function useSearch() {
   })
 }
 
+export function useCancelSearch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api.post(`/soulseek/queue/${id}/cancel-search/`, {}),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['search-queue'] })
+      qc.invalidateQueries({ queryKey: ['wanted-items'] })
+    },
+  })
+}
+
 export function useSearchResults(queueItemId, queueItemStatus) {
   return useQuery({
     // Status is part of the key so a re-search (status flips searching→found)
