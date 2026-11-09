@@ -5,26 +5,29 @@ const REVEAL_URL = /^ocdj-reveal:\/\/track\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 // Reuse the exact same cached match as the Finder indicator. No staging here.
 export function useIndexedPlayback(track) {
-  const { data, isError } = useLibraryMatch(track.artist, track.title)
+  const archiveMatch = track.archiveLibraryMatch
+  const query = useLibraryMatch(archiveMatch ? '' : track.artist, archiveMatch ? '' : track.title)
   if (track.source?.kind === 'mac') return track
-  const id = !isError && data?.status === 'matched' && data.matches?.length === 1
-    ? data.matches[0].playback_id : null
+  const match = archiveMatch || (query.isError ? null : query.data)
+  const id = match?.status === 'matched' && match.matches?.length === 1
+    ? match.matches[0].playback_id : null
   return Number.isSafeInteger(id) && id > 0 ? { ...track,
     source: { kind: 'mac', libraryId: id }, start: 0, end: undefined,
     fallback: track, description: 'Indexed Mac library · temporary MP3 playback copy',
   } : track
 }
 
-export default function LibraryMatch({ artist, title }) {
-  const query = useLibraryMatch(artist, title)
+export default function LibraryMatch({ artist, title, archiveMatch }) {
+  const query = useLibraryMatch(archiveMatch ? '' : artist, archiveMatch ? '' : title)
+  const result = archiveMatch || (query.isError ? null : query.data)
   let label = 'Artist + title needed for library check'
   let state = 'unknown'
   let quality = ''
   let revealUrl
-  if (artist?.trim() && title?.trim()) {
+  if (archiveMatch || (artist?.trim() && title?.trim())) {
     label = query.isError ? 'Library check unavailable' : 'Checking library index…'
-    if (!query.isError && query.data) {
-      const { status, matches } = query.data
+    if (result) {
+      const { status, matches } = result
       label = {
         no_indexed_match: 'No indexed match',
         indexed_missing: 'Indexed file marked missing',
@@ -46,7 +49,8 @@ export default function LibraryMatch({ artist, title }) {
       }
     }
   }
-  const description = `${revealUrl ? 'Open in Finder · ' : ''}${label}. ${COVERAGE}`
+  const coverage = archiveMatch ? COVERAGE.replace('artist/title', 'Organize archive ID') : COVERAGE
+  const description = `${revealUrl ? 'Open in Finder · ' : ''}${label}. ${coverage}`
   const Indicator = revealUrl ? 'a' : 'span'
   return <Indicator className={`track-library-match track-library-match--${state}`}
     href={revealUrl} role={revealUrl ? undefined : 'img'} tabIndex={0}

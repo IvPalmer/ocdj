@@ -166,6 +166,24 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(payload['tracks'][0]['artist'], 'Fixture Artist')
         self.assertEqual(payload['tracks'][0]['title'], 'Tone (Dub)')
 
+    def test_snapshot_carries_only_unambiguous_organize_grouping_ids(self):
+        from mutagen.id3 import GRP1
+        from mutagen.wave import WAVE
+
+        for filename, texts in [('tagged.wav', ['ocdj:123']),
+                                ('unrelated.wav', ['personal grouping']),
+                                ('ambiguous.wav', ['ocdj:234', 'ocdj:345'])]:
+            path = self.audio(filename)
+            audio = WAVE(path)
+            audio.add_tags()
+            audio.tags.add(GRP1(encoding=3, text=texts))
+            audio.save()
+        payload, _ = self.scan()
+        snapshots.validate(payload)
+        self.assertEqual([row['archive_item_id'] for row in payload['tracks']
+                          if 'archive_item_id' in row], [123])
+        self.assertNotIn('personal grouping', json.dumps(payload))
+
     def test_size_cap_and_bad_envelopes(self):
         self.audio()
         payload, _ = self.scan()
