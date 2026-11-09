@@ -15,24 +15,46 @@ The five-post fixture remains a synthetic demonstration; cursor tests also cover
 256 posts/1,232 video children over 22 synthetic pages. This is not live QA.
 
 ```sh
-python -m unittest tools.instagram.test_connector -v
+python -m unittest tools.instagram.test_connector tools.instagram.test_foreground -v
 ```
 
-## Explicit Mac run
+## Explicit private Mac run
 
-Install `tools/instagram/requirements.txt` into a Mac-owned virtual environment.
-Use the **existing** `DRAIN_TOKEN` injection used by the drain connector; never
-paste a token on the command line, into the repo, or into a task comment.
+Use [the foreground operation](FOREGROUND.md) from an **already-authorized**
+Mac launch context, with the connector requirements installed in its active
+virtual environment. It reuses SSH to `main-instance` and the existing drain
+configuration; no public connector ingress or browser OAuth cookies are needed.
 
 ```sh
-python tools/instagram/connector.py --api https://YOUR-OCDJ-ORIGIN --profile 'Profile 1' --work-seconds 600
+(
+  source "$HOME/.config/ocdj/drain.env"
+  export DRAIN_TOKEN
+  python tools/instagram/foreground.py --seconds 600
+)
 ```
 
-No daemon, LaunchAgent, scheduled login or credentials are installed. A run
-syncs the complete metadata snapshot, then polls for selected-media/recognition jobs
-for the specified window (0–3600 seconds). At most ten jobs run per invocation; a job in progress finishes before
-exit. Run again to refresh playback after expiry or process later requests.
-The default window is zero: metadata sync and up to ten queued jobs, then exit.
+The wrapper discovers the existing production backend container address, opens
+an SSH forward bound only to Mac `127.0.0.1`, verifies authenticated validation
+with a rejected empty sync, and invokes the unchanged `connector.py` with Chrome
+Profile 1. The local port is a forwarding socket, never a local DB/API. The bearer
+stays in process memory/environment; it is never a command-line argument.
+
+One invocation runs for **at most 1–3600 seconds including setup**, plus bounded
+cleanup (up to eight seconds for two child process groups). Default: 600 seconds.
+It may exit earlier after ten jobs or a session/transport failure. Ctrl-C,
+SIGTERM and terminal hangup stop it; it kills its own connector/ffmpeg and SSH
+process groups and removes its owned temporary media directory. Closing a terminal,
+sleep/reboot, expired login or a lost tunnel requires a new explicit invocation.
+No daemon, LaunchAgent, worker bootstrap, login change or automatic retry is
+installed. This operation provides a temporary online window, not continuous
+availability. The UI becomes offline three minutes after the last heartbeat;
+startup/exit messages are process state, not proof of a live Instagram session.
+
+The raw connector's default work window is zero (sync and up to ten queued
+jobs). Its `--work-seconds` bounds idle waiting only and an active job may outlive
+it; use the wrapper for a hard deadline and cleanup. Do not run concurrent raw
+connectors alongside the wrapper. The wrapper prevents duplicate wrapper runs
+in the same user's temporary directory, but cannot detect independent raw runs.
 
 `yt-dlp` reads Chrome cookies on Mac; only Instagram domains enter the
 Instagram requests session. Cookies and CDN URLs remain in memory. The CDN
