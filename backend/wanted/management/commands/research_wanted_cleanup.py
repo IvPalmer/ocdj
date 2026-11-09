@@ -1,4 +1,4 @@
-"""Render a private review artifact from supplied JSON, without accessing models."""
+"""Render a private review artifact from JSON and explicit evidence/catalog mode."""
 import json
 from pathlib import Path
 
@@ -8,7 +8,7 @@ from wanted.services.cleanup_research import build_cleanup_proposal
 
 
 class Command(BaseCommand):
-    help = 'Dry-run Wanted cleanup research using a saved receipt and source title evidence'
+    help = 'Review-only Wanted cleanup research from a saved receipt and explicit evidence or catalog'
     requires_system_checks = []
 
     def add_arguments(self, parser):

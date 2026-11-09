@@ -23,7 +23,7 @@ class CleanupCatalogTests(SimpleTestCase):
                 'artistName': 'Synthetic Artist', 'trackName': 'Night Signal (Lena Remix)',
                 'trackViewUrl': 'https://music.apple.com/us/song/synthetic/161', **fields}
 
-    def lookup(self, rows=None, receipt=None, payload=None, error=None):
+    def lookup(self, rows=None, receipt=None, payload=None, error=None, body=None):
         from .services.cleanup_catalog import research_cleanup_catalog
         self.session = MagicMock()
         self.session.__enter__.return_value = self.session
@@ -32,7 +32,7 @@ class CleanupCatalogTests(SimpleTestCase):
         if payload is None:
             rows = [self.row()] if rows is None else rows
             payload = {'resultCount': len(rows), 'results': rows}
-        response.iter_content.return_value = [json.dumps(payload).encode()]
+        response.iter_content.return_value = [json.dumps(payload).encode() if body is None else body]
         self.session.get.side_effect = error
         with patch('wanted.services.preview.requests.Session', return_value=self.session):
             return research_cleanup_catalog(receipt if receipt is not None else self.receipt())
@@ -133,3 +133,11 @@ class CleanupCatalogTests(SimpleTestCase):
                     with self.assertRaises((ValueError, requests.RequestException)):
                         search_itunes_catalog('', 'Synthetic')
                 session.get.assert_called_once()
+
+    def test_deeply_nested_provider_payload_is_invalid_response(self):
+        row = json.dumps(self.row())[:-1].encode()
+        body = (b'{"resultCount":1,"results":[' + row + b',"extra":' +
+                b'[' * 2000 + b']' * 2000 + b'}]}')
+        result = self.lookup(body=body)
+        self.assertEqual(result['lookup']['status'], 'invalid_response')
+        self.assertEqual(result['evidence'], [])

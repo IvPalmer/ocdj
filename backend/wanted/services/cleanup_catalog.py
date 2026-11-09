@@ -54,7 +54,7 @@ def research_cleanup_catalog(receipt):
             evidence = _observations(search_itunes_catalog(metadata['artist'], metadata['title']))
         except requests.RequestException:
             lookup.update(status='transport_failure', reason='request_failed_without_retry')
-        except (ValueError, UnicodeError):
+        except (ValueError, RecursionError):
             lookup.update(status='invalid_response', reason='unusable_provider_response')
         else:
             proposal = build_cleanup_proposal(receipt, evidence)
