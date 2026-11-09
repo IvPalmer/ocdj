@@ -121,7 +121,7 @@ class AcceptedCleanupTests(TestCase):
 
     def cached(self, result=None, effect=None):
         from .tasks import recognize_cached
-        self.media.cache_key = 'synthetic'; self.media.cache_until = timezone.now() + timedelta(minutes=5)
+        self.media.cache_key = 'a' * 32; self.media.cache_until = timezone.now() + timedelta(minutes=5)
         self.media.queued = True; self.media.save()
         # No file/audio/provider access; close the coroutine at the asyncio boundary.
         def run(coroutine):
@@ -129,8 +129,9 @@ class AcceptedCleanupTests(TestCase):
             if effect:
                 effect()
             return result if result is not None else [self.candidate]
-        with patch('shutil.copyfile'), patch('asyncio.run', side_effect=run):
+        with patch('shutil.copyfile'), patch('asyncio.run', side_effect=run) as recognize:
             recognize_cached.call_local(self.media.pk)
+            recognize.assert_called_once()
 
     def test_cached_acceptance_and_task_redelivery(self):
         from .tasks import recognize_cached
@@ -166,8 +167,11 @@ class AcceptedCleanupTests(TestCase):
             capture_external_identification(**kwargs)
             # A real PostgreSQL error must be contained by the adapter savepoint.
             MetadataCleanup.objects.create(subject_key=f"external:{kwargs['event_id']}", snapshot={})
-        with patch('wanted.services.cleanup.capture_external_identification', side_effect=fail):
-            self.caption()
+        with patch('wanted.services.cleanup.dispatch') as dispatch:
+            with self.captureOnCommitCallbacks(execute=True):
+                with patch('wanted.services.cleanup.capture_external_identification', side_effect=fail):
+                    self.caption()
+            dispatch.assert_not_called()
         self.assertEqual(self.media.artist, self.candidate['artist'])
         self.assertFalse(MetadataCleanup.objects.exists())
         event = self.media.recognition['cleanup_event']
