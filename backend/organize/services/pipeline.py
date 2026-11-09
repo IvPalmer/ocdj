@@ -231,30 +231,125 @@ def _run_stage_step(item, *, source_stage, working_stage, done_stage, label, act
         return False
 
 
-def discover_and_ingest(download_id):
-    """Find a completed download on disk, move to 01_downloaded, create PipelineItem."""
+def _staged_candidates(download):
+    root = stage_folder_path('downloaded')
+    parts = download.filename.replace(chr(92), '/').split('/')[-2:]
+    if any(part in ('', '.', '..') for part in parts):
+        return set()
+    return {os.path.join(root, *parts), os.path.join(root, parts[-1])}
+
+
+def _staged_download_path(download, expected_size):
+    """Resolve slskd's staged layout with an exact suffix and transfer size."""
+    if not expected_size:
+        return None
+    root = stage_folder_path('downloaded')
+    matches = []
+    for path in _staged_candidates(download):
+        if os.path.realpath(path) != os.path.join(os.path.realpath(root), os.path.relpath(path, root)):
+            continue
+        try:
+            if os.path.isfile(path) and os.path.getsize(path) == expected_size:
+                matches.append(path)
+        except FileNotFoundError:
+            continue  # Another pipeline action moved it.
+    return matches[0] if len(matches) == 1 else None
+
+
+def _staged_transfer_evidence(downloads):
+    """Check transfer provenance before an orphan scan can move Soulseek bytes."""
+    from soulseek.services import SlskdClient
+    import requests
+
+    candidates = {dl.pk: {p for p in _staged_candidates(dl) if os.path.isfile(p)} for dl in downloads}
+    if not any(candidates.values()):
+        return {}, set()
+    try:
+        users = SlskdClient().get_downloads()
+    except requests.RequestException:
+        # Defer known candidates until slskd can confirm the association.
+        return {}, set().union(*candidates.values())
+    transfers = {}
+    for user in users:
+        for directory in user.get('directories', []):
+            for file in directory.get('files', []):
+                key = (user['username'].casefold(), file['filename'].casefold())
+                transfers.setdefault(key, []).append(file)
+
+    proven = {}
+    deferred = set()
+    for dl in downloads:
+        paths = candidates[dl.pk]
+        if not paths:
+            continue
+        found = transfers.get((dl.username.casefold(), dl.filename.casefold()), [])
+        if dl.slskd_id:
+            found = [f for f in found if f.get('id') == dl.slskd_id]
+        if len(found) != 1:
+            if found:
+                deferred.update(paths)
+            continue
+        flags = {part.strip() for part in (found[0].get('state') or '').split(',')}
+        if 'Completed' not in flags:
+            deferred.update(paths)
+        elif 'Succeeded' in flags:
+            size = found[0].get('size')
+            path = _staged_download_path(dl, size)
+            if path:
+                proven.setdefault(path, []).append((dl.pk, size))
+    sizes = {}
+    for path, claims in proven.items():
+        deferred.add(path)
+        if len(claims) == 1:
+            pk, size = claims[0]
+            sizes[pk] = size
+    return sizes, deferred
+
+
+def _lock_staged_path(path):
+    # The orphan scan and completed-transfer ingest run in separate processes.
+    if db.connection.vendor == 'postgresql':
+        with db.connection.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(172808, hashtext(%s))', [path])
+
+
+@db.transaction.atomic
+def discover_and_ingest(download_id, expected_size=None):
+    """Link a proven completed download to its staged pipeline item."""
     from organize.models import PipelineItem
     from soulseek.models import Download
 
-    dl = Download.objects.get(id=download_id)
+    dl = Download.objects.select_for_update().get(id=download_id)
 
     # Skip if already ingested
     if PipelineItem.objects.filter(download=dl).exists():
         return None
 
-    # Find the file
-    filepath = dl.local_path or reconstruct_download_path(dl)
-    if not os.path.exists(filepath):
-        logger.warning(f"File not found for download {dl.id}: {filepath}")
+    size = expected_size or (dl.search_result.file_size if dl.search_result_id else 0)
+    staged = _staged_download_path(dl, size)
+    filepath = dl.local_path or staged or reconstruct_download_path(dl)
+    if not os.path.isfile(filepath):
+        logger.warning("File not found for download %s", dl.id)
         return None
 
-    # Update download.local_path if not set
-    if not dl.local_path:
-        dl.local_path = filepath
-        dl.save(update_fields=['local_path'])
-
-    # Move to 01_downloaded
-    new_path = _move_to_stage(filepath, 'downloaded')
+    if filepath == staged:
+        _lock_staged_path(staged)
+        existing = list(PipelineItem.objects.select_for_update().filter(current_path=staged)[:2])
+        if existing:
+            if len(existing) == 1 and existing[0].download_id is None:
+                existing[0].download = dl
+                if existing[0].wanted_item_id is None:
+                    existing[0].wanted_item_id = dl.wanted_item_id
+                existing[0].save(update_fields=['download', 'wanted_item'])
+                dl.local_path = staged
+                dl.save(update_fields=['local_path'])
+            # Existing artifact stays in its current state, with its existing tags.
+            return None
+        if not os.path.isfile(staged):
+            return None
+        new_path = staged
+    else:
+        new_path = _move_to_stage(filepath, 'downloaded')
     if dl.local_path != new_path:
         dl.local_path = new_path
         dl.save(update_fields=['local_path'])
@@ -303,33 +398,36 @@ def scan_completed_downloads():
     ensure_pipeline_folders()
 
     # Pass 1 — Soulseek downloads
-    completed = Download.objects.filter(status='completed')
+    downloads = list(Download.objects.filter(status__in=('queued', 'downloading', 'completed')))
     already_tracked_dl = set(
         PipelineItem.objects.values_list('download_id', flat=True)
     )
+    sizes, deferred = _staged_transfer_evidence([dl for dl in downloads if dl.id not in already_tracked_dl])
     created_from_downloads = 0
     already_tracked = 0
     missing_files = 0
     errors = []
-    for dl in completed:
+    for dl in downloads:
+        size = sizes.get(dl.id)
+        if dl.status != 'completed' and size is None:
+            continue
         if dl.id in already_tracked_dl:
             already_tracked += 1
             continue
         try:
-            item = discover_and_ingest(dl.id)
+            item = discover_and_ingest(dl.id, expected_size=size) if size is not None else discover_and_ingest(dl.id)
             if item:
                 created_from_downloads += 1
+            elif PipelineItem.objects.filter(download=dl).exists():
+                already_tracked += 1
             else:
-                # discover_and_ingest returns None for "already ingested" or
-                # "file not on disk"; the tracked case is filtered above, so
-                # what's left here is a download whose bytes went missing.
                 missing_files += 1
         except Exception as e:
             logger.error(f"Error ingesting download {dl.id}: {e}")
             errors.append({'download_id': dl.id, 'error': str(e)})
 
     # Pass 2 — orphan audio files in 01_downloaded/
-    created_from_filesystem, fs_errors = _scan_filesystem_orphans()
+    created_from_filesystem, fs_errors = _scan_filesystem_orphans(deferred)
     errors.extend(fs_errors)
 
     return {
@@ -343,7 +441,7 @@ def scan_completed_downloads():
     }
 
 
-def _scan_filesystem_orphans():
+def _scan_filesystem_orphans(deferred):
     """Create PipelineItems for audio files in 01_downloaded/ that aren't tracked.
 
     Walks the stage folder recursively (handles `_to_triage/` and any
@@ -378,17 +476,17 @@ def _scan_filesystem_orphans():
             if ext not in AUDIO_EXTS:
                 continue
             full = os.path.join(dirpath, fn)
-            if full in tracked_paths:
+            if full in tracked_paths or full in deferred:
                 continue
             try:
-                PipelineItem.objects.create(
-                    download=None,
-                    wanted_item=None,
-                    original_filename=fn,
-                    current_path=full,
-                    stage='downloaded',
-                )
-                created += 1
+                with db.transaction.atomic():
+                    _lock_staged_path(full)
+                    if not os.path.isfile(full) or PipelineItem.objects.filter(current_path=full).exists():
+                        continue
+                    PipelineItem.objects.create(
+                        original_filename=fn, current_path=full, stage='downloaded',
+                    )
+                    created += 1
             except Exception as e:
                 logger.error(f'Failed to create PipelineItem for {full}: {e}')
                 errors.append({'path': full, 'error': str(e)})
@@ -509,10 +607,10 @@ def process_all_pending(already_claimed=False):
     return True
 
 
-def auto_ingest_download(download_id):
+def auto_ingest_download(download_id, expected_size=None):
     """Auto-trigger: discover file, create PipelineItem, process through pipeline."""
     try:
-        item = discover_and_ingest(download_id)
+        item = discover_and_ingest(download_id, expected_size)
         if item:
             process_pipeline_item(item.id)
     except Exception as e:

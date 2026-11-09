@@ -589,51 +589,32 @@ function OrganizePanel() {
           <>
           <div className="pipeline-table">
             <div className="pipeline-table__header">
-              <span className="col-file">Current filename</span>
-              <span className="col-meta">Tags</span>
-              <span className="col-stage">Stage</span>
-              <span className="col-source">Source</span>
+              <span>Track / file</span>
+              <span>Stage</span>
               <span className="col-actions">Actions</span>
             </div>
             {items.map(item => {
               const currentName = item.final_filename
                 || (item.current_path ? item.current_path.split('/').pop() : null)
                 || item.original_filename
-              const renamed = item.final_filename && item.original_filename
-                && item.final_filename !== item.original_filename
+              const credit = [item.artist, item.title].filter(Boolean).join(' — ')
+              const details = [item.album, item.label].filter(Boolean).join(' · ')
               return (
               <div key={item.id} className="pipeline-table__row">
-                <span className="col-file" title={item.current_path || currentName}>
-                  <span className="col-file__name">{currentName}</span>
-                  {renamed && (
-                    <span className="col-file__original" title={`Originally: ${item.original_filename}`}>
-                      was: {item.original_filename}
-                    </span>
-                  )}
-                </span>
-                <span className="col-meta">
-                  {item.artist || item.title ? (
-                    <>
-                      <span className="col-meta__main">
-                        {[item.artist, item.title].filter(Boolean).join(' — ')}
-                      </span>
-                      {(item.album || item.label) && (
-                        <span className="col-meta__sub">
-                          {[item.album, item.label].filter(Boolean).join(' · ')}
-                        </span>
-                      )}
-                    </>
-                  ) : '—'}
+                <span className="col-file">
+                  <span className="col-file__name" title={credit || currentName}>{credit || currentName}</span>
+                  {credit && <span className="col-file__original" title={item.current_path || currentName}>
+                    {currentName}
+                  </span>}
+                  {details && <span className="col-file__original" title={details}>{details}</span>}
                 </span>
                 <span className="col-stage">
                   <StagePill stage={item.stage} />
-                </span>
-                <span className="col-source">
-                  {item.metadata_source || '—'}
+                  {item.metadata_source && <span className="col-source">{item.metadata_source}</span>}
                 </span>
                 <span className="col-actions">
                   <TrackPlayback sourceOnly track={{
-                    artist: item.artist, title: item.title || currentName,
+                    pipelineId: item.id, artist: item.artist, title: item.title || currentName,
                     wantedId: item.wanted_item, source: directSource(item),
                     archiveLibraryMatch: item.archive_library_match,
                     description: 'Organize · server file',

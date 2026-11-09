@@ -135,6 +135,38 @@ class PipelineServiceTestCase(TestCase):
         self.assertIsNone(discover_and_ingest(download.id))
         self.assertEqual(PipelineItem.objects.count(), 1)
 
+    def test_link_staged_soulseek_file_without_changing_existing_tags(self):
+        path = self.write_file('01_downloaded', 'Release', 'audio.flac')
+        item = PipelineItem.objects.create(original_filename='audio.flac', current_path=path,
+                                           artist='Edited artist', metadata_source='manual')
+        download = Download.objects.create(username='fixture', filename=r'Share\Release\audio.flac',
+                                           status='completed')
+        self.assertIsNone(discover_and_ingest(download.id, expected_size=1234))
+        item.refresh_from_db()
+        self.assertIsNone(item.download_id)
+        self.assertIsNone(discover_and_ingest(download.id, expected_size=5))
+        item.refresh_from_db()
+        download.refresh_from_db()
+        self.assertEqual(item.download_id, download.id)
+        self.assertEqual(item.artist, 'Edited artist')
+        self.assertEqual(item.metadata_source, 'manual')
+        self.assertEqual(download.local_path, path)
+        self.assertEqual(PipelineItem.objects.count(), 1)
+
+    def test_scan_reserves_active_transfer_and_links_when_slskd_succeeds(self):
+        path = self.write_file('01_downloaded', 'Release', 'audio.flac')
+        dl = Download.objects.create(username='fixture', filename=r'Share\Release\audio.flac',
+                                     status='queued', slskd_id='fixture-transfer')
+        file = {'id': dl.slskd_id, 'filename': dl.filename, 'size': 5, 'state': 'InProgress'}
+        with patch('soulseek.services.SlskdClient') as client:
+            client.return_value.get_downloads.return_value = [
+                {'username': dl.username, 'directories': [{'files': [file]}]}
+            ]
+            self.assertEqual(scan_completed_downloads()['created'], 0)
+            file['state'] = 'Completed, Succeeded'
+            self.assertEqual(scan_completed_downloads()['created_from_downloads'], 1)
+        self.assertEqual(PipelineItem.objects.get(download=dl).current_path, path)
+
     # process_pipeline_item's finally block closes DB connections — correct for its
     # real caller (a background thread after the HTTP response already returned),
     # but it kills the connection Django's TestCase reuses across the class, so it
