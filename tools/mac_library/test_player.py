@@ -78,7 +78,14 @@ with sync_playwright() as playwright:
             setTimeout(() => config.events.onReady(), 0);
           }};
         """)
-        page.goto(BASE + '/library')
+        def visit(path):
+            # Each scenario reloads to reset the player/query cache. Let WebKit
+            # finish mocked fetches before destroying the prior document.
+            page.wait_for_load_state('networkidle')
+            page.goto(BASE + path)
+            page.wait_for_load_state('networkidle')
+
+        visit('/library')
         player = page.get_by_role('region', name='Persistent player')
         expect(page.get_by_role('link', name='Open in Finder')).to_have_attribute('href', REVEAL)
         page.get_by_role('button', name='Play Fixture artist — Mac tone', exact=True).click()
@@ -104,6 +111,7 @@ with sync_playwright() as playwright:
         player.get_by_role('button', name='Previous track').click()
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
         page.get_by_role('link', name='Wanted', exact=True).click()
+        page.wait_for_load_state('networkidle')
         expect(player.get_by_text('Queue (2)', exact=True)).to_be_visible()
         # Shared controls have exactly one pair of actions; Finder is always last.
         def controls(label):
@@ -113,7 +121,7 @@ with sync_playwright() as playwright:
             expect(page.get_by_role('button', name='Play library ' + label, exact=True)).to_have_count(0)
             return play
 
-        page.goto(BASE + '/wanted')
+        visit('/wanted')
         play = controls('Fixture artist — Wanted checked')
         expect(play).to_be_visible()  # Mac available even when catalog lookup found nothing.
         finder = page.locator('tr').filter(has=play).get_by_role('link', name='Open in Finder')
@@ -138,7 +146,7 @@ with sync_playwright() as playwright:
 
         # No exact Mac match keeps normal Wanted preview behavior and never prepares.
         match_status[0] = 'no_indexed_match'
-        page.goto(BASE + '/wanted')
+        visit('/wanted')
         expect(page.get_by_text('No catalog preview found.')).to_be_visible()
         before = len(prepares)
         controls('Fixture artist — Wanted preview').click()
@@ -147,7 +155,7 @@ with sync_playwright() as playwright:
 
         # Recognize exact match -> Mac offline -> original mix with original bounds.
         match_status[0] = 'matched'
-        page.goto(BASE + '/recognize')
+        visit('/recognize')
         play = controls('Fixture artist — Mix segment')
         expect(page.get_by_role('link', name='Open in Finder')).to_be_visible()
         assert play.evaluate('e => e.closest(".track-controls").lastElementChild.matches("a.track-library-match")')
@@ -158,7 +166,7 @@ with sync_playwright() as playwright:
         # Ambiguous/absent Mac matches retain normal Recognize playback.
         for status in ('no_indexed_match', 'multiple_matches'):
             match_status[0] = status
-            page.goto(BASE + '/recognize')
+            visit('/recognize')
             before = len(prepares)
             controls('Fixture artist — Mix segment').click()
             page.wait_for_function("window.adapterCalls.some(c => c[0] === 'play')")
@@ -170,7 +178,7 @@ with sync_playwright() as playwright:
         match_status[0] = 'matched'
         library_preview[0] = True
         mode[0] = 'pending'
-        page.goto(BASE + '/library')
+        visit('/library')
         before = len(prepares)
         controls('Fixture artist — Mac tone').click()
         expect(player.get_by_text('Waiting for Mac audio… The Mac connector must be running.')).to_be_visible()
