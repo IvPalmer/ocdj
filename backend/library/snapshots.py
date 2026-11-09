@@ -75,7 +75,7 @@ def read_audio(handle, fmt, size):
         return None
 
 
-def scan(root, collection_id, key):
+def scan(root, collection_id, key, *, local_paths=None):
     """Explicit root; ID3/TraxDB and symlinks are outside this snapshot's scope.
 
     Errors make the snapshot non-exportable. No filename-derived identity tags.
@@ -138,6 +138,8 @@ def scan(root, collection_id, key):
                 phase = 'metadata_validation'
                 validate_row(row)
                 rows.append(row)
+                if local_paths is not None:
+                    local_paths[row['id']] = os.fsdecode(relative)
                 counts['readable'] += 1
                 counts['tagged_identity'] += bool(row['artist'] and row['title'])
                 counts['measured_quality'] += bool(row['bitrate'] and row['sample_rate'])

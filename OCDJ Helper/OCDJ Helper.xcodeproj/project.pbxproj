@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A04000000000000000000001 /* FinderReveal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04000000000000000000002; };
 		475FA7932F91D9C600153852 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475FA7922F91D9C600153852 /* AppDelegate.swift */; };
 		475FA7972F91D9C600153852 /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7952F91D9C600153852 /* Main.html */; };
 		475FA7992F91D9C600153852 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 475FA7982F91D9C600153852 /* Icon.png */; };
@@ -53,6 +54,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A04000000000000000000002 /* FinderReveal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FinderReveal.swift; sourceTree = "<group>"; };
 		475FA78F2F91D9C600153852 /* OCDJ Helper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OCDJ Helper.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		475FA7922F91D9C600153852 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		475FA7962F91D9C600153852 /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				475FA7922F91D9C600153852 /* AppDelegate.swift */,
+				A04000000000000000000002 /* FinderReveal.swift */,
 				475FA79E2F91D9C600153852 /* ViewController.swift */,
 				475FA7A02F91D9C600153852 /* Main.storyboard */,
 				475FA7A32F91D9C700153852 /* Assets.xcassets */,
@@ -284,6 +287,7 @@
 			files = (
 				475FA79F2F91D9C600153852 /* ViewController.swift in Sources */,
 				475FA7932F91D9C600153852 /* AppDelegate.swift in Sources */,
+				A04000000000000000000001 /* FinderReveal.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -447,7 +451,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -482,7 +486,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -520,7 +524,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -562,7 +566,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;

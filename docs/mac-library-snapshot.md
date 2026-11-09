@@ -152,3 +152,11 @@ then obtain an error-free aggregate dry run. Do not import the readable subset a
 complete or equate unmatched/untagged tracks with verified absence. Mac playback
 is separate work requiring an authorized source route; these IDs cannot be used
 to open Mac files on the VPS and this slice provides no audio endpoint.
+
+## Optional local Finder sidecar (#40)
+
+`--local-reveal-map` explicitly opts into a separate mode-0600 local ID-to-relative-
+path map for the existing sandboxed OCDJ Helper. The exported server JSON and
+scan/ID policy stay unchanged. With the same root/scope, collection UUID and key,
+the sidecar can be populated without another server import. See
+[the local map, permission and release contract](MAC-FINDER-REVEAL-40.md).

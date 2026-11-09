@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
 from library.snapshots import SnapshotError, scan, write_snapshot
+from reveal_map import default_map_path, write_reveal_map
 
 
 def main():
@@ -17,10 +18,12 @@ def main():
     parser.add_argument('--export', metavar='NEW_PRIVATE_JSON')
     parser.add_argument('--collection-id', help='Stable UUID for this root and exclusion scope')
     parser.add_argument('--key-file', help='Existing private file containing exactly 32 random bytes')
+    parser.add_argument('--local-reveal-map', action='store_true',
+                        help='Atomically refresh the private map in OCDJ Helper’s sandbox; no server export required')
     args = parser.parse_args()
     try:
-        if args.export and not (args.collection_id and args.key_file):
-            raise SnapshotError('Export requires a stable collection UUID and private key file.')
+        if (args.export or args.local_reveal_map) and not (args.collection_id and args.key_file):
+            raise SnapshotError('Export or local map requires a stable collection UUID and private key file.')
         key = b'\0' * 32  # Ephemeral dry run only; IDs are never emitted.
         if args.key_file:
             fd = os.open(args.key_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -31,13 +34,20 @@ def main():
                 key = handle.read(33)
                 if len(key) != 32:
                     raise SnapshotError('Key must contain exactly 32 bytes.')
-        payload, counts = scan(args.root, args.collection_id or '00000000-0000-0000-0000-000000000000', key)
-        print(json.dumps(dict(mode='export' if args.export else 'dry_run', complete=payload['complete'], **counts), sort_keys=True))
+        local_paths = {} if args.local_reveal_map else None
+        payload, counts = scan(args.root, args.collection_id or '00000000-0000-0000-0000-000000000000', key,
+                               local_paths=local_paths)
+        print(json.dumps(dict(mode='export' if args.export else ('local_map' if args.local_reveal_map else 'dry_run'), complete=payload['complete'], **counts), sort_keys=True))
+        if args.local_reveal_map:
+            destination = default_map_path()
+            if not destination.parents[3].is_dir():
+                raise SnapshotError('Launch the installed helper once to initialize its sandbox before creating a local map.')
+            write_reveal_map(destination, payload, args.root, local_paths)
         if args.export:
             write_snapshot(args.export, payload)
         return 0 if payload['complete'] else 2
     except (SnapshotError, OSError, ValueError):
-        print('Snapshot refused: check root, identity, key, completeness and new private destination.', file=sys.stderr)
+        print('Snapshot refused: check root, identity, key, completeness and private destinations (launch the helper once before creating its local map).', file=sys.stderr)
         return 2
 
 
