@@ -162,6 +162,9 @@ services:
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
       - instagram_cache:/app/.cache/instagram
+    # Stable destination for the existing private Mac SSH forwards.
+    ports:
+      - "127.0.0.1:18002:8002"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8002/api/core/health/ || exit 1"]
       interval: 30s

@@ -318,7 +318,7 @@ class ThumbnailCapture:
 
 
 class API:
-    def __init__(self, base, token):
+    def __init__(self, base, token, *, resident=False):
         u = urlsplit(base)
         if u.scheme != 'https' and not (u.scheme == 'http' and u.hostname in ['localhost', '127.0.0.1']):
             raise ConnectorError('API requires HTTPS')
@@ -327,6 +327,8 @@ class API:
         self.base = base.rstrip('/')+'/api/instagram/connector/'
         self.session = requests.Session()
         self.session.headers['Authorization'] = 'Bearer '+token
+        self.recovery_port = u.port if resident and u.scheme == 'http' and u.hostname == '127.0.0.1' else None
+        self.token = token
 
     def post(self, endpoint, data=None, files=None, lease=None, timeout=90):
         headers = {'X-Instagram-Lease': lease} if lease else None
@@ -337,8 +339,18 @@ class API:
         # exactly once, including a claim whose response may have been lost.
         try:
             r = safe_request(send) if endpoint == 'heartbeat/' else send()
-        except (requests.ConnectionError, requests.Timeout):
-            raise ConnectorError('ambiguous-transport') from None
+        except (requests.ConnectionError, requests.Timeout, ConnectorError) as exc:
+            if not self.recovery_port:
+                if isinstance(exc, ConnectorError):
+                    raise
+                raise ConnectorError('ambiguous-transport') from None
+            try:
+                wait_backend(self.recovery_port, self.token)
+            except RunError:
+                raise ConnectorError('network-unavailable') from None
+            # The failed request is never resent. Server leases fence any
+            # unknown claim, upload or completion before future polls.
+            return None
         if r.status_code == 204: return None
         if r.status_code == 409: return None  # expired result; server owns fencing
         if r.status_code != 200: raise ConnectorError('API request failed')
@@ -356,6 +368,7 @@ def ffmpeg_path():
 # Keep the exact ffmpeg/Shazam sampling path shared with the existing backend.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.instagram.recognition import recognize, explicit_candidates
+from tools.instagram.foreground import RunError, wait_backend
 
 
 def run(args):
@@ -365,7 +378,7 @@ def run(args):
         raise ConnectorError('keychain-prompt-requires-live-resident')
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token: raise ConnectorError('DRAIN_TOKEN missing')
-    api = API(args.api, token)
+    api = API(args.api, token, resident=resident)
     if resident and args.fixture:
         raise ConnectorError('resident-fixture-disallowed')
     ffmpeg = ffmpeg_path() if args.fixture else None
@@ -379,10 +392,10 @@ def run(args):
             session = instagram_session(args.profile, allow_keychain_prompt=not resident or allow_prompt)
             data, urls = read_collection(session, thumbnail_urls=thumbnail_urls)
         synced = api.post('sync/', data)
-        mapping = synced['media']
-        thumbnails = ThumbnailCapture(synced, thumbnail_urls)
+        mapping = (synced or {}).get('media', [])
+        thumbnails = ThumbnailCapture(synced or {}, thumbnail_urls)
         api.post('heartbeat/', {'status': 'ready'})
-        refresh_at = time.monotonic() + 3600
+        refresh_at = time.monotonic() + (3600 if synced is not None else 60)
         last_poll = time.time()
         # One original at a time; TemporaryDirectory owns every local byte.
         with tempfile.TemporaryDirectory(prefix='ocdj-instagram-') as directory:
@@ -411,8 +424,10 @@ def run(args):
                     thumbnail_urls = {}
                     data, _ = read_collection(session, thumbnail_urls=thumbnail_urls)
                     synced = api.post('sync/', data)
-                    thumbnails = ThumbnailCapture(synced, thumbnail_urls)
-                    refresh_at = time.monotonic() + 3600
+                    if synced is not None:
+                        thumbnails = ThumbnailCapture(synced, thumbnail_urls)
+                    # A lost sync result waits for a fresh collection read.
+                    refresh_at = time.monotonic() + (3600 if synced is not None else 60)
                 job = api.post('claim/')
                 if job:
                     jobs += 1

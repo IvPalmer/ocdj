@@ -12,6 +12,8 @@ import subprocess
 import sys
 import time
 
+import requests
+
 from tools.instagram import foreground as transport
 from tools.mac_library import helper
 
@@ -64,25 +66,28 @@ def playback(config):
         data = helper.load_map(Path(config['map']), config['root'])
         fd = helper.open_absolute(config['root'], directory=True)
         os.close(fd)
-        address = transport.backend_address()
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
         tunnel = None
         try:
-            tunnel = subprocess.Popen(
-                transport.SSH + ['-N', '-o', 'ExitOnForwardFailure=yes', '-L',
-                                 f'127.0.0.1:{port}:{address}:8002', 'main-instance'],
-                env=transport.clean_env(), start_new_session=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            tunnel = transport.start_tunnel(port)
             transport.wait_tunnel(tunnel, port, time.monotonic() + 15)
-            api = helper.API(f'http://127.0.0.1:{port}', os.environ['DRAIN_TOKEN'])
+            token = os.environ['DRAIN_TOKEN']
+            transport.wait_backend(port, token)
+            api = helper.API(f'http://127.0.0.1:{port}', token)
             observed = 0
             while True:
                 if tunnel.poll() is not None:
                     raise helper.Refused()
-                # Claims/completions are sent once; all transport errors unwind.
-                helper.serve_one(api, data, ffmpeg=config['ffmpeg'])
+                try:
+                    helper.serve_one(api, data, ffmpeg=config['ffmpeg'])
+                except (requests.ConnectionError, requests.Timeout):
+                    event('playback-waiting-for-backend')
+                    # The prior attempt is over. The server skips live leases
+                    # and the next iteration starts a fresh claim.
+                    transport.wait_backend(port, token)
+                    continue
                 if time.monotonic() >= observed:
                     event('playback-poll-completed')
                     observed = time.monotonic() + 60
