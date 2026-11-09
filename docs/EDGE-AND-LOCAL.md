@@ -67,6 +67,12 @@ empty library is usually a daemon that has stopped, not data loss —
 are already incompressible, so compression only costs throughput: measured on a
 144 MB AIFF from this VPS, `-az` gave 16.5 MB/s and `-a` gave 37 MB/s.
 
+Optional Instagram resident and indexed-library playback login restoration now
+has a reviewed source installer in [tools/mac_login](../tools/mac_login/README.md).
+Its installed copies still live outside Git. It stages for the next GUI login
+without restarting existing workers; Instagram access must be verified in that
+launch context. No installation or live verification is implied by this source.
+
 ## Safari extension: build and signing
 
 Source in `ocdj-helper/` (the connected variant) and `OCDJ Helper/` (the Xcode

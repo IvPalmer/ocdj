@@ -1,0 +1,24 @@
+name: Mac login restore synthetic fixtures
+on:
+  pull_request:
+    paths:
+      - 'tools/mac_login/**'
+      - 'tools/mac_library/**'
+      - 'tools/instagram/**'
+      - '.github/workflows/mac-login.yml'
+jobs:
+  login:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install requests==2.32.3 mutagen==1.47.0 imageio-ffmpeg Pillow
+      - name: Synthetic lifecycle, installation and audio; no launchctl or real SSH
+        run: |
+          export TEST_FFMPEG="$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')"
+          python -m unittest tools.mac_login.test_restore tools.instagram.test_connector tools.instagram.test_foreground tools.instagram.test_resident tools.mac_library.test_helper -v

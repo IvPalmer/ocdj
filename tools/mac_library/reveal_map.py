@@ -5,8 +5,6 @@ import stat
 import tempfile
 from pathlib import Path
 
-from library.snapshots import EXCLUDED, MAX_BYTES, SnapshotError, validate
-
 
 def default_map_path():
     return (Path.home() / 'Library/Containers/com.ocdj.OCDJHelperApp/Data/Library/'
@@ -15,6 +13,9 @@ def default_map_path():
 
 def write_reveal_map(destination, payload, root, paths):
     """Replace only the local sidecar, atomically, after a complete validated scan."""
+    # Playback needs only default_map_path; snapshot dependencies stay with export.
+    from library.snapshots import EXCLUDED, MAX_BYTES, SnapshotError, validate
+
     validate(payload)
     root = Path(root).expanduser().resolve(strict=True)
     if set(paths) != {row['id'] for row in payload['tracks']}:
