@@ -93,7 +93,7 @@ for (const root of roots) {
         await pause();
       }
       assert.equal(f.w.document.querySelectorAll('.ocdj-btn-group').length, 1);
-      click(f.w, '.ocdj-play-btn'); click(f.w, '.ocdj-dig-btn');
+      click(f.w, '.ocdj-play-btn'); click(f.w, '[title="Add the whole Bandcamp release"]');
       assert.match(f.messages[0].data.embedUrl, /album=123/);
       assert.equal(f.messages[1].data.release_name, 'Release');
       assert.equal(f.messages[1].data.source_site, 'bandcamp');

@@ -179,12 +179,24 @@
       });
       group.appendChild(queueBtn);
 
+      const albumPage = window.location.pathname.startsWith('/album/');
       const btn = OCDJ.createDigButton({
         size: 'large',
-        tooltip: 'Add to Wantlist',
-        onClick: () => OCDJ.sendToBackground('dig:add', wantedPayload(focusedTrack(extractTralbumData()))),
+        label: albumPage ? 'Wantlist track' : 'Wantlist',
+        tooltip: albumPage ? 'Add the track selected in the Bandcamp player' : 'Add this track to Wantlist',
+        onClick: () => {
+          const track = focusedTrack(extractTralbumData());
+          if (albumPage && !track) return { error: 'Select a track in the player, or use Wantlist release.' };
+          return OCDJ.sendToBackground('dig:add', wantedPayload(track));
+        },
       });
       group.appendChild(btn);
+      if (albumPage) {
+        group.appendChild(OCDJ.createDigButton({
+          size: 'large', label: 'Wantlist release', tooltip: 'Add the whole Bandcamp release',
+          onClick: () => OCDJ.sendToBackground('dig:add', wantedPayload()),
+        }));
+      }
 
       buyArea.parentElement.insertBefore(group, buyArea.nextSibling);
     }
