@@ -63,8 +63,12 @@ Instagram requests session. Cookies and CDN URLs remain in memory. The CDN
 session is separate and cookie-free. No raw browser cookie export is created.
 Only metadata, video bytes, and artist/title candidates go to OCDJ. Chrome
 Keychain/profile access must already be available in the chosen Mac context.
-The no-UI native Keychain adapter never prompts or falls back to the CLI helper;
-its caller identity/access must be verified separately from the old helper.
+Resident mode defaults to the no-UI native Keychain adapter, with no CLI
+fallback. Explicit foreground `--resident --allow-keychain-prompt` uses yt-dlp's
+existing macOS CLI helper once at startup; legacy bounded runs keep that helper.
+No hourly/wake refresh or transport retry extracts cookies again. Helper denial
+is sanitized as `keychain-access-required` and stops without fallback or retry.
+See [the runbook](FOREGROUND.md) for the operator gate and launch constraints.
 
 `imageio-ffmpeg` supplies the temporary standalone binary that avoids the
 broken Homebrew ffmpeg. Preflight runs `-version`. `INSTAGRAM_FFMPEG` can
