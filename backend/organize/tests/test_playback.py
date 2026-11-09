@@ -58,7 +58,6 @@ class PipelinePlaybackTests(PlaybackFixture, TestCase):
             self.assertEqual(response['Cache-Control'], 'private, no-store')
             if value:
                 self.assertEqual(response['Content-Range'], f'bytes {start}-{end}/{len(raw)}')
-            response.close()
         head = self.client.head(self.url, HTTP_RANGE='bytes=4-7')
         self.assertEqual(head.status_code, 206)
         self.assertEqual(head.content, b'')
@@ -100,7 +99,6 @@ class PipelinePlaybackTests(PlaybackFixture, TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(b''.join(response.streaming_content), target.read_bytes())
-        response.close()
 
     def test_roots_symlinks_traversal_and_file_types(self):
         outside = self.root / 'outside.wav'
@@ -132,4 +130,3 @@ class PipelinePlaybackTests(PlaybackFixture, TestCase):
         PipelineItem.objects.filter(pk=self.item.pk).update(current_path=str(self.path))
         response = self.client.get(self.url, {'path': str(outside)})
         self.assertEqual(b''.join(response.streaming_content), self.path.read_bytes())
-        response.close()
