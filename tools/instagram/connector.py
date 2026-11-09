@@ -184,7 +184,7 @@ def download(url, dest, *, image_only=False):
     with requests.get(cdn_url(url), stream=True, timeout=(3, 3) if image_only else (10, 45),
                       headers={'Accept-Encoding': 'identity'} if image_only else None,
                       allow_redirects=False) as r:
-        if image_only and r.status_code in (301, 302, 303, 307, 308, 401, 403, 429):
+        if r.status_code in (301, 302, 303, 307, 308, 401, 403, 429):
             raise ConnectorError({401: 'session-expired', 429: 'rate-limited'}.get(r.status_code, 'restricted'))
         mime = r.headers.get('Content-Type', '').split(';')[0]
         allowed = ['image/jpeg', 'image/png'] if image_only else ['video/mp4', 'image/jpeg', 'image/png']

@@ -47,6 +47,17 @@ class RetryTests(unittest.TestCase):
                 api.session.post.assert_called_once()
                 sleep.assert_not_called()
 
+    def test_video_cdn_restrictions_also_fail_closed(self):
+        from unittest.mock import MagicMock
+        for code, status in [(302, 'restricted'), (401, 'session-expired'), (403, 'restricted'), (429, 'rate-limited')]:
+            response = MagicMock(status_code=code)
+            response.__enter__.return_value = response
+            with patch.object(c, 'cdn_url', return_value='https://synthetic.invalid/'), \
+                 patch.object(c.requests, 'get', return_value=response) as request, \
+                 self.assertRaisesRegex(c.ConnectorError, '^' + status + '$'):
+                c.download('https://synthetic.invalid/', Path('/unused-synthetic'))
+            request.assert_called_once()
+
     def test_heartbeat_recovers_but_auth_rejection_stops(self):
         api = c.API('https://fixture.invalid', 'synthetic')
         ok = Mock(status_code=200); ok.json.return_value = {}
@@ -257,6 +268,31 @@ class MacAccessTests(unittest.TestCase):
         with patch.object(mac_access.ctypes, 'CDLL', return_value=security), self.assertRaises(RuntimeError):
             mac_access.keyring_password('Chrome', Mock())
         security.SecKeychainFindGenericPassword.assert_not_called()
+
+    def test_mac_extraction_uses_no_ui_helper_and_restores_upstream(self):
+        original = Mock(side_effect=AssertionError('prompting helper must never run'))
+        cookies = SimpleNamespace(_get_mac_keyring_password=original)
+        def extract(*args, **kwargs):
+            self.assertEqual(args, ('chrome',))
+            self.assertEqual(kwargs, {'profile': 'Profile 1'})
+            self.assertEqual(cookies._get_mac_keyring_password('Chrome', Mock()), b'synthetic')
+            return []
+        cookies.extract_cookies_from_browser = Mock(side_effect=extract)
+        with patch.dict('sys.modules', {'yt_dlp': SimpleNamespace(cookies=cookies)}), \
+             patch.object(c.sys, 'platform', 'darwin'), \
+             patch.object(mac_access, 'keyring_password', return_value=b'synthetic') as native:
+            with self.assertRaisesRegex(c.ConnectorError, 'session-expired'):
+                c.instagram_session('Profile 1')
+        native.assert_called_once()
+        original.assert_not_called()
+        self.assertIs(cookies._get_mac_keyring_password, original)
+
+    def test_missing_upstream_adapter_fails_closed(self):
+        cookies = SimpleNamespace(extract_cookies_from_browser=Mock())
+        with patch.dict('sys.modules', {'yt_dlp': SimpleNamespace(cookies=cookies)}), \
+             patch.object(c.sys, 'platform', 'darwin'), self.assertRaises(AttributeError):
+            c.instagram_session('Profile 1')
+        cookies.extract_cookies_from_browser.assert_not_called()
 
     def test_synthetic_key_is_freed_and_prior_policy_restored(self):
         security = Mock()

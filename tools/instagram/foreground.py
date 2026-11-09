@@ -151,7 +151,7 @@ def supervise(tunnel, child, deadline, reconnect=None):
 
 def preflight():
     try:
-        with COOKIE_DB.open('rb') as cookie_file:
+        with COOKIE_DB.open('rb', buffering=0) as cookie_file:
             header = cookie_file.read(16)
     except OSError:
         raise RunError('Chrome-Profile-1-unreadable-in-this-launch-context') from None

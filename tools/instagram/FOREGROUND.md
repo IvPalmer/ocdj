@@ -118,13 +118,18 @@ new invocation. To retain the old one-shot window, use `--seconds 600` without
 `--resident`; its hard deadline and ten-job cap remain. `--seconds` is ignored
 in resident mode.
 
+Long selected-media downloads/recognition still occupy the single worker and
+can exceed the three-minute heartbeat age. During such a job, online status can
+briefly age out even though the process remains alive. This PR does not add a
+second heartbeat writer or change recognition timing/backend status semantics.
+
 ## Verification, release and rollback
 
 ```sh
 python -m unittest tools.instagram.test_connector tools.instagram.test_foreground tools.instagram.test_resident -v
 ```
 
-56 DB-free synthetic tests cover the existing parser/thumbnail contracts,
+59 DB-free synthetic tests cover the existing parser/thumbnail contracts,
 more than ten jobs, idle residency, hourly and wake refresh, restriction stop,
 single-attempt ambiguous mutations, read/heartbeat retry budgets, same-worker
 transport recovery, auth failure, flap budget, native no-UI denial/restore/free
