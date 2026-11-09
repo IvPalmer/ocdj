@@ -112,6 +112,11 @@ class WantedItem(models.Model):
                                      if k in ('artist', 'title', 'cleanup_isrc')}
         return instance
 
+    def refresh_from_db(self, using=None, fields=None, from_queryset=None):
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+        self._loaded_metadata = {k: self.__dict__[k] for k in ('artist', 'title', 'cleanup_isrc')
+                                 if k in self.__dict__}
+
     def save(self, *args, **kwargs):
         # Central create boundary includes API/imports/Dig/Shazam/admin and the
         # existing Instagram wishlist without editing the other agent's files.

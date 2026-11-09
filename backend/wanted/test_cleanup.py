@@ -144,6 +144,19 @@ class CleanupIntegrationTests(TestCase):
         self.assertEqual(item.title, 'Human title')
         self.assertTrue(item.metadata_protected)
 
+    def test_refresh_then_stale_status_save_preserves_later_manual_correction(self):
+        item = self.item()
+        process_cleanup(self.receipt(item).pk)
+        item.refresh_from_db()
+        human = WantedItem.objects.get(pk=item.pk)
+        human.artist = 'Later human correction'
+        human.save(update_fields=['artist'])
+        item.status = 'found'
+        item.save()
+        item.refresh_from_db()
+        self.assertEqual(item.artist, 'Later human correction')
+        self.assertTrue(item.metadata_protected)
+
     def test_delete_preserves_original_receipt_and_prevents_apply(self):
         item = self.item()
         receipt = self.receipt(item)
