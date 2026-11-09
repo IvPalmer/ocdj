@@ -19,7 +19,10 @@ with sync_playwright() as playwright:
         page = browser.new_page()
         page.set_default_timeout(15000)
         errors, prepares = [], []
-        page.on('pageerror', lambda e: errors.append(str(e)))
+        stage = ['startup']
+        failed_requests = []
+        page.on('requestfailed', lambda r: failed_requests.append((stage[0], r.url, r.failure)))
+        page.on('pageerror', lambda e: errors.append((stage[0], str(e), e.stack)))
         mode = ['pending']
         match_status = ['matched']
         preview_requests = []
@@ -82,6 +85,7 @@ with sync_playwright() as playwright:
             # Each scenario reloads to reset the player/query cache. Let WebKit
             # finish mocked fetches before destroying the prior document.
             page.wait_for_load_state('networkidle')
+            stage[0] = f'visit {path} match={match_status[0]} mode={mode[0]}'
             page.goto(BASE + path)
             page.wait_for_load_state('networkidle')
 
@@ -110,6 +114,7 @@ with sync_playwright() as playwright:
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
         player.get_by_role('button', name='Previous track').click()
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
+        stage[0] = 'soft navigation to Wanted after Library queue'
         page.get_by_role('link', name='Wanted', exact=True).click()
         page.wait_for_load_state('networkidle')
         expect(player.get_by_text('Queue (2)', exact=True)).to_be_visible()
@@ -187,6 +192,6 @@ with sync_playwright() as playwright:
         page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
         page.wait_for_timeout(2100)
         assert len(prepares) == before + 1, f'Fallback must cancel Mac polling without resending: {prepares[before:]}'
-        assert not errors, errors
+        assert not errors, (errors, failed_requests)
         browser.close()
         print(f'PASS {engine}: Library normal entry, Finder, pending/offline/retry, real MP3 decode, pause, queue, next/previous, route continuity, Wanted lazy fallback, Recognize mix bounds, absent/ambiguous matches, persistent fallback choice; synthetic API only')
