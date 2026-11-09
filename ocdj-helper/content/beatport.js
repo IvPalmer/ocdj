@@ -1,13 +1,36 @@
 // Beatport track/release pages. Queue uses the existing YouTube search workflow;
-// Beatport has no supported native embed in the OCDJ player.
+// the native Beatport embed is not integrated into the OCDJ player/CSP.
 (() => {
   'use strict';
 
+  // Public pages may have a language prefix; IDs identify the recording/release.
+  const route = path => path.match(/^\/(?:[a-z]{2}\/)?(track|release)\/[^/]+\/(\d+)\/?$/);
+  const normalize = text => text.replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+  let metadata = '';
+  let group;
+  let enabled = false;
+
   function inject() {
-    const match = window.location.pathname.match(/^\/(track|release)\/[^/]+\/\d+\/?$/);
+    if (!enabled) return;
+    const match = route(window.location.pathname);
     if (!match) return;
     const heading = document.querySelector('h1');
-    if (!heading || OCDJ.isInjected(heading.parentElement)) return;
+    // Title/canonical may lag behind SPA navigation, including same-named tracks.
+    const canonical = document.querySelector('link[rel="canonical"]')?.href || '';
+    const currentMetadata = document.title + '|' + canonical;
+    if (metadata !== currentMetadata) {
+      group?.remove();
+      metadata = currentMetadata;
+    }
+    if (!heading) return;
+    if (canonical) {
+      let url;
+      try { url = new URL(canonical, window.location.href); } catch { return; }
+      const canonicalRoute = route(url.pathname);
+      if (!['www.beatport.com', 'beatport.com'].includes(url.hostname) ||
+          url.protocol !== 'https:' || !canonicalRoute ||
+          canonicalRoute[1] !== match[1] || canonicalRoute[2] !== match[2]) return;
+    }
 
     // Beatport's document title includes the primary artists and mix name;
     // global artist links also include charts/recommendations, so don't scrape them.
@@ -16,9 +39,8 @@
     const artist = split > 0 ? raw.slice(0, split).trim() : '';
     const title = split > 0 ? raw.slice(split + 3).trim() : '';
     // Wait for SPA metadata rather than sending the previous page's recording.
-    const headingText = heading.textContent.trim().replace(/\s+/g, ' ');
-    const normalizedTitle = title.replace(/[()]/g, '').replace(/\s+/g, ' ');
-    if (!artist || !title || normalizedTitle !== headingText) return;
+    if (!artist || !title || normalize(title) !== normalize(heading.textContent)) return;
+    if (OCDJ.isInjected(heading.parentElement)) return;
     const source_url = window.location.origin + window.location.pathname;
     const thumb = document.querySelector('meta[property="og:image"]')?.content || '';
     const queue = OCDJ.createPlayButton({
@@ -36,9 +58,18 @@
         source_site: 'beatport', source_url,
       }),
     });
-    const group = OCDJ.createButtonGroup(queue, wantlist);
+    group = OCDJ.createButtonGroup(queue, wantlist);
     heading.parentElement.appendChild(group);
   }
 
-  OCDJ.observePage(inject);
+  chrome.storage.local.get('siteSettings', ({ siteSettings = {} }) => {
+    enabled = siteSettings.beatport !== false;
+    OCDJ.observePage(inject);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.siteSettings) return;
+    enabled = changes.siteSettings.newValue?.beatport !== false;
+    group?.remove();
+    inject();
+  });
 })();
