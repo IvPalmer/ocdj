@@ -4,9 +4,13 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import pty
+import select
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -99,6 +103,63 @@ class LoginTests(unittest.TestCase):
         run.assert_called_once_with(600, resident=True, allow_keychain_prompt=False)
         self.assertNotIn('synthetic-only', output.getvalue())
         self.assertIn('no-retry', output.getvalue())
+
+    def test_login_worker_survives_terminal_hangup(self):
+        log = self.home / 'connector.log'
+        marker = self.home / 'terminal-closed'
+        worker = """import os, sys, time
+from pathlib import Path
+assert not os.isatty(0)
+print(os.getpid(), flush=True)
+while not Path(sys.argv[1]).exists():
+    time.sleep(0.05)
+for _ in range(600):
+    print('poll', flush=True)
+    time.sleep(0.05)
+"""
+        launcher = (
+            "from pathlib import Path; import sys, time; from tools.mac_login.restore import detach; "
+            "detach([sys.executable, '-u', '-c', sys.argv[2], sys.argv[3]], Path(sys.argv[1])); "
+            "print('ready', flush=True); time.sleep(30)"
+        )
+        pid, terminal = pty.fork()
+        if pid == 0:
+            os.execv(sys.executable, [sys.executable, '-c', launcher, str(log), worker, str(marker)])
+        worker_pid = None
+        try:
+            self.assertTrue(select.select([terminal], [], [], 5)[0])
+            self.assertEqual(os.read(terminal, 4096).strip(), b'ready')
+            os.close(terminal)
+            terminal = None
+            marker.touch()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                lines = log.read_text().splitlines()
+                if lines:
+                    worker_pid = int(lines[0])
+                if lines.count('poll') >= 2:
+                    break
+                time.sleep(0.05)
+            self.assertGreaterEqual(lines.count('poll'), 2)
+            self.assertEqual(os.getsid(worker_pid), worker_pid)
+            self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        finally:
+            if terminal is not None:
+                os.close(terminal)
+            for process in (pid, worker_pid):
+                if process is not None:
+                    try:
+                        os.kill(process, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+            os.waitpid(pid, 0)
+
+    def test_detach_refuses_nonprivate_log(self):
+        log = self.home / 'connector.log'
+        log.touch(mode=0o644)
+        with patch.object(subprocess, 'Popen') as spawn, self.assertRaises(helper.Refused):
+            restore.detach(['unused'], log)
+        spawn.assert_not_called()
 
     def test_playback_holds_real_singleton_and_cleans_tunnel_after_ambiguity(self):
         processes = []

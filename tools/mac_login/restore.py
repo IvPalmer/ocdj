@@ -47,6 +47,17 @@ def token_from_file(path):
     return values[0]
 
 
+def detach(command, log_path):
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+    with os.fdopen(os.open(log_path, flags, 0o600), 'ab') as log:
+        info = os.fstat(log.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_nlink != 1):
+            raise helper.Refused()
+        subprocess.Popen(command, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=log, stderr=subprocess.STDOUT, close_fds=True)
+
+
 def playback(config):
     # Same singleton as manual helper: no second worker even across launch contexts.
     with helper.singleton():
@@ -84,7 +95,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('instagram', 'playback'))
     parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--detach', action='store_true', help='Release the login Terminal session')
+    parser.add_argument('--allow-keychain-prompt', action='store_true',
+                        help='Permit the existing Instagram Keychain prompt in the GUI login context')
     args = parser.parse_args()
+    if args.allow_keychain_prompt and args.mode != 'instagram':
+        parser.error('--allow-keychain-prompt requires instagram')
+    if args.detach:
+        command = [sys.executable, '-u', '-m', 'tools.mac_login.restore',
+                   args.mode, '--config', str(args.config)]
+        if args.allow_keychain_prompt:
+            command.append('--allow-keychain-prompt')
+        try:
+            detach(command, args.config.with_name(args.mode + '.log'))
+        except (OSError, helper.Refused):
+            event(args.mode + '-launcher-failed; check private log and runtime')
+            return 1
+        return 0
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, transport.interrupted)
     event(args.mode + '-starting')
@@ -92,8 +119,7 @@ def main():
         config = json.loads(private_text(args.config))
         os.environ['DRAIN_TOKEN'] = token_from_file(config['token_file'])
         if args.mode == 'instagram':
-            # Login never opts into an unattended Keychain access prompt.
-            code = transport.run(600, resident=True, allow_keychain_prompt=False)
+            code = transport.run(600, resident=True, allow_keychain_prompt=args.allow_keychain_prompt)
         else:
             playback(config)
             code = 0
