@@ -1,5 +1,28 @@
 # Mac login restoration (#13)
 
+## Terminal login items on the production Mac
+
+Use the registered `OCDJ Instagram Connector.command` and
+`OCDJ Playback Connector.command` login items on the Mac where background
+LaunchAgents were denied access to the Chrome profile and playback map.
+While both connectors are stopped, stage the reviewed `restore.py` under
+`login-connectors/code/tools/mac_login/` and update the contents of both
+registered documents from [login.command](login.command). Keep the existing
+durable Python environment and private `config.json`. Keep both entries in
+Open at Login and avoid duplicate LaunchAgents.
+
+Each login item starts one worker in the existing GUI login context with no
+controlling Terminal or inherited Terminal I/O. The launcher can exit and its
+window can close while the worker keeps running. Inspect the corresponding
+private `instagram.log` or `playback.log` and verify fresh activity on the
+server. To stop a worker, send SIGTERM to the verified worker PID so it can
+clean up its owned SSH tunnel. An explicit start or the next login starts a
+new worker after exit. Authentication and ambiguous requests retain the existing
+stop behavior. To roll back, stop the workers and restore the prior launcher
+contents and staged module.
+
+## Background LaunchAgent alternative
+
 Opt-in per-user **GUI login** restoration for the existing Instagram resident and
 indexed-library audio connector. This is Mac connector tooling; `RUNTIME.md`
 continues to prohibit a local OCDJ DB/API. No VPS deployment is needed for this
