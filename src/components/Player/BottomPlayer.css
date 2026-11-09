@@ -20,6 +20,10 @@
   .layout .sidebar { position: sticky; top: 0; align-self: flex-start; height: calc(100dvh - var(--player-height, 100px)); }
 }
 
-.track-controls { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.track-library-match { display: block; font-size: 11px; color: var(--text-muted, #aaa); max-width: 230px; overflow-wrap: anywhere; }
-.track-library-coverage { display: block; opacity: .8; }
+.track-controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.track-playback { align-items: center; }
+.track-library-match { min-width: 24px; min-height: 24px; justify-content: center; display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 11px; line-height: 1.4; color: var(--text-secondary); white-space: nowrap; border-radius: 3px; }
+.track-library-match svg { flex: none; }
+.track-library-match--matched { color: var(--accent-green); }
+.track-library-match--warning { color: var(--accent-amber); }
+.track-library-match:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }

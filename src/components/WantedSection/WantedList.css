@@ -157,9 +157,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-.td-actions {
-  display: flex;
-  gap: 2px;
+/* Keep the cell in the table grid; align controls inside it. */
+.wanted-table .td-actions { white-space: nowrap; }
+.wanted-row-controls { display: inline-flex; align-items: center; gap: 4px; }
+.wanted-row-controls .track-controls { flex-wrap: nowrap; }
+.wanted-row-controls .btn { flex: none; min-height: 24px; }
+@media (max-width: 767px) {
+  .wanted-row-controls .btn { min-height: 44px; }
+  .wanted-row-controls .track-library-match { min-height: 44px; }
 }
 
 .empty-state {
