@@ -122,6 +122,7 @@ class ReleaseTests(unittest.TestCase):
         for caption in ['#FIX001', 'Love #FIX001 tonight', '#TECHNO2026 #DANCE2026',
                         '#FIX001 is in-stock\n[OTHER002] Other Label',
                         '[FIX001] Fixture Label\n#OTHER002',
+                        'Catalog: FIX001\n#OTHER002 is out now',
                         'FIX001 is up on Bandcamp today. OTHER002 too.',
                         '#FIX001 is in-stock?', '#FIX001 is not in-stock',
                         'https://example.test/FIX001 is in-stock',

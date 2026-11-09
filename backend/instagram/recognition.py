@@ -79,8 +79,8 @@ def explicit_candidates(caption, position, comments=(), *, media_count=None):
     return (candidates if len(candidates) == 1 else []), records
 
 
-def _caption_release_code(caption):
-    """Conservative fallback for common release posts without a Catalog field.
+def _caption_release_code(caption, catalog=''):
+    """Extract one catalog field or conservative common release caption code.
 
     A leading bracket is an explicit catalog position. Bare codes/hashtags
     need an immediate release predicate; generic tags alone prove nothing.
@@ -91,8 +91,12 @@ def _caption_release_code(caption):
     token = r'[a-zA-Z]{2,12}[0-9]{2,6}'
     codes = {m[0].upper() for m in re.finditer(
         r'(?<![\w/@.-])' + token + r'(?![\w-])', caption)}
+    if catalog:
+        codes.add(catalog.upper())
     if len(codes) != 1:
         return ''
+    if catalog:
+        return catalog
     code = codes.pop()
     for line in caption.splitlines():
         line = line.strip()
@@ -133,7 +137,7 @@ def release_candidates(caption, position, media_count):
             if key in fields and fields[key] != value:
                 return [], []
             fields[key] = value
-    code = fields.get('catalog') or _caption_release_code(caption[:10000])
+    code = _caption_release_code(caption[:10000], fields.get('catalog', ''))
     if not re.fullmatch(r'(?=.*[a-zA-Z])(?=.*[0-9])[a-zA-Z0-9 ._-]{2,60}', code):
         return [], []
     if media_count < 1 or (fields.get('track') and media_count != 1):
