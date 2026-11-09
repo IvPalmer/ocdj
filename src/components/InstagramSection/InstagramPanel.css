@@ -70,7 +70,7 @@
   overflow: hidden;
   border-radius: var(--r-sm);
 }
-.ig-cover video { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.ig-cover img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 
 .ig-grid-layout .ig-focus { position: sticky; top: var(--s-3); }
 @media (max-width: 900px) { .ig-grid-layout { grid-template-columns: minmax(0, 1fr); } .ig-grid-layout .ig-focus { position: static; } }

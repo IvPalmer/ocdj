@@ -19,6 +19,9 @@ class Post(models.Model):
     author = models.CharField(max_length=150, blank=True)
     caption = models.TextField(blank=True)
 
+    thumbnail_key = models.CharField(max_length=32, blank=True)
+    thumbnail_until = models.DateTimeField(null=True)
+
     class Meta:
         ordering = ['rank', 'pk']
 

@@ -1,11 +1,15 @@
 import re
+import base64
+import binascii
+import json
 import os
 import secrets
 from datetime import timedelta
+from django.core import signing
 from django.db import transaction
 from django.db.models import Q
 from django.core.files.uploadhandler import FileUploadHandler, StopUpload
-from django.http import StreamingHttpResponse, HttpResponse
+from django.http import StreamingHttpResponse, HttpResponse, FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view
@@ -15,8 +19,8 @@ from drain.auth import require_drain_token
 from wanted.models import WantedItem
 from wanted.services.preview import find_exact_preview
 from .models import Collection, Post, Media
-from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion
-from . import cache
+from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion, ThumbnailBatch
+from . import cache, thumbnails
 from .recognition import explicit_candidates
 
 
@@ -50,6 +54,7 @@ def workspace(request):
     return Response(dict(name=c.name, fixture=c.fixture, synced_at=c.synced_at,
                          connector_status=c.connector_status if online else 'offline',
                          posts=[dict(id=p.pk, author=p.author, caption=p.caption, permalink=p.permalink,
+                                     thumbnail_url=f'/api/instagram/posts/{p.pk}/thumbnail/?v={p.thumbnail_key}' if thumbnails.available(p, now) else None,
                                      media=[child_json(m) for m in p.media.all() if m.active]) for p in posts]))
 
 
@@ -146,7 +151,11 @@ def sync(request):
                     position=pos, kind=ch['kind'], active=True))
         c.synced_at = timezone.now(); c.fixture = data['fixture']; c.save()
     cache.cleanup()
-    return Response({'posts': len(data['posts']), 'media': list(Media.objects.filter(active=True, post__active=True).values('id', 'instagram_id', 'kind'))})
+    return Response({'posts': len(data['posts']),
+                     'sync_token': signing.dumps({'synced_at': c.synced_at.isoformat()}, salt='instagram-thumbnails'),
+                     'thumbnail_posts': [dict(post_id=p.instagram_id, available=thumbnails.available(p))
+                                         for p in c.posts.filter(active=True)],
+                     'media': list(Media.objects.filter(active=True, post__active=True).values('id', 'instagram_id', 'kind'))})
 
 
 @api_view(['POST'])
@@ -296,4 +305,78 @@ def stream(request, pk):
     response['Accept-Ranges'] = 'bytes'; response['Cache-Control'] = 'private, no-store'
     response['X-Content-Type-Options'] = 'nosniff'
     if code == 206: response['Content-Range'] = f'bytes {start}-{end}/{size}'
+    return response
+
+
+@api_view(['POST'])
+@require_drain_token
+def thumbnail_batch(request):
+    # JSON is bounded before parsing as well as by serializer item/field limits.
+    if int(request.META.get('CONTENT_LENGTH') or 0) > 3 * 1024 * 1024:
+        return Response(status=413)
+    if request.content_type != 'application/json':
+        return Response(status=415)
+    raw = request.stream.read(3 * 1024 * 1024 + 1) if request.stream else b''
+    if len(raw) > 3 * 1024 * 1024:
+        return Response(status=413)
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise ValidationError('Invalid JSON') from None
+    s = ThumbnailBatch(data=payload); s.is_valid(raise_exception=True)
+    data = s.validated_data
+    try:
+        generation = signing.loads(data['sync_token'], salt='instagram-thumbnails', max_age=3600)
+    except signing.BadSignature:
+        return Response({'error': 'stale sync'}, status=409)
+    results = []
+    with thumbnails.locked(), transaction.atomic():
+        c = Collection.objects.select_for_update().filter(instagram_id=COLLECTION_ID).first()
+        if not c or not c.synced_at or generation != {'synced_at': c.synced_at.isoformat()}:
+            return Response({'error': 'stale sync'}, status=409)
+        for item in data['thumbnails']:
+            post = c.posts.filter(instagram_id=item['post_id'], active=True).first()
+            result = dict(post_id=item['post_id'])
+            if not post:
+                result['status'] = 'inactive'
+            elif thumbnails.available(post):
+                result['status'] = 'available'
+            else:
+                try:
+                    raw = base64.b64decode(item['jpeg'], validate=True)
+                    key = thumbnails.store(raw)
+                except (binascii.Error, ValueError, ValidationError):
+                    result['status'] = 'retry'
+                else:
+                    previous = post.thumbnail_key
+                    try:
+                        post.thumbnail_key = key
+                        post.thumbnail_until = timezone.now() + thumbnails.TTL
+                        post.save(update_fields=['thumbnail_key', 'thumbnail_until'])
+                    except Exception:
+                        thumbnails.path(key).unlink(missing_ok=True)
+                        raise
+                    if previous:
+                        transaction.on_commit(lambda key=previous: thumbnails.path(key).unlink(missing_ok=True))
+                    result['status'] = 'available'
+            results.append(result)
+    return Response({'results': results}, headers={'Cache-Control': 'private, no-store'})
+
+
+@api_view(['GET', 'HEAD'])
+def thumbnail(request, pk):
+    # Same outer authenticated browser boundary as workspace/stream, never a
+    # connector bypass. The origin must remain private (see release matrix).
+    post = Post.objects.filter(pk=pk, active=True, thumbnail_until__gt=timezone.now()).first()
+    if not post:
+        return HttpResponse(status=404, headers={'Cache-Control': 'private, no-store'})
+    if not post.thumbnail_key:
+        return HttpResponse(status=410, headers={'Cache-Control': 'private, no-store'})
+    try:
+        f = thumbnails.path(post.thumbnail_key).open('rb')
+    except FileNotFoundError:
+        return HttpResponse(status=410, headers={'Cache-Control': 'private, no-store'})
+    response = FileResponse(f, content_type='image/jpeg')
+    response['Cache-Control'] = 'private, no-store'
+    response['X-Content-Type-Options'] = 'nosniff'
     return response

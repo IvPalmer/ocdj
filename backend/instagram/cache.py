@@ -27,6 +27,8 @@ def path(key):
 
 
 def cleanup():
+    from . import thumbnails
+    thumbnails.cleanup()
     from .models import Media
     now = timezone.now()
     Media.objects.filter(cache_until__lte=now).update(cache_key='', cache_until=None)

@@ -189,7 +189,7 @@ class WorkspaceTests(TestCase):
         self.assertEqual(self.complete(job, 'identified', []).status_code, 400)
 
     def test_auth_disabled_bad_and_valid(self):
-        routes = ['heartbeat/', 'sync/', 'claim/',
+        routes = ['heartbeat/', 'sync/', 'claim/', 'thumbnails/',
                   f'media/{self.media.pk}/upload/', f'media/{self.media.pk}/complete/']
         for route in routes:
             url = '/api/instagram/connector/'+route
@@ -371,3 +371,93 @@ class WorkspaceTests(TestCase):
         self.media.refresh_from_db()
         self.assertEqual((self.media.artist, self.media.title), ('Human', 'Correction'))
         self.assertEqual(self.media.candidates, [{'artist': 'New', 'title': 'Candidate'}])
+
+    def thumbnail_batch(self, items, token=None):
+        if token is None:
+            token = self.sync().data['sync_token']
+        return self.worker.post('/api/instagram/connector/thumbnails/',
+            dict(sync_token=token, thumbnails=items), format='json')
+
+    def thumbnail_item(self, post=None):
+        import base64
+        from .test_thumbnails import sample_jpeg
+        return dict(post_id=(post or self.media.post).instagram_id,
+                    jpeg=base64.b64encode(sample_jpeg()).decode('ascii'))
+
+    def test_thumbnail_partial_retry_idempotent_and_missing_file(self):
+        from . import thumbnails
+        posts = list(Post.objects.all())
+        items = [self.thumbnail_item(posts[0]), dict(post_id=posts[1].instagram_id, jpeg='not base64')]
+        token = self.sync().data['sync_token']
+        response = self.thumbnail_batch(items, token)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([r['status'] for r in response.data['results']], ['available', 'retry'])
+        posts[0].refresh_from_db(); key = posts[0].thumbnail_key
+        response = self.thumbnail_batch([self.thumbnail_item(posts[0]), self.thumbnail_item(posts[1])], token)
+        self.assertEqual([r['status'] for r in response.data['results']], ['available', 'available'])
+        posts[0].refresh_from_db(); self.assertEqual(posts[0].thumbnail_key, key)
+        thumbnails.path(key).unlink()
+        self.assertFalse(self.sync().data['thumbnail_posts'][0]['available'])
+        self.assertEqual(self.thumbnail_batch([self.thumbnail_item(posts[0])]).data['results'][0]['status'], 'available')
+        posts[0].refresh_from_db(); self.assertNotEqual(posts[0].thumbnail_key, key)
+
+    def test_thumbnail_outlives_video_and_offline_mac_preserves_state_and_order(self):
+        from . import thumbnails
+        self.media.artist = 'Human'; self.media.title = 'Track'; self.media.reviewed = True; self.media.save()
+        self.upload(); self.media.refresh_from_db()
+        self.thumbnail_batch([self.thumbnail_item()])
+        self.media.cache_until = timezone.now() - timedelta(seconds=1); self.media.save()
+        cache.cleanup()
+        workspace = self.client.get('/api/instagram/').data
+        self.assertEqual(workspace['connector_status'], 'offline')
+        url = workspace['posts'][0]['thumbnail_url']
+        self.assertTrue(url.startswith('/api/instagram/posts/'))
+        self.assertIsNone(workspace['posts'][0]['media'][0]['playback_url'])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'image/jpeg')
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+        self.assertTrue(b''.join(response.streaming_content).startswith(b'\xff\xd8\xff'))
+        self.assertEqual(self.client.head(url).status_code, 200)
+        reordered = copy.deepcopy(self.data); reordered['posts'].reverse(); self.sync(reordered)
+        self.media.refresh_from_db()
+        self.assertEqual((self.media.artist, self.media.title, self.media.reviewed), ('Human', 'Track', True))
+        self.assertTrue(thumbnails.path(self.media.post.thumbnail_key).exists())
+        actual = self.client.get('/api/instagram/').data['posts']
+        self.assertEqual([p['permalink'] for p in actual], [p['permalink'] for p in reordered['posts']])
+        self.assertTrue(actual[-1]['thumbnail_url'])
+
+    def test_thumbnail_expiry_removal_orphans_and_no_video_cleanup_interference(self):
+        from . import thumbnails
+        self.thumbnail_batch([self.thumbnail_item()])
+        post = Post.objects.get(pk=self.media.post_id)
+        url = f'/api/instagram/posts/{post.pk}/thumbnail/'
+        owned = thumbnails.path(post.thumbnail_key)
+        post.thumbnail_until = timezone.now() - timedelta(seconds=1); post.save()
+        self.assertEqual(self.client.get(url).status_code, 404)
+        os.utime(owned, (timezone.now().timestamp()-301,)*2)
+        unrelated = thumbnails.root() / 'unrelated'; unrelated.write_bytes(b'keep')
+        cache.cleanup(); post.refresh_from_db()
+        self.assertFalse(post.thumbnail_key); self.assertFalse(owned.exists()); self.assertTrue(unrelated.exists())
+        self.thumbnail_batch([self.thumbnail_item()])
+        removed = copy.deepcopy(self.data); removed['posts'] = removed['posts'][1:]; self.sync(removed)
+        post.refresh_from_db(); self.assertFalse(post.thumbnail_key)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_thumbnail_sync_fencing_auth_bounds_and_no_source_urls(self):
+        token = self.sync().data['sync_token']
+        self.sync()
+        self.assertEqual(self.thumbnail_batch([self.thumbnail_item()], token).status_code, 409)
+        self.assertEqual(self.thumbnail_batch([self.thumbnail_item()], 'forged').status_code, 409)
+        with patch('django.core.signing.time.time', return_value=timezone.now().timestamp() + 3601):
+            self.assertEqual(self.thumbnail_batch([self.thumbnail_item()], token).status_code, 409)
+        item = self.thumbnail_item()
+        self.assertEqual(self.thumbnail_batch([dict(item, url='https://private.invalid/')]).status_code, 400)
+        self.assertEqual(self.thumbnail_batch([item, item]).status_code, 400)
+        self.assertEqual(self.thumbnail_batch([item]*17).status_code, 400)
+        self.assertEqual(self.thumbnail_batch([dict(item, jpeg='x'*174765)]).status_code, 400)
+        self.assertEqual(self.client.post('/api/instagram/connector/thumbnails/', {}).status_code, 401)
+        with patch.dict(os.environ, {'DRAIN_TOKEN': ''}):
+            self.assertEqual(self.thumbnail_batch([item], token).status_code, 503)
+        self.assertIsNone(self.client.get('/api/instagram/').data['posts'][0]['thumbnail_url'])

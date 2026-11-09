@@ -2,6 +2,8 @@ from django.urls import path
 from . import views
 urlpatterns = [
     path('', views.workspace),
+    path('posts/<int:pk>/thumbnail/', views.thumbnail),
+    path('connector/thumbnails/', views.thumbnail_batch),
     path('media/<int:pk>/', views.media_action),
     path('media/<int:pk>/candidate-preview/', views.candidate_preview),
     path('media/<int:pk>/<str:action>/', views.media_action),
