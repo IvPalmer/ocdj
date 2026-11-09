@@ -207,6 +207,15 @@ class CleanupIntegrationTests(TestCase):
         self.assertEqual(self.receipt(item).status, 'applied')
         self.assertEqual(self.receipt(item).attempts, 2)
 
+    def test_registered_huey_outbox_sweeps_only_bounded_due_receipts(self):
+        from wanted.tasks import task_metadata_cleanup_outbox
+        for index in range(30):
+            WantedItem.objects.create(title=f'Synthetic outbox {index}')
+        with patch('wanted.tasks.task_metadata_cleanup') as enqueue:
+            task_metadata_cleanup_outbox.call_local()
+        self.assertEqual(enqueue.call_count, 25)
+        self.collect.assert_not_called()
+
     def test_active_claim_and_terminal_exhausted_claim_do_not_lookup(self):
         item = self.item()
         receipt = self.receipt(item)
@@ -515,3 +524,24 @@ class CleanupConcurrencyTests(TransactionTestCase):
         self.assertEqual(item.artist, '')
         self.assertTrue(item.metadata_protected)
         self.assertEqual(receipt.status, 'superseded')
+
+
+class CleanupLegacyMigrationTests(TransactionTestCase):
+    def test_existing_values_are_preserved_protected_and_not_backfilled(self):
+        from django.db.migrations.executor import MigrationExecutor
+        before = [('wanted', '0009_wantedsource_cursor')]
+        after = [('wanted', '0010_metadata_cleanup')]
+        executor = MigrationExecutor(connection)
+        executor.migrate(before)
+        try:
+            historical = executor.loader.project_state(before).apps.get_model('wanted', 'WantedItem')
+            original = historical.objects.create(artist='', title=TITLE)
+            executor = MigrationExecutor(connection)
+            executor.migrate(after)
+            item = WantedItem.objects.get(pk=original.pk)
+            self.assertEqual(item.artist, '')
+            self.assertEqual(item.title, TITLE)
+            self.assertTrue(item.metadata_protected)
+            self.assertEqual(MetadataCleanup.objects.count(), 0)
+        finally:
+            MigrationExecutor(connection).migrate(after)
