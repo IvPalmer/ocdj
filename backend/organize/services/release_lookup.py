@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def _identity(value):
-    return ' '.join(value.casefold().split())
+    return ' '.join(str(value or '').casefold().split())
 
 
 def _text(value, limit=500):
@@ -27,14 +27,14 @@ def _discogs(artist, title, token):
     base = 'https://api.discogs.com'
     with requests.Session() as session:
         response = session.get(base + '/database/search', params={
-            'artist': artist, 'track': title, 'type': 'release', 'per_page': 5,
-        }, headers=headers, timeout=5)
+            'artist': artist, 'track': title, 'type': 'release', 'per_page': 3,
+        }, headers=headers, timeout=4)
         response.raise_for_status()
-        for match in response.json().get('results', [])[:5]:
+        for match in response.json().get('results', [])[:3]:
             release_id = match.get('id')
             if type(release_id) is not int or release_id < 1:
                 continue
-            response = session.get(f'{base}/releases/{release_id}', headers=headers, timeout=5)
+            response = session.get(f'{base}/releases/{release_id}', headers=headers, timeout=4)
             if not response.ok:
                 continue
             release = response.json()
@@ -44,12 +44,15 @@ def _discogs(artist, title, token):
                 if _identity(track.get('title', '')) != _identity(title) or _identity(artist) not in names + [', '.join(names)]:
                     continue
                 label = (release.get('labels') or [{}])[0]
+                name = re.sub(r' \(\d+\)$', '', _text(label.get('name'), 255))
+                catno = _text(label.get('catno'), 100)
+                position = _text(track.get('position'), 20)
                 yield {
                     'album': _text(release.get('title')),
-                    'label': _text(label.get('name'), 255),
-                    'catalog_number': _text(label.get('catno'), 100),
+                    'label': '' if name.casefold().startswith('not on label') else name,
+                    'catalog_number': '' if catno.casefold() in ('none', 'n/a') else catno,
                     'year': _year(release.get('year')),
-                    'track_number': _text(track.get('position'), 20),
+                    'track_number': position if position.isascii() and position.isdecimal() else '',
                     'provider': 'Discogs',
                     'url': f'https://www.discogs.com/release/{release_id}',
                 }
