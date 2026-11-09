@@ -3,7 +3,7 @@ import {
   useSlskdHealth, useSearch, useDownloadFile,
   useDownloadsStatus, useSearchResults,
   useSearchQueue, useAddToQueue, useRemoveFromQueue, useClearQueue,
-  useCancelDownload, useClearDownloads, useDeleteDownload,
+  useCancelDownload, useCancelSearch, useClearDownloads, useDeleteDownload,
 } from '../../api/hooks'
 import BrowseModal from './BrowseModal'
 import TrackPlayback, { directSource } from '../Player/TrackPlayback'
@@ -30,6 +30,7 @@ function SoulseekPanel() {
   const { data: downloadsData } = useDownloadsStatus()
   const { data: queueData } = useSearchQueue()
   const searchMutation = useSearch()
+  const cancelSearch = useCancelSearch()
   const downloadMutation = useDownloadFile()
   const cancelMutation = useCancelDownload()
   const clearDlMutation = useClearDownloads()
@@ -268,6 +269,9 @@ function SoulseekPanel() {
           </div>
         )}
 
+        {cancelSearch.isError && <p role="status">
+          {cancelSearch.error?.data?.error || 'Could not cancel the search. Try again.'}
+        </p>}
         {sortedItems.length > 0 ? (
           <table className="queue-table">
             <thead>
@@ -290,6 +294,8 @@ function SoulseekPanel() {
                     expandedItemId === item.id ? null : item.id
                   )}
                   onSearch={() => handleItemSearch(item.id)}
+                  onCancelSearch={() => cancelSearch.mutate(item.id)}
+                  cancellingSearch={cancelSearch.isPending && cancelSearch.variables === item.id}
                   onDownload={handleDownload}
                   onBrowse={(result) => setBrowseTarget({
                     username: result.username,
@@ -516,7 +522,7 @@ function DownloadRow({ dl, onCancel, cancelPending, formatSize, formatSpeed }) {
 }
 
 function QueueItemRow({
-  item, expanded, onToggle, onSearch,
+  item, expanded, onToggle, onSearch, onCancelSearch, cancellingSearch,
   onDownload, onBrowse, onRemove, downloadPending, getFileDownloadStatus,
   formatSize, formatAgo, connected,
 }) {
@@ -559,9 +565,11 @@ function QueueItemRow({
         <td className="td-ago">{formatAgo(item.last_searched)}</td>
         <td className="td-action" onClick={e => e.stopPropagation()}>
           {isSearching ? (
-            <span className="searching-indicator">
-              <span className="spinner" /> Searching...
-            </span>
+            <button type="button" className="btn btn-xs"
+              onClick={onCancelSearch} disabled={cancellingSearch}
+              aria-label={`Cancel search for ${label}`}>
+              {cancellingSearch ? 'Cancelling…' : 'Cancel'}
+            </button>
           ) : (
             <div className="action-buttons">
               <button

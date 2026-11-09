@@ -475,7 +475,7 @@ function ConversionRules() {
 
 function OrganizePanel() {
   const [stageFilter, setStageFilter] = useState(null)
-  const [showArchived, setShowArchived] = useState(false)
+  const [showArchived, setShowArchived] = useState(true)
   const [page, setPage] = useState(1)
   const [editingItem, setEditingItem] = useState(null)
 
@@ -493,10 +493,6 @@ function OrganizePanel() {
   const removeItem = useRemovePipelineItem()
   const scanDownloads = useScanDownloads()
 
-  // Archived = drained to the Mac and confirmed. Done work, hidden from the
-  // workbench by default — but the server does the hiding now, so `count`,
-  // the page count and `archived_count` describe the whole table instead of
-  // whichever 50 rows happened to land on this page.
   const items = itemsData?.results || []
   const totalCount = itemsData?.count ?? 0
   const pageSize = itemsData?.page_size || 50
@@ -513,14 +509,9 @@ function OrganizePanel() {
   const toggleArchived = () => { setShowArchived(v => !v); setPage(1) }
 
   const stageLabel = STAGES.find(s => s.key === stageFilter)?.label
-  const hiddenNote = (!showArchived && archivedCount > 0)
-    ? `${archivedCount} completed ${plural(archivedCount, 'item is', 'items are')} archived on your Mac and hidden — use "Show archived" to see ${plural(archivedCount, 'it', 'them')}.`
-    : null
-  const emptyMessage = hiddenNote
-    ? `Nothing on the workbench${stageFilter ? ` in "${stageLabel}"` : ''}. ${hiddenNote}`
-    : stageFilter
-      ? `No items in "${stageLabel}" stage.`
-      : 'No items in the pipeline. Use "Scan Downloads" to import completed downloads.'
+  const emptyMessage = stageFilter
+    ? `No items in "${stageLabel}" stage.`
+    : showArchived ? 'No items in Organize yet.' : 'No files on the VPS workbench.'
 
   const actionErrors = [
     ['Process All', processPipeline],
@@ -535,6 +526,7 @@ function OrganizePanel() {
   // must not also be dressed in the success colour.
   const scan = scanDownloads.data
   const scanHadErrors = !!scan?.error_count
+  const scanEmpty = scan && !scan.created && !scan.error_count && !scan.missing_files
   const scanFirstError = scan?.errors?.[0]?.error
 
   return (
@@ -545,10 +537,11 @@ function OrganizePanel() {
           <UploadButton onDone={() => scanDownloads.mutate()} />
           <button
             className="btn btn-sm"
+            title="Import new files still in the VPS download inbox"
             onClick={() => scanDownloads.mutate()}
             disabled={scanDownloads.isPending}
           >
-            {scanDownloads.isPending ? 'Scanning...' : 'Scan Downloads'}
+            {scanDownloads.isPending ? 'Scanning…' : 'Scan inbox'}
           </button>
           <button
             className="btn btn-sm btn-primary"
@@ -603,7 +596,7 @@ function OrganizePanel() {
           )}
           {archivedCount > 0 && (
             <button className="btn btn-sm" onClick={toggleArchived}>
-              {showArchived ? 'Hide archived' : `Show archived (${archivedCount})`}
+              {showArchived ? 'VPS only' : `Show all · ${archivedCount} on Mac`}
             </button>
           )}
         </div>
@@ -634,6 +627,12 @@ function OrganizePanel() {
                 || item.original_filename
               const credit = [item.artist, item.title].filter(Boolean).join(' — ')
               const details = [item.album, item.label].filter(Boolean).join(' · ')
+              const location = {
+                archived: ['On Mac', 'var(--accent-green)'],
+                publishable: ['Ready for Mac', 'var(--accent-blue)'],
+                draining: ['Sending to Mac', 'var(--accent-amber)'],
+                failed: ['Send to Mac failed', 'var(--accent-red)'],
+              }[item.archive_state]
               return (
               <div key={item.id} className="pipeline-table__row">
                 <span className="col-file">
@@ -644,7 +643,8 @@ function OrganizePanel() {
                   {details && <span className="col-file__original" title={details}>{details}</span>}
                 </span>
                 <span className="col-stage">
-                  <StagePill stage={item.stage} />
+                  {location ? <span className="stage-pill" style={{ '--pill-color': location[1] }}>{location[0]}</span>
+                    : <StagePill stage={item.stage} />}
                   {item.metadata_source && <span className="col-source">{item.metadata_source}</span>}
                 </span>
                 <span className="col-actions">
@@ -749,7 +749,7 @@ function OrganizePanel() {
         )}
         {scan?.message && (
           <div className={`organize-toast ${scanHadErrors ? 'organize-toast--error' : ''}`}>
-            {scan.message}
+            {scanEmpty ? 'No new files in the VPS inbox. Previously processed downloads stay in Organize.' : scan.message}
             {scanFirstError && (
               <span className="organize-toast__detail">first error: {scanFirstError}</span>
             )}
