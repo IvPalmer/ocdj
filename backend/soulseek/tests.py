@@ -203,6 +203,7 @@ class ClearDownloadsTests(TestCase):
     def test_non_string_mode_rejected_before_upstream_calls(self):
         for mode in [[], {}, None, 123]:
             self.assertEqual(self.clear(mode).status_code, 400)
+        self.peer.session.delete.assert_not_called()
 
 
 class SearchLockTests(TestCase):
@@ -222,4 +223,3 @@ class SearchLockTests(TestCase):
             _run_search_for_queue_item(item.pk)
         self.assertEqual(dict(SearchResult.objects.filter(queue_item=item).values_list('filename', 'is_locked')),
                          {'open.flac': False, 'flagged.flac': True, 'private.flac': True})
-        self.peer.session.delete.assert_not_called()
