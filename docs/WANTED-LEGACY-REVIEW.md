@@ -47,7 +47,8 @@ outbox recovery, cooldowns, fenced leases and maximum three attempts. No new
 scheduler, service, dependency or direct synchronous provider path. Existing
 consumer has modest throughput: allow time before reporting. Report mode prints
 only aggregate statuses/candidate assessments/hypothesis counts and PK boundaries,
-not artist/title/source/notes/evidence payloads. Keep even these reports private.
+not artist/title/source/notes/evidence payloads. Report windows use durable receipts,
+including deleted or subsequently unprotected subjects. Keep reports private.
 
 Without an ISRC, review queries the complete original title alone, avoiding a bad
 label/compilation artist contaminating the search. It reuses the bounded iTunes

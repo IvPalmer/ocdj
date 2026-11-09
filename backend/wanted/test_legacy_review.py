@@ -132,6 +132,16 @@ class LegacyReviewTests(TestCase):
                 item.refresh_from_db()
                 self.assertEqual(item.artist, 'Owner correction')
 
+    def test_report_retains_deleted_subject_receipts(self):
+        item = legacy()
+        item_id = item.pk
+        receipt, _ = capture_legacy(item_id, through_id=item_id)
+        item.delete()
+        process_cleanup(receipt.pk)
+        report = self.command(through_id=item_id, report=True)
+        self.assertEqual(report['statuses'], {'superseded': 1})
+        self.assertEqual(report['existing'], 1)
+
     def test_report_is_aggregate_only_and_api_exposes_private_receipt(self):
         from wanted.views import WantedItemViewSet
         item = legacy(cleanup_isrc=CODE)
