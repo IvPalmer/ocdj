@@ -5,9 +5,10 @@
 Use the registered `OCDJ Instagram Connector.command` and
 `OCDJ Playback Connector.command` login items on the Mac where background
 LaunchAgents were denied access to the Chrome profile and playback map.
-While both connectors are stopped, stage the reviewed `restore.py` under
-`login-connectors/code/tools/mac_login/` and update the contents of both
-registered documents from [login.command](login.command). Keep the existing
+While both connectors are stopped, stage the reviewed runtime sources listed in
+`install.SOURCES` under `login-connectors/code/` and use [login.command](login.command)
+for both registered documents. Deploy the VPS loopback port before switching the
+Mac to this runtime. Keep the existing
 durable Python environment and private `config.json`. Keep both entries in
 Open at Login and avoid duplicate LaunchAgents.
 
@@ -17,9 +18,8 @@ window can close while the worker keeps running. Inspect the corresponding
 private `instagram.log` or `playback.log` and verify fresh activity on the
 server. To stop a worker, send SIGTERM to the verified worker PID so it can
 clean up its owned SSH tunnel. An explicit start or the next login starts a
-new worker after exit. Authentication and ambiguous requests retain the existing
-stop behavior. To roll back, stop the workers and restore the prior launcher
-contents and staged module.
+new worker after exit. To roll back, stop the workers and restore the prior
+launcher contents and staged runtime.
 
 ## Background LaunchAgent alternative
 
@@ -124,14 +124,15 @@ place after exit to avoid unlink races.
 ## Audio transport, health and rollback
 
 Audio startup acquires the exact existing playback singleton **before SSH**,
-loads the exact private map/root, discovers the existing private backend address,
-and opens only an ephemeral `127.0.0.1` SSH forward with existing BatchMode access.
-No shared/public listener, new VPS route or persistent SSH daemon is introduced.
+loads the exact private map/root, and opens an ephemeral Mac loopback forward
+to `127.0.0.1:18002` on the VPS using the existing BatchMode SSH access.
+The VPS Compose backend publishes that port on host loopback only.
 It reuses `serve_one`, including staging, source validation and fenced upload.
-Each claim/completion is sent once; an ambiguous response, denied bearer, dead
-SSH tunnel or inaccessible map stops the run and cleans up its owned SSH group.
-It never reconnects/relaunches audio automatically. The existing Instagram
-transport-only recovery remains unchanged and never restarts its worker.
+Each claim and completion is sent once. After a connection failure or timeout,
+the connector abandons the attempt and waits up to 90 seconds for the existing
+authenticated probe. The next poll uses a fresh claim and the server skips
+live leases. Authentication rejection, an exited SSH tunnel or an inaccessible
+map ends the run and cleans up its SSH group.
 
 `playback.log` records UTC start/exit and a `playback-poll-completed` observation
 at most once per minute, after a successful claim response. This proves a poll,

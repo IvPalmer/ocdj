@@ -98,20 +98,20 @@ Resident behavior:
   connection/timeouts or HTTP 502/503/504, at 5/15/30s, maximum four attempts.
   Other HTTP errors, login redirects, 401/403/429 and Instagram restrictions stop
   without retry. Existing per-image errors remain bounded to that sync attempt.
-- An exited SSH tunnel is rebuilt on the same Mac loopback port, rediscovering
-  the private container address and revalidating auth. Setup uses at most four
+- An exited SSH tunnel is rebuilt on the same Mac loopback port, forwarding to
+  the Compose loopback listener `127.0.0.1:18002` on the VPS. Setup uses at most four
   attempts at 5/15/30s; three reconnect episodes in 180s exhaust the flap budget.
   Only recognized SSH network failures/timeouts retry; authentication, command,
-  target or validation rejection stops immediately. This reuses the existing
-  forwarding socket and never exposes an inbound service or new port on VPS.
+  target or validation rejection stops immediately. The listener is reachable
+  from the Mac through the existing SSH route.
 - Claims, sync, uploads, thumbnail batches and completions are sent **once**.
-  An ambiguous response can stop the process even if the tunnel recovers. No
-  worker is relaunched and no job is replayed to hide that uncertainty. Resolve
-  the cause and inspect server lease/state before any new explicit invocation.
+  A resident worker waits up to 90 seconds for the authenticated probe after a
+  backend connection failure. It drops the unresolved attempt. Server leases
+  fence future claims, and an unresolved sync gets a fresh collection read
+  on a later pass.
 - Sleep is offline time. On wake, the same process can recover a surviving or
-  rebuilt tunnel during a safe heartbeat/read. If a mutation was interrupted,
-  retry budgets exhaust, or the worker exited, it stays stopped. This is not
-  an always-awake or reboot-persistent service; no sleep inhibition is added.
+  rebuilt tunnel during a safe heartbeat/read. It exits if the recovery budget
+  runs out or the existing auth validation fails.
 
 Ctrl-C, SIGTERM or terminal hangup stops the wrapper, its worker/ffmpeg and SSH
 process groups and removes the owned temporary directory. No restart occurs.

@@ -19,13 +19,25 @@ class ForegroundTests(unittest.TestCase):
                 fg.seconds(value)
         self.assertEqual(fg.seconds('600'), 600)
 
-    def test_discovery_rejects_public_multiple_or_malformed_targets(self):
-        for value in ('8.8.8.8', '172.22.0.5 172.23.0.2', '127.0.0.1', 'not-an-ip'):
-            with patch.object(fg.subprocess, 'check_output', return_value=value):
-                with self.assertRaises(fg.RunError):
-                    fg.backend_address()
-        with patch.object(fg.subprocess, 'check_output', return_value='172.22.0.5\n'):
-            self.assertEqual(fg.backend_address(), '172.22.0.5')
+    def test_recovery_only_repeats_the_auth_probe(self):
+        with patch.object(fg, 'probe', side_effect=[ConnectionResetError(), None]) as probe, \
+             patch.object(fg.time, 'sleep') as sleep:
+            fg.wait_backend(12345, 'fixture-secret')
+        self.assertEqual(probe.call_count, 2)
+        sleep.assert_called_once()
+        with patch.object(fg, 'probe', side_effect=fg.RunError('private-auth-validation-failed')) as probe, \
+             patch.object(fg.time, 'sleep') as sleep, self.assertRaises(fg.RunError):
+            fg.wait_backend(12345, 'fixture-secret')
+        probe.assert_called_once()
+        sleep.assert_not_called()
+
+    def test_tunnel_target_stays_on_vps_loopback(self):
+        with patch.dict(os.environ, {'DRAIN_TOKEN': 'fixture-secret'}), \
+             patch.object(fg.subprocess, 'Popen') as spawn:
+            fg.start_tunnel(12345)
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[command.index('-L') + 1], '127.0.0.1:12345:127.0.0.1:18002')
+        self.assertNotIn('DRAIN_TOKEN', spawn.call_args.kwargs['env'])
 
     def test_probe_rejects_redirects_and_unexpected_responses(self):
         import urllib.error
@@ -52,7 +64,7 @@ class ForegroundTests(unittest.TestCase):
                 fg.probe(12345, 'fixture-secret')
 
     def test_missing_token_stops_before_ssh(self):
-        with patch.dict(os.environ, {}, clear=True), patch.object(fg, 'backend_address') as discover:
+        with patch.dict(os.environ, {}, clear=True), patch.object(fg, 'start_tunnel') as discover:
             with self.assertRaises(fg.RunError):
                 fg.run(1)
             discover.assert_not_called()
@@ -60,7 +72,7 @@ class ForegroundTests(unittest.TestCase):
     def test_denied_cookie_access_stops_before_ssh(self):
         with patch.dict(os.environ, {'DRAIN_TOKEN': 'fixture-secret'}), \
              patch.object(Path, 'open', side_effect=PermissionError), \
-             patch.object(fg, 'backend_address') as discover:
+             patch.object(fg, 'start_tunnel') as discover:
             with self.assertRaises(fg.RunError):
                 fg.run(1)
             discover.assert_not_called()
@@ -101,7 +113,6 @@ class ForegroundTests(unittest.TestCase):
                  patch.object(fg, 'COOKIE_DB', fake_cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
                  patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
-                 patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
                  patch.object(fg, 'supervise', side_effect=KeyboardInterrupt):

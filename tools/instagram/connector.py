@@ -16,6 +16,7 @@ import time
 from urllib.parse import urlsplit
 
 import requests
+from requests.exceptions import ChunkedEncodingError
 
 COLLECTION = '18117783274346248'
 MAX_BYTES = 64 * 1024 * 1024
@@ -143,7 +144,7 @@ def safe_request(request):
             if response.status_code not in (502, 503, 504):
                 return response
             response.close()
-        except (requests.ConnectionError, requests.Timeout):
+        except (requests.ConnectionError, requests.Timeout, ChunkedEncodingError):
             pass
         if attempt == len(RETRY_DELAYS):
             raise ConnectorError('network-unavailable') from None
@@ -318,7 +319,7 @@ class ThumbnailCapture:
 
 
 class API:
-    def __init__(self, base, token):
+    def __init__(self, base, token, *, resident=False):
         u = urlsplit(base)
         if u.scheme != 'https' and not (u.scheme == 'http' and u.hostname in ['localhost', '127.0.0.1']):
             raise ConnectorError('API requires HTTPS')
@@ -327,6 +328,8 @@ class API:
         self.base = base.rstrip('/')+'/api/instagram/connector/'
         self.session = requests.Session()
         self.session.headers['Authorization'] = 'Bearer '+token
+        self.recovery_port = u.port if resident and u.scheme == 'http' and u.hostname == '127.0.0.1' else None
+        self.token = token
 
     def post(self, endpoint, data=None, files=None, lease=None, timeout=90):
         headers = {'X-Instagram-Lease': lease} if lease else None
@@ -337,8 +340,18 @@ class API:
         # exactly once, including a claim whose response may have been lost.
         try:
             r = safe_request(send) if endpoint == 'heartbeat/' else send()
-        except (requests.ConnectionError, requests.Timeout):
-            raise ConnectorError('ambiguous-transport') from None
+        except (requests.ConnectionError, requests.Timeout, ChunkedEncodingError, ConnectorError) as exc:
+            if not self.recovery_port:
+                if isinstance(exc, ConnectorError):
+                    raise
+                raise ConnectorError('ambiguous-transport') from None
+            try:
+                wait_backend(self.recovery_port, self.token)
+            except RunError:
+                raise ConnectorError('network-unavailable') from None
+            # The failed request is never resent. Server leases fence any
+            # unknown claim, upload or completion before future polls.
+            return None
         if r.status_code == 204: return None
         if r.status_code == 409: return None  # expired result; server owns fencing
         if r.status_code != 200: raise ConnectorError('API request failed')
@@ -356,6 +369,7 @@ def ffmpeg_path():
 # Keep the exact ffmpeg/Shazam sampling path shared with the existing backend.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.instagram.recognition import recognize, explicit_candidates
+from tools.instagram.foreground import RunError, wait_backend
 
 
 def run(args):
@@ -365,7 +379,7 @@ def run(args):
         raise ConnectorError('keychain-prompt-requires-live-resident')
     token = os.environ.get('DRAIN_TOKEN', '')
     if not token: raise ConnectorError('DRAIN_TOKEN missing')
-    api = API(args.api, token)
+    api = API(args.api, token, resident=resident)
     if resident and args.fixture:
         raise ConnectorError('resident-fixture-disallowed')
     ffmpeg = ffmpeg_path() if args.fixture else None
@@ -379,8 +393,7 @@ def run(args):
             session = instagram_session(args.profile, allow_keychain_prompt=not resident or allow_prompt)
             data, urls = read_collection(session, thumbnail_urls=thumbnail_urls)
         synced = api.post('sync/', data)
-        mapping = synced['media']
-        thumbnails = ThumbnailCapture(synced, thumbnail_urls)
+        thumbnails = ThumbnailCapture(synced or {}, thumbnail_urls)
         api.post('heartbeat/', {'status': 'ready'})
         refresh_at = time.monotonic() + 3600
         last_poll = time.time()
@@ -389,7 +402,7 @@ def run(args):
             video = Path(directory) / 'child.mp4'
             # Metadata first: live sync downloads no videos. Synthetic fixture
             # keeps eager uploads solely for deterministic isolated browser QA.
-            for media in mapping if args.fixture else []:
+            for media in (synced or {}).get('media', []) if args.fixture else []:
                 if media['kind'] != 'video': continue
                 subprocess.run([ffmpeg, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x29241f:s=640x360:d=3',
                                 '-f', 'lavfi', '-i', 'sine=frequency=220:duration=3', '-c:v', 'libx264',
@@ -411,7 +424,9 @@ def run(args):
                     thumbnail_urls = {}
                     data, _ = read_collection(session, thumbnail_urls=thumbnail_urls)
                     synced = api.post('sync/', data)
-                    thumbnails = ThumbnailCapture(synced, thumbnail_urls)
+                    if synced is not None:
+                        thumbnails = ThumbnailCapture(synced, thumbnail_urls)
+                    # An ambiguous sync waits for the normal refresh cadence.
                     refresh_at = time.monotonic() + 3600
                 job = api.post('claim/')
                 if job:
@@ -439,15 +454,17 @@ def run(args):
                                 with video.open('rb') as f:
                                     uploaded = api.post(f"media/{job['id']}/upload/",
                                                         files={'file': ('source', f, source_mime)}, lease=job['token'])
-                                if uploaded is None:  # Stale job, including a correction during download.
+                                if uploaded is None:  # Stale lease or unknown upload outcome.
                                     continue
                                 if job.get('action', 'recognize') == 'recognize':
                                     ffmpeg = ffmpeg or ffmpeg_path()
                                     matches = asyncio.run(recognize(video, directory, ffmpeg))
                         status = 'identified' if matches else 'no-match'
                     except Exception as exc:
+                        if isinstance(exc, ConnectorError) and str(exc) in {'network-unavailable', 'ambiguous-transport'}:
+                            raise
                         status, matches = 'error', []
-                        if isinstance(exc, ConnectorError) and str(exc) in STOP_STATUSES | {'network-unavailable', 'ambiguous-transport'}:
+                        if isinstance(exc, ConnectorError) and str(exc) in STOP_STATUSES:
                             stop_error = exc
                     finally:
                         video.unlink(missing_ok=True)

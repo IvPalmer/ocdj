@@ -3,7 +3,6 @@
 import argparse
 from contextlib import contextmanager, ExitStack
 import fcntl
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -23,6 +22,8 @@ SSH = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
        '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
        '-o', 'ForkAfterAuthentication=no', '-o', 'RemoteCommand=none',
        '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2']
+
+VPS_CONNECTOR_TARGET = '127.0.0.1:18002'
 
 
 class RunError(Exception):
@@ -57,26 +58,11 @@ def network_failure(detail):
         'connection reset by peer', 'connection closed by remote host', 'broken pipe'))
 
 
-def backend_address(deadline=None):
-    try:
-        value = subprocess.check_output(
-            SSH + ['main-instance', 'docker inspect ocdj-backend-1 --format '
-                   '\"{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}\"'],
-            text=True, stderr=subprocess.PIPE, env=clean_env(),
-            timeout=remaining(deadline, 15) if deadline else 15).strip()
-    except subprocess.CalledProcessError as exc:
-        if exc.returncode == 255 and network_failure(exc.stderr):
-            raise ConnectionError('ssh-network-unavailable') from None
-        raise RunError('backend-discovery-failed; check-existing-access') from None
-    # Fail closed on multiple networks or unexpected targets; never guess.
-    try:
-        address = ipaddress.IPv4Address(value)
-    except ValueError:
-        raise RunError('backend-target-unavailable') from None
-    if not any(address in ipaddress.ip_network(net) for net in
-               ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
-        raise RunError('backend-target-unavailable')
-    return str(address)
+def start_tunnel(port):
+    return subprocess.Popen(
+        SSH + ['-N', '-o', 'ExitOnForwardFailure=yes', '-L',
+               f'127.0.0.1:{port}:{VPS_CONNECTOR_TARGET}', 'main-instance'],
+        env=clean_env(), start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -104,6 +90,18 @@ def probe(port, token, timeout=10):
                 except (ValueError, UnicodeError):
                     pass
     raise RunError('private-auth-validation-failed')
+
+
+def wait_backend(port, token):
+    """Wait through one bounded outage using only the existing auth probe."""
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            probe(port, token, remaining(deadline, 5))
+            return
+        except OSError:
+            time.sleep(min(3, max(0, deadline - time.monotonic())))
+    raise RunError('backend-recovery-timeout')
 
 
 def wait_tunnel(tunnel, port, deadline):
@@ -230,12 +228,7 @@ def run(duration, resident=False, allow_keychain_prompt=False):
                             raise RunError('connector-stopped; no-relaunch')
                         if delay: time.sleep(delay)
                         try:
-                            address = backend_address(deadline)
-                            tunnel = subprocess.Popen(
-                                SSH + ['-N', '-o', 'ExitOnForwardFailure=yes', '-L',
-                                       f'127.0.0.1:{port}:{address}:8002', 'main-instance'],
-                                env=clean_env(), start_new_session=True,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                            tunnel = start_tunnel(port)
                             wait_tunnel(tunnel, port, deadline)
                             probe(port, token, remaining(deadline))
                             return

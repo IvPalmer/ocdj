@@ -47,6 +47,19 @@ class RetryTests(unittest.TestCase):
                 api.session.post.assert_called_once()
                 sleep.assert_not_called()
 
+    def test_resident_recovers_transport_without_repeating_mutation(self):
+        for endpoint in ['claim/', 'sync/', 'thumbnails/', 'media/1/upload/', 'media/1/complete/']:
+            api = c.API('http://127.0.0.1:12345', 'synthetic', resident=True)
+            api.session.post = Mock(side_effect=c.ChunkedEncodingError())
+            with patch.object(c, 'wait_backend') as recover:
+                self.assertIsNone(api.post(endpoint, {}))
+            api.session.post.assert_called_once()
+            recover.assert_called_once_with(12345, 'synthetic')
+        api.session.post = Mock(return_value=Mock(status_code=401))
+        with patch.object(c, 'wait_backend') as recover, self.assertRaises(c.ConnectorError):
+            api.post('claim/')
+        recover.assert_not_called()
+
     def test_video_cdn_restrictions_also_fail_closed(self):
         from unittest.mock import MagicMock
         for code, status in [(302, 'restricted'), (401, 'session-expired'), (403, 'restricted'), (429, 'rate-limited')]:
@@ -192,17 +205,6 @@ class ResidentTests(unittest.TestCase):
 
 
 class SupervisorTests(unittest.TestCase):
-    def test_ssh_discovery_only_classifies_known_network_failures_for_retry(self):
-        import subprocess
-        for code, detail, expected in [
-                (255, 'Connection timed out', ConnectionError),
-                (255, 'Permission denied (publickey)', fg.RunError),
-                (1, 'docker access denied', fg.RunError),
-                (255, 'unrecognized failure', fg.RunError)]:
-            failure = subprocess.CalledProcessError(code, ['ssh'], stderr=detail)
-            with patch.object(fg.subprocess, 'check_output', side_effect=failure), self.assertRaises(expected):
-                fg.backend_address()
-
     def test_tunnel_start_auth_failure_is_not_network_retry(self):
         for detail, expected in [(b'Permission denied (publickey)', fg.RunError),
                                  (b'Connection refused', ConnectionError)]:
@@ -236,7 +238,7 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cookie = Path(directory) / 'synthetic'
             cookie.write_bytes(b'SQLite format 3\x00' + b'not read or printed')
-            with patch.object(fg, 'COOKIE_DB', cookie), patch.object(fg, 'backend_address') as ssh, \
+            with patch.object(fg, 'COOKIE_DB', cookie), patch.object(fg, 'start_tunnel') as ssh, \
                  patch.dict(os.environ, {}, clear=True), patch('sys.stdout', new_callable=io.StringIO) as output:
                 fg.preflight()
             ssh.assert_not_called()
@@ -263,7 +265,6 @@ class SupervisorTests(unittest.TestCase):
                  patch.object(fg, 'COOKIE_DB', cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
                  patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
-                 patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
                  patch.object(fg, 'stop') as stop, \
@@ -308,18 +309,17 @@ class SupervisorTests(unittest.TestCase):
                  patch.object(fg, 'COOKIE_DB', cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
                  patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
-                 patch.object(fg, 'backend_address', side_effect=['172.22.0.5', OSError(), '172.22.0.6']), \
-                 patch.object(fg, 'wait_tunnel'), patch.object(fg, 'probe') as probe, \
+                 patch.object(fg, 'wait_tunnel', side_effect=[None, ConnectionError(), None]), patch.object(fg, 'probe') as probe, \
                  patch.object(fg.time, 'sleep') as sleep, patch.object(fg, 'stop'), \
                  patch.object(fg.subprocess, 'Popen', side_effect=spawn), \
                  patch.object(fg, 'supervise', side_effect=supervise):
                 with self.assertRaises(KeyboardInterrupt): fg.run(600, resident=True)
-            self.assertEqual(len(commands), 3)  # two tunnels, one worker
+            self.assertEqual(len(commands), 4)  # two ready tunnels, one failed tunnel, one worker
             self.assertEqual(sum('--resident' in command for command in commands), 1)
             forward1 = commands[0][commands[0].index('-L') + 1]
-            forward2 = commands[2][commands[2].index('-L') + 1]
-            self.assertEqual(forward1.split(':')[:2], forward2.split(':')[:2])
-            self.assertIn('172.22.0.6', forward2)
+            forward2 = commands[3][commands[3].index('-L') + 1]
+            self.assertEqual(forward1, forward2)
+            self.assertTrue(forward2.endswith(':127.0.0.1:18002'))
             self.assertEqual(probe.call_count, 2)
             sleep.assert_called_once_with(5)
 
@@ -330,7 +330,6 @@ class SupervisorTests(unittest.TestCase):
                  patch.object(fg, 'COOKIE_DB', cookie), \
                  patch.object(fg.tempfile, 'gettempdir', return_value=directory), \
                  patch.object(fg, 'LOGIN_LOCK', Path(directory) / 'stable.lock'), \
-                 patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
                  patch.object(fg, 'wait_tunnel'), \
                  patch.object(fg, 'probe', side_effect=fg.RunError('private-auth-validation-failed')), \
                  patch.object(fg.time, 'sleep') as sleep, patch.object(fg, 'stop'), \

@@ -178,7 +178,7 @@ for _ in range(600):
             raise TimeoutError('ambiguous result')
         with patch.object(helper, 'singleton', side_effect=lambda: original_singleton(lock)), \
              patch.object(helper, 'serve_one', side_effect=claim) as serve, \
-             patch.object(fg, 'backend_address', return_value='172.22.0.5'), \
+             patch.object(fg, 'wait_backend'), \
              patch.object(fg, 'wait_tunnel'), patch.object(subprocess, 'Popen', side_effect=spawn), \
              patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic-only'}):
             with self.assertRaises(TimeoutError): restore.playback(self.config)
@@ -192,9 +192,27 @@ for _ in range(600):
         lock = self.home / 'playback.lock'
         with original_singleton(lock), \
              patch.object(helper, 'singleton', side_effect=lambda: original_singleton(lock)), \
-             patch.object(fg, 'backend_address') as discover:
+             patch.object(fg, 'start_tunnel') as discover:
             with self.assertRaises(BlockingIOError): restore.playback(self.config)
         discover.assert_not_called()
+
+    def test_playback_resumes_polling_after_transport_loss_without_new_tunnel(self):
+        lock = self.home / 'playback.lock'
+        singleton = helper.singleton
+        tunnel = Mock()
+        tunnel.poll.return_value = None
+        with patch.object(helper, 'singleton', side_effect=lambda: singleton(lock)), \
+             patch.object(fg, 'start_tunnel', return_value=tunnel) as start, \
+             patch.object(fg, 'wait_tunnel'), patch.object(fg, 'wait_backend') as ready, \
+             patch.object(fg, 'stop') as stop, \
+             patch.object(helper, 'serve_one', side_effect=[restore.ChunkedEncodingError(), KeyboardInterrupt]) as serve, \
+             patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic-only'}), \
+             self.assertRaises(KeyboardInterrupt):
+            restore.playback(self.config)
+        start.assert_called_once()
+        self.assertEqual(ready.call_count, 2)
+        self.assertEqual(serve.call_count, 2)
+        stop.assert_called_once_with(tunnel)
 
     def test_instagram_lock_crosses_tmp_context_and_honors_legacy(self):
         stable = self.home / 'stable.lock'
