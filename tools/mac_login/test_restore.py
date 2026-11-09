@@ -205,7 +205,7 @@ for _ in range(600):
              patch.object(fg, 'start_tunnel', return_value=tunnel) as start, \
              patch.object(fg, 'wait_tunnel'), patch.object(fg, 'wait_backend') as ready, \
              patch.object(fg, 'stop') as stop, \
-             patch.object(helper, 'serve_one', side_effect=[restore.requests.ConnectionError(), KeyboardInterrupt]) as serve, \
+             patch.object(helper, 'serve_one', side_effect=[restore.ChunkedEncodingError(), KeyboardInterrupt]) as serve, \
              patch.dict(os.environ, {'DRAIN_TOKEN': 'synthetic-only'}), \
              self.assertRaises(KeyboardInterrupt):
             restore.playback(self.config)

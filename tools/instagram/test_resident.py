@@ -50,7 +50,7 @@ class RetryTests(unittest.TestCase):
     def test_resident_recovers_transport_without_repeating_mutation(self):
         for endpoint in ['claim/', 'sync/', 'thumbnails/', 'media/1/upload/', 'media/1/complete/']:
             api = c.API('http://127.0.0.1:12345', 'synthetic', resident=True)
-            api.session.post = Mock(side_effect=requests.ConnectionError())
+            api.session.post = Mock(side_effect=c.ChunkedEncodingError())
             with patch.object(c, 'wait_backend') as recover:
                 self.assertIsNone(api.post(endpoint, {}))
             api.session.post.assert_called_once()

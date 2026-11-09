@@ -13,6 +13,7 @@ import sys
 import time
 
 import requests
+from requests.exceptions import ChunkedEncodingError
 
 from tools.instagram import foreground as transport
 from tools.mac_library import helper
@@ -82,7 +83,7 @@ def playback(config):
                     raise helper.Refused()
                 try:
                     helper.serve_one(api, data, ffmpeg=config['ffmpeg'])
-                except (requests.ConnectionError, requests.Timeout):
+                except (requests.ConnectionError, requests.Timeout, ChunkedEncodingError):
                     event('playback-waiting-for-backend')
                     # The prior attempt is over. The server skips live leases
                     # and the next iteration starts a fresh claim.
