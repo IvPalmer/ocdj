@@ -148,6 +148,24 @@ class ResidentTests(unittest.TestCase):
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_ssh_discovery_only_classifies_known_network_failures_for_retry(self):
+        import subprocess
+        for code, detail, expected in [
+                (255, 'Connection timed out', ConnectionError),
+                (255, 'Permission denied (publickey)', fg.RunError),
+                (1, 'docker access denied', fg.RunError),
+                (255, 'unrecognized failure', fg.RunError)]:
+            failure = subprocess.CalledProcessError(code, ['ssh'], stderr=detail)
+            with patch.object(fg.subprocess, 'check_output', side_effect=failure), self.assertRaises(expected):
+                fg.backend_address()
+
+    def test_tunnel_start_auth_failure_is_not_network_retry(self):
+        for detail, expected in [(b'Permission denied (publickey)', fg.RunError),
+                                 (b'Connection refused', ConnectionError)]:
+            tunnel = Mock(stderr=io.BytesIO(detail))
+            tunnel.poll.return_value = 255
+            with self.assertRaises(expected): fg.wait_tunnel(tunnel, 12345, float('inf'))
+
     def test_reconnect_same_worker_and_stop_on_worker_failure(self):
         tunnel, child, reconnect = Mock(), Mock(), Mock()
         tunnel.poll.side_effect = [1, None]

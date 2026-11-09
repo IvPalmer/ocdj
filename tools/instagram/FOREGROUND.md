@@ -94,7 +94,8 @@ Resident behavior:
 - An exited SSH tunnel is rebuilt on the same Mac loopback port, rediscovering
   the private container address and revalidating auth. Setup uses at most four
   attempts at 5/15/30s; three reconnect episodes in 180s exhaust the flap budget.
-  Auth/target/validation rejection stops immediately. This reuses the existing
+  Only recognized SSH network failures/timeouts retry; authentication, command,
+  target or validation rejection stops immediately. This reuses the existing
   forwarding socket and never exposes an inbound service or new port on VPS.
 - Claims, sync, uploads, thumbnail batches and completions are sent **once**.
   An ambiguous response can stop the process even if the tunnel recovers. No
@@ -129,7 +130,7 @@ second heartbeat writer or change recognition timing/backend status semantics.
 python -m unittest tools.instagram.test_connector tools.instagram.test_foreground tools.instagram.test_resident -v
 ```
 
-59 DB-free synthetic tests cover the existing parser/thumbnail contracts,
+61 DB-free synthetic tests cover the existing parser/thumbnail contracts,
 more than ten jobs, idle residency, hourly and wake refresh, restriction stop,
 single-attempt ambiguous mutations, read/heartbeat retry budgets, same-worker
 transport recovery, auth failure, flap budget, native no-UI denial/restore/free

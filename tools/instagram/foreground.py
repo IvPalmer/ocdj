@@ -47,12 +47,25 @@ def clean_env(token=False):
             if not k.lower().endswith('_proxy') and (token or k != 'DRAIN_TOKEN')}
 
 
+def network_failure(detail):
+    # Classify in memory only; never print SSH stderr, target names or details.
+    return any(message in (detail or '').lower() for message in (
+        'connection timed out', 'operation timed out', 'connection refused',
+        'no route to host', 'network is unreachable', 'could not resolve hostname',
+        'connection reset by peer', 'connection closed by remote host', 'broken pipe'))
+
+
 def backend_address(deadline=None):
-    value = subprocess.check_output(
-        SSH + ['main-instance', 'docker inspect ocdj-backend-1 --format '
-               '"{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"'],
-        text=True, stderr=subprocess.DEVNULL, env=clean_env(),
-        timeout=remaining(deadline, 15) if deadline else 15).strip()
+    try:
+        value = subprocess.check_output(
+            SSH + ['main-instance', 'docker inspect ocdj-backend-1 --format '
+                   '\"{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}\"'],
+            text=True, stderr=subprocess.PIPE, env=clean_env(),
+            timeout=remaining(deadline, 15) if deadline else 15).strip()
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode == 255 and network_failure(exc.stderr):
+            raise ConnectionError('ssh-network-unavailable') from None
+        raise RunError('backend-discovery-failed; check-existing-access') from None
     # Fail closed on multiple networks or unexpected targets; never guess.
     try:
         address = ipaddress.IPv4Address(value)
@@ -95,6 +108,9 @@ def wait_tunnel(tunnel, port, deadline):
     end = min(deadline, time.monotonic() + 10)
     while time.monotonic() < end:
         if tunnel.poll() is not None:
+            detail = tunnel.stderr.read(4096).decode('utf-8', 'replace') if tunnel.stderr else ''
+            if network_failure(detail):
+                raise ConnectionError('ssh-network-unavailable')
             raise RunError('tunnel-start-failed')
         try:
             with socket.create_connection(('127.0.0.1', port), timeout=.1):
@@ -123,6 +139,8 @@ def stop(process):
         except ProcessLookupError:
             pass
         process.wait(timeout=2)
+        if process.stderr is not None:
+            process.stderr.close()
 
 
 def supervise(tunnel, child, deadline, reconnect=None):
@@ -198,18 +216,17 @@ def run(duration, resident=False):
                                 SSH + ['-N', '-o', 'ExitOnForwardFailure=yes', '-L',
                                        f'127.0.0.1:{port}:{address}:8002', 'main-instance'],
                                 env=clean_env(), start_new_session=True,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                             wait_tunnel(tunnel, port, deadline)
                             probe(port, token, remaining(deadline))
                             return
-                        except (TimeoutError, OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                        except (TimeoutError, OSError, subprocess.TimeoutExpired):
                             stop(tunnel)
                             if not resident or attempt == 3: raise
-                        except RunError as exc:
+                        except RunError:
                             stop(tunnel)
                             # Auth/validation rejection cannot be retried.
-                            if str(exc) != 'tunnel-start-failed' or not resident or attempt == 3:
-                                raise
+                            raise
                 connect()
                 mode = 'resident' if resident else str(duration) + 's'
                 print(f'private-auth-verified; starting Profile 1 connector; mode={mode}; Ctrl-C stops', flush=True)
