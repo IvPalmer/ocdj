@@ -22,7 +22,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         second = PipelineItem.objects.create(original_filename='second.wav',
             current_path=str(self.path), artist='Fixture artist', title='Second tone', stage='ready')
         PipelineItem.objects.create(original_filename='missing.wav',
-            current_path=str(self.downloads / 'missing.wav'), title='Missing tone')
+            current_path=str(self.downloads / 'missing.wav'), artist='Fixture artist', title='Missing tone')
         archived_item = PipelineItem.objects.create(original_filename='archived.aiff', artist='Archived credit',
             title='Archived tone', stage='published', archive_state='archived',
             archived_at=timezone.now(), music_persistent_id='fixture', sha256='a' * 64)
@@ -71,7 +71,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     page.goto(self.live_server_url + '/organize')
                     player = page.get_by_role('region', name='Persistent player')
                     expect(page.get_by_text('File unavailable on server', exact=True)).to_be_visible()
-                    expect(page.get_by_role('button', name='Play Missing tone', exact=True)).to_have_count(0)
+                    expect(page.get_by_role('button', name='Play Fixture artist — Missing tone', exact=True)).to_have_count(0)
                     page.get_by_role('button', name='Play Fixture artist — Pipeline tone', exact=True).click()
                     page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
                     expect(player.get_by_role('button', name='In Wanted')).to_have_count(0)
