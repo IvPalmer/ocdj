@@ -8,6 +8,7 @@ import time
 import logging
 import unicodedata
 import requests
+from urllib.parse import quote
 from django.conf import settings
 from rapidfuzz import fuzz
 
@@ -141,6 +142,21 @@ class SlskdClient:
         r = self.session.get(self._url(f'/users/{username}/browse'), timeout=120)
         r.raise_for_status()
         return r.json()
+
+    def remove_download_history(self, username, transfer_id):
+        """Remove an already terminal transfer from slskd's history.
+
+        slskd 0.24.5 uses DELETE with remove=true, not a state-changing PUT.
+        The caller must select terminal transfers; this endpoint also cancels
+        active transfers if called for one. It does not delete downloaded audio.
+        """
+        r = self.session.delete(
+            self._url(f'/transfers/downloads/{quote(username, safe="")}/{quote(transfer_id, safe="")}'),
+            params={'remove': 'true'},
+            timeout=DEFAULT_TIMEOUT,
+        )
+        if r.status_code != 404:  # Already removed is a successful retry.
+            r.raise_for_status()
 
     def cancel_download(self, username, transfer_id, remove=False):
         """Cancel a download transfer. If remove=True, also remove from slskd."""

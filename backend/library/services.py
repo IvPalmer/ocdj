@@ -175,7 +175,7 @@ def scan_library():
                 updated += 1
 
     # Mark files not seen on disk as missing
-    missing_count = LibraryTrack.objects.filter(missing=False).exclude(
+    missing_count = LibraryTrack.objects.filter(missing=False).exclude(source='mac_snapshot').exclude(
         file_path__in=seen_paths
     ).update(missing=True)
 
@@ -194,6 +194,7 @@ def get_track_metadata(file_path):
 
 def update_track_metadata(track, data):
     """Write metadata changes to file and update DB record."""
+    track.require_local_file()
     from organize.services.tagger import write_tags
 
     filepath = track.file_path

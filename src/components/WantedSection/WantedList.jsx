@@ -1,10 +1,10 @@
+import WantedPlayback from '../Player/WantedPlayback'
 import { useState } from 'react'
 import {
   useWantedItems, useWantedSources, useCreateWantedItem,
   useUpdateWantedItem, useDeleteWantedItem, useBulkUpdateStatus,
   useBulkDeleteItems, useAddToQueue, useSearch,
 } from '../../api/hooks'
-import usePreviewPlayer from '../shared/usePreviewPlayer'
 import StatusBadge, { STATUS_LABELS } from '../shared/StatusBadge'
 import AddItemForm from './AddItemForm'
 import ImportPanel from './ImportPanel'
@@ -150,7 +150,6 @@ function WantedList() {
   const [editingItem, setEditingItem] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [queuingId, setQueuingId] = useState(null)
-  const { toggle: togglePreview, playingId, loadingId: loadingPreviewId } = usePreviewPlayer()
 
   const { data, isLoading } = useWantedItems({
     ...filters,
@@ -348,19 +347,7 @@ function WantedList() {
                   {new Date(item.added).toLocaleDateString('pt-BR')}
                 </td>
                 <td className="td-actions">
-                  <button
-                    className={`btn btn-xs${playingId === item.id ? ' btn-xs--active' : ''}`}
-                    onClick={() => togglePreview(item)}
-                    disabled={loadingPreviewId === item.id
-                      || (item.preview_checked && !item.preview_url)}
-                    title={item.preview_checked && !item.preview_url
-                      ? 'No preview — not in iTunes or Deezer'
-                      : 'Play 30s preview'}
-                  >
-                    {loadingPreviewId === item.id ? '…'
-                      : playingId === item.id ? '■'
-                      : (item.preview_checked && !item.preview_url) ? '—' : '▶'}
-                  </button>
+                  <WantedPlayback item={item} />
                   <button
                     className="btn btn-xs"
                     onClick={() => setEditingItem(item)}

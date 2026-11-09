@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path('match/', views.track_match, name='library-match'),
     path('tracks/', views.track_list, name='library-tracks'),
     path('tracks/<int:pk>/', views.track_detail, name='library-track-detail'),
     path('tracks/<int:pk>/update/', views.track_update, name='library-track-update'),

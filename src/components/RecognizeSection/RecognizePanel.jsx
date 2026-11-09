@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import TrackPlayback, { recognizedTrack } from '../Player/TrackPlayback'
 import {
   useRecognizeJobs,
   useRecognizeJob,
@@ -123,7 +124,7 @@ function ProgressBar({ job }) {
   )
 }
 
-function DescriptionTracks({ tracks }) {
+function DescriptionTracks({ tracks, job }) {
   const [expanded, setExpanded] = useState(false)
 
   if (!tracks || tracks.length === 0) return null
@@ -147,6 +148,7 @@ function DescriptionTracks({ tracks }) {
                     {t.artist && <span className="track-artist">{t.artist}</span>}
                     {t.artist && t.title && ' \u2014 '}
                     <span className="track-title">{t.title}</span>
+                    <TrackPlayback track={recognizedTrack({ ...t, timestamp_start: t.timestamp }, { ...job, tracklist: [] }, i)} unavailable="No supported audio source for this description track." />
                   </td>
                 </tr>
               ))}
@@ -158,148 +160,12 @@ function DescriptionTracks({ tracks }) {
   )
 }
 
-function getYouTubeId(url) {
-  if (!url) return null
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/embed\/)([^&?/]+)/)
-  return m ? m[1] : null
-}
-
-function useSoundCloudWidget(iframeRef, url) {
-  const widgetRef = useRef(null)
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    if (!url || !iframeRef.current) return
-    setReady(false)
-
-    const encodedUrl = encodeURIComponent(url)
-    iframeRef.current.src = `https://w.soundcloud.com/player/?url=${encodedUrl}&color=%23ff5500&auto_play=false&hide_related=true&show_comments=false&show_user=true&show_reposts=false&show_teaser=false&visual=false`
-
-    function init() {
-      if (!iframeRef.current || !window.SC) return
-      const w = window.SC.Widget(iframeRef.current)
-      widgetRef.current = w
-      w.bind(window.SC.Widget.Events.READY, () => {
-        setReady(true)
-      })
-    }
-
-    if (!window.SC) {
-      const script = document.createElement('script')
-      script.src = 'https://w.soundcloud.com/player/api.js'
-      script.onload = init
-      document.body.appendChild(script)
-    } else {
-      setTimeout(init, 200)
-    }
-  }, [url])
-
-  const seekAndPlay = useCallback((seconds) => {
-    const w = widgetRef.current
-    if (!w) return
-    w.seekTo(seconds * 1000)
-    w.play()
-  }, [])
-
-  return { ready, seekAndPlay }
-}
-
-function useYouTubePlayer(containerRef, url) {
-  const playerRef = useRef(null)
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    if (!url || !containerRef.current) return
-    const videoId = getYouTubeId(url)
-    if (!videoId) return
-    setReady(false)
-
-    function create() {
-      if (playerRef.current?.destroy) playerRef.current.destroy()
-      playerRef.current = new window.YT.Player(containerRef.current, {
-        videoId,
-        playerVars: { autoplay: 0, modestbranding: 1, rel: 0 },
-        events: { onReady: () => setReady(true) },
-      })
-    }
-
-    if (!window.YT) {
-      window.onYouTubeIframeAPIReady = create
-      const script = document.createElement('script')
-      script.src = 'https://www.youtube.com/iframe_api'
-      document.body.appendChild(script)
-    } else {
-      create()
-    }
-
-    return () => {
-      if (playerRef.current?.destroy) playerRef.current.destroy()
-    }
-  }, [url])
-
-  const seekAndPlay = useCallback((seconds) => {
-    const p = playerRef.current
-    if (!p) return
-    p.seekTo(seconds, true)
-    p.playVideo()
-  }, [])
-
-  return { ready, seekAndPlay }
-}
-
-function MixPlayer({ url, seekRef }) {
-  const iframeRef = useRef(null)
-  const ytContainerRef = useRef(null)
-  const platform = getPlatform(url)
-
-  const sc = useSoundCloudWidget(
-    iframeRef,
-    platform?.name === 'SoundCloud' ? url : null,
-  )
-  const yt = useYouTubePlayer(
-    ytContainerRef,
-    platform?.name === 'YouTube' ? url : null,
-  )
-
-  // Keep seekRef in sync with the active player
-  useEffect(() => {
-    if (platform?.name === 'SoundCloud' && sc.ready) {
-      seekRef.current = sc.seekAndPlay
-    } else if (platform?.name === 'YouTube' && yt.ready) {
-      seekRef.current = yt.seekAndPlay
-    }
-  }, [sc.ready, yt.ready, sc.seekAndPlay, yt.seekAndPlay, platform, seekRef])
-
-  if (!platform || (platform.name !== 'SoundCloud' && platform.name !== 'YouTube')) {
-    return null
-  }
-
-  return (
-    <div className="mix-player">
-      {platform.name === 'SoundCloud' && (
-        <iframe
-          ref={iframeRef}
-          className="mix-player__iframe mix-player__iframe--sc"
-          scrolling="no"
-          frameBorder="no"
-          allow="autoplay"
-        />
-      )}
-      {platform.name === 'YouTube' && (
-        <div ref={ytContainerRef} className="mix-player__iframe mix-player__iframe--yt" />
-      )}
-    </div>
-  )
-}
-
 function Tracklist({ job }) {
   const [selected, setSelected] = useState(() =>
     new Set(job.tracklist.map((_, i) => i))
   )
   const [successMsg, setSuccessMsg] = useState('')
-  const [playingIdx, setPlayingIdx] = useState(null)
   const addToWanted = useAddRecognizeToWanted()
-  const seekRef = useRef(null)
 
   const tracklist = job.tracklist || []
 
@@ -317,14 +183,6 @@ function Tracklist({ job }) {
       setSelected(new Set())
     } else {
       setSelected(new Set(tracklist.map((_, i) => i)))
-    }
-  }
-
-  function handlePlay(idx) {
-    const track = tracklist[idx]
-    if (seekRef.current) {
-      seekRef.current(track.timestamp_start)
-      setPlayingIdx(idx)
     }
   }
 
@@ -349,7 +207,7 @@ function Tracklist({ job }) {
         <h3>Tracklist ({tracklist.length} tracks)</h3>
         <EngineBadge engine={job.engine} />
       </div>
-      <MixPlayer url={job.url} seekRef={seekRef} />
+      <p className="track-meta">Play identified segments in the persistent bottom player.</p>
       {successMsg && <div className="recognize-success">{successMsg}</div>}
       <table className="recognize-table">
         <thead>
@@ -371,7 +229,7 @@ function Tracklist({ job }) {
         </thead>
         <tbody>
           {tracklist.map((track, i) => (
-            <tr key={i} className={playingIdx === i ? 'track-row--playing' : ''}>
+            <tr key={i}>
               <td>
                 <input
                   type="checkbox"
@@ -380,13 +238,7 @@ function Tracklist({ job }) {
                 />
               </td>
               <td>
-                <button
-                  className="track-play-btn"
-                  onClick={() => handlePlay(i)}
-                  title={`Play from ${formatTimestamp(track.timestamp_start)}`}
-                >
-                  {playingIdx === i ? '\u23F8' : '\u25B6'}
-                </button>
+                <TrackPlayback track={recognizedTrack(track, job, i)} unavailable="No direct audio source or supported YouTube/SoundCloud mix. Shazam links identify tracks; they are not audio streams." />
               </td>
               <td className="track-timestamp">
                 {formatTimestamp(track.timestamp_start)}
@@ -518,7 +370,7 @@ function ActiveJob({ jobId }) {
       {job.status === 'completed' && (
         <>
           <Tracklist job={job} />
-          <DescriptionTracks tracks={job.description_tracks} />
+          <DescriptionTracks job={job} tracks={job.description_tracks} />
         </>
       )}
     </>

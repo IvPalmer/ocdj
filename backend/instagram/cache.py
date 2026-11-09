@@ -39,8 +39,8 @@ def cleanup():
 
 
 def store(upload):
-    if upload.content_type != 'video/mp4' or upload.size > MAX_BYTES or upload.size < 12:
-        raise ValidationError('Expected MP4 video, at most 64 MiB')
+    if upload.content_type not in ['video/mp4', 'image/jpeg', 'image/png'] or upload.size > MAX_BYTES or upload.size < 12:
+        raise ValidationError('Expected MP4, JPEG or PNG, at most 64 MiB')
     key = uuid.uuid4().hex
     p = path(key)
     try:
@@ -61,9 +61,14 @@ def _write(upload, p):
         os.chmod(p, 0o600)
         size = 0
         for chunk in upload.chunks():
-            if size == 0 and chunk[4:8] != b'ftyp':
-                raise ValidationError('Invalid MP4 header')
+            if size == 0 and not valid_header(chunk, upload.content_type):
+                raise ValidationError('Invalid media header')
             size += len(chunk)
             if size > MAX_BYTES:
                 raise ValidationError('Video exceeds 64 MiB')
             out.write(chunk)
+
+
+def valid_header(chunk, content_type):
+    return {'video/mp4': chunk[4:8] == b'ftyp', 'image/jpeg': chunk.startswith(b'\xff\xd8\xff'),
+            'image/png': chunk.startswith(b'\x89PNG\r\n\x1a\n')}.get(content_type, False)

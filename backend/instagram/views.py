@@ -1,7 +1,9 @@
 import re
+import os
 import secrets
 from datetime import timedelta
 from django.db import transaction
+from django.db.models import Q
 from django.core.files.uploadhandler import FileUploadHandler, StopUpload
 from django.http import StreamingHttpResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -15,6 +17,7 @@ from wanted.services.preview import find_exact_preview
 from .models import Collection, Post, Media
 from .serializers import COLLECTION_ID, Candidate, SyncInput, EditInput, Completion
 from . import cache
+from .recognition import explicit_candidates
 
 
 def collection():
@@ -31,9 +34,11 @@ def child_json(m):
     ready = bool(m.cache_key and m.cache_until and m.cache_until > timezone.now())
     return dict(id=m.pk, instagram_id=m.instagram_id, position=m.position, kind=m.kind,
                 status=m.status, candidates=m.candidates, artist=m.artist, title=m.title,
+                recognition=m.recognition, playback_requested=m.playback_requested, playback_error=m.playback_error,
                 reviewed=m.reviewed, wanted_id=m.wanted_id,
                 wanted_matches_current=wanted_matches_current(m), queued=m.queued,
-                playback_url=f'/api/instagram/media/{m.pk}/stream/' if ready else None)
+                playback_version=m.cache_until.isoformat() if ready else None,
+                playback_url=f'/api/instagram/media/{m.pk}/stream/?v={int(m.cache_until.timestamp()*1000000)}' if ready else None)
 
 
 @api_view(['GET'])
@@ -77,7 +82,21 @@ def media_action(request, pk, action='edit'):
             if m.kind != 'video':
                 raise ValidationError('Only videos can be recognized')
             if not m.queued:
-                m.queued = True; m.status = 'pending'
+                candidates, records = explicit_candidates(m.post.caption, m.position)
+                if candidates:
+                    m.candidates = candidates; m.status = 'identified'
+                    m.recognition = dict(source='caption', certainty='explicit', outcome='identified',
+                                         comments='not-read', records=records)
+                    if not m.reviewed and len(candidates) == 1 and not (m.artist or m.title):
+                        m.artist = candidates[0]['artist']; m.title = candidates[0]['title']
+                else:
+                    m.queued = True; m.status = 'pending'; m.recognition = {}
+                    if m.cache_key and m.cache_until and m.cache_until > timezone.now():
+                        from .tasks import recognize_cached
+                        transaction.on_commit(lambda: recognize_cached(m.pk))
+        elif action == 'playback' and request.method == 'POST':
+            # Explicit retries must also refresh a missing/corrupt cached object.
+            m.playback_requested = True; m.playback_error = False
         elif action == 'wishlist' and request.method == 'POST':
             if not m.artist or not m.title:
                 raise ValidationError('Choose or correct artist and title first')
@@ -135,14 +154,23 @@ def sync(request):
 def claim(request):
     with transaction.atomic():
         now = timezone.now()
-        m = Media.objects.select_for_update(skip_locked=True).filter(queued=True, active=True,
-            post__active=True, kind='video').exclude(lease_until__gt=now).order_by('post__rank', 'position').first()
+        m = Media.objects.select_for_update(skip_locked=True).filter(Q(queued=True) | Q(playback_requested=True), active=True,
+            post__active=True).exclude(lease_until__gt=now).order_by('post__rank', 'position').first()
         if not m:
             return Response(status=204)
+        m.lease_action = 'recognize' if m.queued else 'playback'
         m.lease_token = secrets.token_hex(24); m.lease_until = now + timedelta(minutes=10)
-        m.status = 'running'; m.save()
+        if m.queued: m.status = 'running'
+        m.save()
         return Response(dict(id=m.pk, instagram_id=m.instagram_id, token=m.lease_token,
-                             permalink=m.post.permalink, lease_until=m.lease_until))
+                             permalink=m.post.permalink, post_instagram_id=m.post.instagram_id, position=m.position,
+                             action=m.lease_action, mime='video/mp4' if m.kind == 'video' else 'image/jpeg', lease_until=m.lease_until))
+
+
+def current_lease(m, token):
+    return (m.active and m.post.active and (m.queued or m.playback_requested)
+            and m.lease_token and m.lease_until and m.lease_until > timezone.now()
+            and secrets.compare_digest(m.lease_token.encode(), token.encode()))
 
 
 @api_view(['POST'])
@@ -152,13 +180,22 @@ def complete(request, pk):
     d = s.validated_data
     with transaction.atomic():
         m = get_object_or_404(Media.objects.select_for_update(), pk=pk)
-        if not m.queued or not m.lease_token or not secrets.compare_digest(m.lease_token, d['token']) or m.lease_until <= timezone.now():
+        if not current_lease(m, d['token']):
             return Response({'error': 'stale lease'}, status=409)
-        m.status = d['status']; m.candidates = d['candidates']; m.queued = False
-        m.lease_token = ''; m.lease_until = None
-        if m.candidates and not m.reviewed:
-            m.artist = m.candidates[0]['artist']; m.title = m.candidates[0]['title']
+        if m.lease_action != 'playback' and m.queued:
+            m.status = d['status']; m.candidates = d['candidates']; m.queued = False
+            m.recognition = d.get('recognition', dict(source='shazam', certainty='tentative',
+                                 outcome=d['status'], comments='not-read'))
+            if len(m.candidates) == 1 and not m.reviewed and not (m.artist or m.title):
+                m.artist = m.candidates[0]['artist']; m.title = m.candidates[0]['title']
+        if m.lease_action == 'playback' or (m.cache_key and m.cache_until and m.cache_until > timezone.now()):
+            m.playback_error = m.playback_requested and d['status'] == 'error'
+            m.playback_requested = False
+        m.lease_token = ''; m.lease_until = None; m.lease_action = ''
         m.save()
+        if m.queued and m.cache_key and m.cache_until and m.cache_until > timezone.now():
+            from .tasks import recognize_cached
+            transaction.on_commit(lambda: recognize_cached(m.pk))
     return Response({'ok': True})
 
 
@@ -172,27 +209,45 @@ class BoundedUpload(FileUploadHandler):
         return None
 
 
+def may_upload(m, token):
+    # Only the synthetic fixture seeds cache objects without claiming jobs.
+    if not token and not m.lease_token and m.post.collection.fixture:
+        return m.active and m.post.active
+    return current_lease(m, token)
+
+
 @api_view(['POST'])
 @require_drain_token
 def upload(request, pk):
-    m = get_object_or_404(Media, pk=pk, active=True, post__active=True, kind='video')
+    token = request.headers.get('X-Instagram-Lease', '')
+    m = get_object_or_404(Media.objects.select_related('post__collection'), pk=pk, active=True, post__active=True)
+    if not may_upload(m, token):
+        return Response({'error': 'stale lease'}, status=409)
     if int(request.META.get('CONTENT_LENGTH') or 0) > cache.MAX_BYTES + 1024 * 1024:
         return Response({'error': 'Upload exceeds limit'}, status=413)
     request._request.upload_handlers.insert(0, BoundedUpload(request._request))
     f = request.FILES.get('file')
     if not f:
         raise ValidationError('Missing file')
+    if (m.kind == 'video') != (f.content_type == 'video/mp4'):
+        raise ValidationError('Media type does not match source')
     key = cache.store(f)
+    installed = False
     try:
         with transaction.atomic():
-            m = Media.objects.select_for_update().get(pk=m.pk)
+            m = Media.objects.select_related('post__collection').select_for_update(of=('self',)).get(pk=pk)
+            if not may_upload(m, token):
+                return Response({'error': 'stale lease'}, status=409)
             previous = m.cache_key
-            m.cache_key = key; m.cache_until = timezone.now() + cache.TTL; m.save()
-        if previous:
-            cache.path(previous).unlink(missing_ok=True)
-    except Exception:
-        cache.path(key).unlink(missing_ok=True)
-        raise
+            m.cache_key = key
+            m.cache_until = timezone.now() + cache.TTL
+            m.save(update_fields=['cache_key', 'cache_until'])
+        installed = True
+    finally:
+        if not installed:
+            cache.path(key).unlink(missing_ok=True)
+    if previous:
+        cache.path(previous).unlink(missing_ok=True)
     cache.cleanup()
     return Response({'ok': True})
 
@@ -209,7 +264,9 @@ def stream(request, pk):
         f = cache.path(m.cache_key).open('rb')
     except FileNotFoundError:
         return Response(status=410)
-    size = cache.path(m.cache_key).stat().st_size
+    header = f.read(12); f.seek(0)
+    mime = 'video/mp4' if m.kind == 'video' else 'image/png' if header.startswith(b'\x89PNG') else 'image/jpeg'
+    size = os.fstat(f.fileno()).st_size
     start, end, code = 0, size-1, 200
     value = request.headers.get('Range')
     if value:
@@ -232,9 +289,9 @@ def stream(request, pk):
         finally:
             f.close()
     if request.method == 'HEAD':
-        f.close(); response = HttpResponse(status=code, content_type='video/mp4')
+        f.close(); response = HttpResponse(status=code, content_type=mime)
     else:
-        response = StreamingHttpResponse(chunks(), status=code, content_type='video/mp4')
+        response = StreamingHttpResponse(chunks(), status=code, content_type=mime)
     response['Content-Length'] = end-start+1
     response['Accept-Ranges'] = 'bytes'; response['Cache-Control'] = 'private, no-store'
     response['X-Content-Type-Options'] = 'nosniff'
