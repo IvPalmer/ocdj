@@ -111,7 +111,8 @@ def publish_recognition(job, tracklist):
         job.tracklist = tracks
         job.tracks_found = len(tracks)
         # Avoid stale job object fields overwriting concurrent metadata edits.
-        job.save(update_fields=['tracklist', 'tracks_found', 'status', 'engine', 'segments_done', 'updated'])
+        job.save(update_fields=['tracklist', 'tracks_found', 'raw_results', 'acrcloud_calls',
+                                'status', 'engine', 'segments_done', 'updated'])
     return tracks
 
 

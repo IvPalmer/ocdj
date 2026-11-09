@@ -49,6 +49,10 @@ class CleanupPolicyTests(unittest.TestCase):
         self.assertEqual(evaluate(snapshot(artist='Wrong tag'), evidence())['changes'], {})
         self.assertEqual(evaluate(snapshot(title='Incomplete'), evidence())['changes'], {})
 
+    def test_placeholder_artist_is_not_a_recovered_credit(self):
+        for artist in ['Various Artists', '[unknown]']:
+            self.assertEqual(evaluate(snapshot(), evidence(artist=artist))['changes'], {})
+
     def test_protected_blank_is_preserved(self):
         self.assertEqual(evaluate(snapshot(protected=True), evidence())['reason'], 'protected')
 
@@ -107,6 +111,16 @@ class CatalogTests(unittest.TestCase):
         with patch('wanted.services.cleanup_evidence._get_json') as get:
             self.assertEqual(collect_evidence(snapshot(isrc='', title=''))['kind'], 'not_queried')
         get.assert_not_called()
+
+    def test_malformed_identity_fields_cannot_authorize(self):
+        for changes in [{'isrcs': CODE}, {'isrcs': [None]}, {'disambiguation': {}},
+                        {'disambiguation': []}]:
+            row = {'id': RECORDING, 'title': TITLE, 'artist-credit': [{'name': 'Fixture Artist'}],
+                   'isrcs': [CODE], **changes}
+            with patch('wanted.services.cleanup_evidence._get_json', return_value={'isrc': CODE, 'recordings': [row]}), \
+                 patch('wanted.services.cleanup_evidence.time.sleep'):
+                with self.assertRaises(ValueError):
+                    collect_evidence(snapshot())
 
     def _session(self, status=200, chunks=None):
         response = MagicMock(status_code=status)

@@ -74,10 +74,16 @@ def collect_evidence(snapshot):
             if not isinstance(credits, list) or not credits or len(credits) > 30:
                 raise ValueError('Invalid credits')
             artist = ''.join(_text(c['name']) + c.get('joinphrase', '') for c in credits)
+            isrcs = row.get('isrcs', [])
+            disambiguation = row.get('disambiguation', '')
+            if (not isinstance(isrcs, list) or len(isrcs) > 100
+                    or any(not isinstance(code, str) or clean_isrc(code) != code for code in isrcs)
+                    or not isinstance(disambiguation, str) or len(disambiguation) > 500):
+                raise ValueError('Invalid recording identity')
             candidates.append({'provider': 'musicbrainz', 'id': recording_id,
                                'artist': _text(artist), 'title': _text(row['title']),
-                               'isrc': isrc, 'isrcs': row.get('isrcs', []),
-                               'disambiguation': row.get('disambiguation', ''),
+                               'isrc': isrc, 'isrcs': isrcs,
+                               'disambiguation': disambiguation,
                                'url': f'https://musicbrainz.org/recording/{recording_id}'})
         return {'kind': 'isrc_lookup', 'isrc': isrc, 'candidates': candidates}
 
@@ -119,6 +125,8 @@ def evaluate(snapshot, evidence):
                 and snapshot['isrc'] in candidate.get('isrcs', [])
                 and not candidate.get('disambiguation')
                 and same_name(snapshot.get('title'), candidate.get('title'))
+                and not same_name(candidate.get('artist', ''), 'Various Artists')
+                and not same_name(candidate.get('artist', ''), '[unknown]')
                 and candidate.get('artist') and not snapshot.get('artist', '').strip()):
             result.update(changes={'artist': candidate['artist']}, reason='exact_isrc_and_full_title')
             return result

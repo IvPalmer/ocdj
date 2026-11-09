@@ -293,6 +293,59 @@ class CleanupIntegrationTests(TestCase):
         self.assertEqual(job.tracklist[0]['title'], TITLE)
         self.assertEqual(receipt.snapshot['artist'], '')
 
+    def test_actual_pipeline_completion_captures_and_retains_raw_results(self):
+        from contextlib import ExitStack
+        from recognize.services.pipeline import _recognize_worker
+        job = self.job()
+        # Fresh Shazam-only pass: all I/O and recognition are synthetic. This
+        # exercises the actual final-save entry point, not just its helper.
+        patches = {
+            '_find_existing_audio': None,
+            'lookup_by_url': None,
+            'submit_url': None,
+            'download_audio': ('/synthetic/audio.mp3', {'title': 'Synthetic mix', 'duration': 30}),
+            'parse_tracklist_from_description': [],
+            '_has_acrcloud_credentials': False,
+            '_tuning': {'segment_duration': 10, 'segment_step': 20, 'gap_threshold': 30},
+            'segment_audio': [('/synthetic/segment.mp3', 0)],
+            'shazam_recognize_segments': raw(),
+            'find_gaps': [],
+            'find_single_segment_candidates': [],
+            'cluster_results': [track()],
+        }
+        with ExitStack() as stack:
+            for name, value in patches.items():
+                stack.enter_context(patch(f'recognize.services.pipeline.{name}', return_value=value))
+            stack.enter_context(patch('recognize.services.pipeline.shutil.rmtree'))
+            stack.enter_context(patch('recognize.services.pipeline.db.connections.close_all'))
+            _recognize_worker(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, 'completed')
+        self.assertEqual(job.raw_results, raw())
+        receipt = MetadataCleanup.objects.get(job_id=job.pk)
+        self.assertEqual(receipt.snapshot['isrc'], CODE)
+
+    def test_progress_save_does_not_erase_in_flight_manual_edit(self):
+        from recognize.services.pipeline import _save_progress
+        from recognize.views import update_track
+        job = self.job(tracklist=[track()])
+        response = update_track(APIRequestFactory().patch('/', {'artist': 'Human'}, format='json'), job.pk, 0)
+        self.assertEqual(response.status_code, 200)
+        job.segments_done = 5
+        _save_progress(job)
+        job.refresh_from_db()
+        self.assertEqual(job.tracklist[0]['artist'], 'Human')
+        self.assertTrue(job.tracklist[0]['manual'])
+
+    def test_rerun_preserves_manual_rows(self):
+        from recognize.views import rerun_job
+        job = self.job(tracklist=[track(artist='Human', manual=True)])
+        with patch('recognize.views.run_recognize'):
+            response = rerun_job(APIRequestFactory().post('/'), job.pk)
+        self.assertEqual(response.status_code, 202)
+        job.refresh_from_db()
+        self.assertEqual(job.tracklist[0]['artist'], 'Human')
+
     def test_publish_repeat_retains_applied_value_and_occurrence(self):
         job = self.job()
         publish_recognition(job, [track()])
