@@ -21,6 +21,8 @@
 .ig-queue small { font-weight: 400; color: var(--text-muted); }
 .ig-post-info { display: flex; align-items: start; gap: var(--s-3); min-width: 0; overflow-wrap: anywhere; }
 .ig-post-number { font: 12px var(--mono); color: var(--text-muted); padding-top: 3px; }
+.ig-review-badge { display: inline-flex; align-items: center; gap: var(--s-1); margin-bottom: var(--s-2); padding: 4px 7px; border-radius: var(--r-sm); background: var(--text); color: var(--bg); font: 600 11px var(--mono); white-space: nowrap; }
+.ig-review-badge-complete { background: var(--accent-green); }
 .ig-focus { border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-5); min-width: 0; }
 .ig-source { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-4); font-size: 13px; }
 .ig-source a { color: var(--accent); }

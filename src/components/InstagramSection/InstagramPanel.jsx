@@ -143,6 +143,8 @@ export default function InstagramPanel() {
           <nav className={postView === 'grid' ? 'ig-queue ig-grid' : 'ig-queue'} aria-label="Saved posts">
             {visiblePosts.map(p => {
               const postVideos = p.media.filter(m => m.kind === 'video')
+              const reviewedCount = postVideos.filter(m => m.reviewed).length
+              const fullyReviewed = postVideos.length > 0 && reviewedCount === postVideos.length
               return <button key={p.id} aria-current={post.id === p.id ? 'true' : undefined} onClick={() => choosePost(p.id)}>
                 {postView === 'grid' && <span className="ig-cover" aria-hidden="true">
                   {p.thumbnail_url ? <PostThumbnail key={p.thumbnail_url} src={p.thumbnail_url} /> : <span>Instagram</span>}
@@ -150,9 +152,12 @@ export default function InstagramPanel() {
                 <span className="ig-post-info">
                   <span className="ig-post-number">{String(posts.indexOf(p)+1).padStart(2, '0')}</span>
                   <span>
+                    {reviewedCount > 0 && <span className={`ig-review-badge${fullyReviewed ? ' ig-review-badge-complete' : ''}`}>
+                      {fullyReviewed ? <><span aria-hidden="true">✓</span>Reviewed</> : `${reviewedCount}/${postVideos.length} reviewed`}
+                    </span>}
                     <strong>@{p.author || 'Instagram'}</strong>
                     <span className="ig-caption">{p.caption || 'Saved post'}</span>
-                    <small>{postVideos.length} videos · {postVideos.filter(m => m.reviewed).length} reviewed</small>
+                    <small>{postVideos.length} videos</small>
                   </span>
                 </span>
               </button>
