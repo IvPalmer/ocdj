@@ -120,3 +120,67 @@ Test-first runs exposed absent service/command at `5921637` and the known-releas
 subject gap at `77aa619` before their respective implementations. Source AST and
 stacked whitespace checks passed. Self-review only; no independent reviewer,
 local DB/API, live/provider validation, production access, merge or deployment.
+
+## Explicit catalog evidence slice (stacked on #30)
+
+The offline mode above stays available unchanged. A second, mutually exclusive
+mode gathers candidates from **iTunes**, already used by Wanted's preview service:
+
+```sh
+python backend/manage.py research_wanted_cleanup \
+  --receipt-json /private/receipt.json --catalog itunes
+```
+
+This is an explicit network action: it sends only the retained artist (when
+present) and full title to Apple's public search endpoint. With missing artist,
+the query is title-only. No DB export or subject lookup occurs. The receipt must
+validate before requesting; blank titles or queries over 512 characters produce
+`lookup.status: not_queried`. It never reads configuration/credentials for a
+provider. The request session disables environment auth/proxies (including netrc),
+follows no redirects and makes one request without retries, pagination, fallback,
+detail fetches or audio requests. The helper lives in the existing preview service;
+preview selection and all existing callers are unchanged.
+
+Bounds: three song results requested; a 12-second connect/read timeout (not a
+whole-operation wall-clock deadline); at most 128 KiB of decompressed response
+body; strict response/count/row validation; 700-character artist/title/URL fields.
+Larger/malformed or non-song responses fail closed, without partial evidence.
+Response size is enforced while streaming, including missing/incorrect length
+headers. No transport exception text, URL, payload or private path is logged.
+
+Output retains #30's receipt/evidence/candidate/reason/change/application contract
+and adds `lookup` with provider, exact query, result limit, status and reason:
+
+- `results`: every returned song retained, including its track ID, source URL,
+  raw artist/title and complete bounded provider row. A preview URL is not required.
+- `no_result`: a valid empty result page; not proof the catalog lacks the recording.
+- `transport_failure`: timeout, connection/HTTP/redirect failure; never retried.
+- `invalid_response`: unusable JSON, oversize response, invalid row/count or locator.
+- `not_queried`: absent title or oversized query; no request made.
+
+All candidates feed the **unchanged #30 evaluator** as `granularity: unknown`.
+An iTunes song is a catalog track hit, not proof that the Wanted receipt identifies
+that particular recording/version. Even one exact title hit cannot suggest an
+artist: `source_not_recording` keeps `changes: {}` and `applicable: false`.
+Same-title IDs, different artists, remix/original mix variants and duplicates all
+remain inspectable without choosing a first hit or voting. Raw version text and
+provider IDs survive even when #30's parser strips labels. Catalog identifiers
+identify search rows, not verified matches or approvals. Results are not persisted;
+stdout can be explicitly retained privately for review under #30's later gates.
+
+The three-result window is intentionally non-exhaustive; ordering, storefront,
+catalog availability and metadata quality can hide alternatives. There is no
+reliable identity selector, automatic cleanup, correction writer or durable review
+store in this slice. Provider output is untrusted text. No source URL is fetched.
+Django management invocation still performs normal app/settings initialization;
+`tools/test_wanted_cleanup.py` instead runs synthetic fixtures with minimal settings,
+no dotenv/project settings, credential reads, DB setup or API. Full backend suite
+and migration checks run only in disposable GitHub CI, per RUNTIME.md.
+
+Validation covers missing artist, exact remix, same-title distinct IDs/artists,
+version loss, preserved human fields/release subjects, invalid receipt/no request,
+empty results versus timeout/connection errors, malformed/non-song/oversized rows,
+HTTP/redirect failures, bad JSON/stream size limits and explicit command mode.
+No live provider call, live user data, tag write, background activation or deployment
+was used. Self-review only; no subagents. Rollback: remove catalog helper/service
+and command flag; offline #30 research and preview callers continue unchanged.
