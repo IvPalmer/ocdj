@@ -1,0 +1,44 @@
+name: Organize player fixtures
+on:
+  pull_request:
+    paths:
+      - 'backend/organize/**'
+      - 'backend/library/playback_cache.py'
+      - 'src/**'
+      - 'package*.json'
+      - '.github/workflows/organize-player.yml'
+jobs:
+  playback:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: fixture
+      POSTGRES_DB: postgres
+      HUEY_DB_PATH: /tmp/organize-fixture/huey.sqlite3
+      PAPERCLIP_SCRATCH_DIR: /tmp/organize-fixture
+      SECRET_KEY: synthetic-ci-fixture
+      ORGANIZE_BROWSER_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: mkdir -p "$PAPERCLIP_SCRATCH_DIR"
+      - run: pip install -r backend/requirements.txt -r tools/instagram/qa-requirements.txt
+      - run: python -m playwright install --with-deps chromium webkit
+      - run: npm ci && npm run build
+      - run: python backend/manage.py test organize.tests.test_playback organize.tests.test_playback_browser organize.tests.test_published_refresh --noinput

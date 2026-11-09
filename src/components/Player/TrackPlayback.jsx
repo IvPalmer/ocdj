@@ -41,9 +41,10 @@ export function recognizedTrack(track, job, index) {
     description: preview ? 'Catalog preview' : 'Original mix · identified segment' }
 }
 
-export default function TrackPlayback({ track, unavailable = 'No browser-playable audio source supplied.' }) {
+export default function TrackPlayback({ track, unavailable = 'No browser-playable audio source supplied.', sourceOnly = false }) {
   const player = usePlayer()
-  const playable = useIndexedPlayback(track)
+  const indexed = useIndexedPlayback(track)
+  const playable = sourceOnly && track.source ? track : indexed
   const label = [track.artist, track.title].filter(Boolean).join(' — ')
   return <span className="track-controls">
     {!playable.source ? <small className="track-no-source">{unavailable}</small> : <span className="track-playback">
