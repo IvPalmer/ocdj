@@ -998,3 +998,60 @@ def pipeline_kick(request):
         'scan': scan,
         'count': count,
     })
+
+
+@api_view(['GET', 'HEAD'])
+def pipeline_audio(request, pk):
+    """Normal authenticated app ingress ONLY; never a signed-download exemption.
+
+    Read-only: no conversion, publishing, drain claims or metadata writes.
+    Revalidate availability when queued audio is actually requested.
+    """
+    from django.http import HttpResponse, StreamingHttpResponse
+    from library.playback_cache import byte_range
+    from .services.playback import open_audio, PlaybackUnavailable
+
+    try:
+        item = PipelineItem.objects.get(pk=pk)
+    except PipelineItem.DoesNotExist:
+        return Response({'error': 'Not found'}, status=404)
+    try:
+        handle, mime, size = open_audio(item)
+    except PlaybackUnavailable as exc:
+        response = Response({'error': str(exc)}, status=410)
+        response['Cache-Control'] = 'private, no-store'
+        return response
+    try:
+        start, end, code = byte_range(request.headers.get('Range'), size)
+    except ValueError:
+        handle.close()
+        return HttpResponse(status=416, headers={
+            'Content-Range': f'bytes */{size}', 'Cache-Control': 'private, no-store'})
+
+    def chunks():
+        try:
+            handle.seek(start)
+            remaining = end - start + 1
+            while remaining:
+                chunk = handle.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+        finally:
+            handle.close()
+
+    if request.method == 'HEAD':
+        handle.close()
+        response = HttpResponse(status=code, content_type=mime)
+    else:
+        response = StreamingHttpResponse(chunks(), status=code, content_type=mime)
+        response._resource_closers.append(handle.close)
+    response['Content-Length'] = end - start + 1
+    response['Accept-Ranges'] = 'bytes'
+    response['Cache-Control'] = 'private, no-store'
+    response['Content-Disposition'] = 'inline'
+    response['X-Content-Type-Options'] = 'nosniff'
+    if code == 206:
+        response['Content-Range'] = f'bytes {start}-{end}/{size}'
+    return response

@@ -6,6 +6,7 @@ import {
   useRefreshPublished, useRetryDrain,
   useConversionRules, useUpdateConversionRules,
 } from '../../api/hooks'
+import TrackPlayback, { directSource } from '../Player/TrackPlayback'
 import './OrganizePanel.css'
 
 const STAGES = [
@@ -631,6 +632,11 @@ function OrganizePanel() {
                   {item.metadata_source || '—'}
                 </span>
                 <span className="col-actions">
+                  <TrackPlayback sourceOnly track={{
+                    artist: item.artist, title: item.title || currentName,
+                    wantedId: item.wanted_item, source: directSource(item),
+                    description: 'Organize · server file',
+                  }} unavailable={item.playback_unavailable || 'File unavailable on server'} />
                   <button
                     className="btn btn-xs"
                     onClick={() => setEditingItem(item)}

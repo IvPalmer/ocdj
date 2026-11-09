@@ -10,6 +10,7 @@ urlpatterns = [
     path('pipeline/retag-clean/', views.pipeline_retag_clean, name='pipeline-retag-clean'),
     path('retag-directory/', views.retag_directory, name='retag-directory'),
     path('pipeline/<int:pk>/', views.pipeline_detail, name='pipeline-detail'),
+    path('pipeline/<int:pk>/audio/', views.pipeline_audio, name='pipeline-audio'),
     path('pipeline/<int:pk>/process/', views.pipeline_process_single, name='pipeline-process-single'),
     path('pipeline/<int:pk>/retry/', views.pipeline_retry, name='pipeline-retry'),
     path('pipeline/<int:pk>/skip/', views.pipeline_skip, name='pipeline-skip'),
