@@ -83,7 +83,7 @@ def read_audio(handle, fmt, size):
         return None
 
 
-def scan(root, collection_id, key, *, local_paths=None):
+def scan(root, collection_id, key, *, local_paths=None, include_ocdj_review=False):
     """Explicit root; ID3/TraxDB and symlinks are outside this snapshot's scope.
 
     Errors make the snapshot non-exportable. No filename-derived identity tags.
@@ -106,7 +106,18 @@ def scan(root, collection_id, key, *, local_paths=None):
     def walk_error(_error):
         counts['walk_errors'] += 1
 
-    for directory, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
+    def directories():
+        yield from os.walk(root, followlinks=False, onerror=walk_error)
+        if not include_ocdj_review:
+            return
+        review = root / 'ID3' / '_review'
+        if review.is_dir() and not review.is_symlink() and not review.parent.is_symlink():
+            try:
+                yield review, [], [entry.name for entry in review.iterdir() if entry.is_file()]
+            except OSError:
+                counts['walk_errors'] += 1
+
+    for directory, dirs, files in directories():
         for name in list(dirs):
             path = Path(directory) / name
             if name.casefold() in EXCLUDED:
@@ -137,7 +148,7 @@ def scan(root, collection_id, key, *, local_paths=None):
                 if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
                     phase = 'file_changed'
                     raise SnapshotError('File changed during metadata read.')
-                if row is None:
+                if row is None or (Path(directory) == root / 'ID3' / '_review' and not row.get('archive_item_id')):
                     counts['excluded_non_audio'] += 1
                     continue
                 relative = os.fsencode(path.relative_to(root))

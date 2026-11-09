@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from tools.mac_library.reveal_map import default_map_path
+from tools.mac_library.reveal_map import default_map_path, review_archive_path
 
 MAX_SOURCE = 512 * 1024 * 1024
 MAX_OUTPUT = 64 * 1024 * 1024
@@ -86,7 +86,7 @@ def source(map_data, collection, opaque):
         raise Refused()
     relative = map_data['tracks'][opaque]
     parts = components(relative)
-    if any(p.casefold() in ('id3', 'traxdb') for p in parts):
+    if any(p.casefold() in ('id3', 'traxdb') for p in parts) and not review_archive_path(parts):
         raise Refused()
     demuxer = DEMUXERS.get(Path(relative).suffix.lower())
     if not demuxer:

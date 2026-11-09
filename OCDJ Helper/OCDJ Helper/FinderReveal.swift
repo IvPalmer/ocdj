@@ -117,7 +117,11 @@ struct FinderReveal {
         guard map.collection_id == request.collection, let relative = map.tracks[request.id] else { throw Failure.staleMap }
         let parts = relative.components(separatedBy: "/")
         guard !relative.contains("\0"), !parts.isEmpty,
-              !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || ["id3", "traxdb"].contains($0.lowercased()) }) else { throw Failure.staleFile }
+              !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { throw Failure.staleFile }
+        let reviewArchive = parts.count == 3 && parts[0].lowercased() == "id3" && parts[1].lowercased() == "_review"
+        guard reviewArchive || !parts.contains(where: { ["id3", "traxdb"].contains($0.lowercased()) }) else {
+            throw Failure.staleFile
+        }
         let path = map.root + "/" + relative
         let fd = try openTarget(root: map.root, parts: parts)
         defer { close(fd) }

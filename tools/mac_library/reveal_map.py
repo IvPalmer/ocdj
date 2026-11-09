@@ -11,6 +11,10 @@ def default_map_path():
             'Application Support/OCDJ/reveal-map.json')
 
 
+def review_archive_path(parts):
+    return len(parts) == 3 and tuple(part.casefold() for part in parts[:2]) == ('id3', '_review')
+
+
 def write_reveal_map(destination, payload, root, paths):
     """Replace only the local sidecar, atomically, after a complete validated scan."""
     # Playback needs only default_map_path; snapshot dependencies stay with export.
@@ -20,10 +24,13 @@ def write_reveal_map(destination, payload, root, paths):
     root = Path(root).expanduser().resolve(strict=True)
     if set(paths) != {row['id'] for row in payload['tracks']}:
         raise SnapshotError('Local map does not match the complete scan.')
-    for relative in paths.values():
+    archive_ids = {row['id'] for row in payload['tracks'] if row.get('archive_item_id')}
+    for opaque, relative in paths.items():
         parts = Path(relative).parts
         if (not parts or Path(relative).is_absolute() or
-                any(p in ('.', '..') or p.casefold() in EXCLUDED for p in parts)):
+                any(p in ('.', '..') for p in parts) or
+                (any(p.casefold() in EXCLUDED for p in parts) and
+                 not (review_archive_path(parts) and opaque in archive_ids))):
             raise SnapshotError('Invalid local map entry.')
         candidate = root / relative
         if candidate.resolve(strict=True) != candidate or not candidate.is_file():
