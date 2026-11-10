@@ -83,6 +83,10 @@ def read_audio(handle, fmt, size):
         return None
 
 
+def opaque_track_id(collection_id, key, relative):
+    return hmac.new(key, collection_id.encode() + b'\0' + os.fsencode(relative), hashlib.sha256).hexdigest()
+
+
 def scan(root, collection_id, key, *, local_paths=None, include_ocdj_review=False):
     """Explicit root; ID3/TraxDB and symlinks are outside this snapshot's scope.
 
@@ -151,8 +155,8 @@ def scan(root, collection_id, key, *, local_paths=None, include_ocdj_review=Fals
                 if row is None or (Path(directory) == root / 'ID3' / '_review' and not row.get('archive_item_id')):
                     counts['excluded_non_audio'] += 1
                     continue
-                relative = os.fsencode(path.relative_to(root))
-                row['id'] = hmac.new(key, collection_id.encode() + b'\0' + relative, hashlib.sha256).hexdigest()
+                relative = path.relative_to(root)
+                row['id'] = opaque_track_id(collection_id, key, relative)
                 row['file_size_bytes'] = before.st_size
                 phase = 'metadata_validation'
                 validate_row(row)

@@ -68,7 +68,7 @@ class RevealMapTests(unittest.TestCase):
         with patch('reveal_map.os.replace', side_effect=OSError), self.assertRaises(OSError):
             write_reveal_map(self.dest, newer, self.root, paths)
         self.assertEqual(self.dest.read_bytes(), old)
-        self.assertEqual(list(self.dest.parent.iterdir()), [self.dest])
+        self.assertCountEqual(self.dest.parent.iterdir(), [self.dest, self.dest.with_suffix(".json.lock")])
         write_reveal_map(self.dest, newer, self.root, paths)
         self.assertEqual(len(json.loads(self.dest.read_text())['tracks']), 2)
 

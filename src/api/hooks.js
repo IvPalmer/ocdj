@@ -242,7 +242,7 @@ export function useDownloadsStatus() {
     refetchInterval: (query) => {
       const data = query.state.data
       const dls = data?.downloads || []
-      if (dls.some(d => d.status === 'queued' || d.status === 'downloading')) return 3000
+      if (dls.some(d => d.status === 'queued' || d.status === 'downloading' || d.artifact?.archive_state === 'draining')) return 3000
       return 30000
     },
   })
@@ -734,7 +734,7 @@ export function usePipelineItems(params = {}) {
       const data = query.state.data
       const items = data?.results || []
       if (items.some(i => i.stage === 'tagging' || i.stage === 'renaming' || i.stage === 'converting')) return KICK_POLL_INTERVAL_MS
-      if (pipelineKickActive()) return KICK_POLL_INTERVAL_MS
+      if (pipelineKickActive() || items.some(i => i.archive_state === 'draining')) return KICK_POLL_INTERVAL_MS
       // Tracks also arrive without any in-app action: the Mac incoming
       // LaunchAgent rsyncs dropped files and kicks the pipeline server-side,
       // which sets no client flag. Idling at `false` left an open tab blind to

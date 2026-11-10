@@ -29,6 +29,10 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=archived_item.pk,
             artist='Retagged artist', title='Retagged title', format='aiff',
             file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'b' * 64)
+        draining_path = self.downloads / 'incoming.aiff'
+        draining_path.write_bytes(self.path.read_bytes())
+        incoming = PipelineItem.objects.create(original_filename='incoming.aiff', artist='Incoming artist',
+            title='Incoming tone', current_path=str(draining_path), stage='published', archive_state='draining')
         download = Download.objects.create(username='fixture', filename='second.wav', status='completed')
         second.download = download
         second.save(update_fields=['download'])
@@ -39,6 +43,8 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
             slskd.return_value.get_downloads.return_value = []
             for engine in ['chromium', 'webkit']:
                 with self.subTest(engine=engine):
+                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='draining')
+                    LibraryTrack.objects.filter(archive_item_id=incoming.pk).delete()
                     browser = getattr(pw, engine).launch()
                     page = browser.new_page()
                     errors, writes, media_requests = [], [], []
@@ -72,6 +78,15 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     player = page.get_by_role('region', name='Persistent player')
                     expect(page.get_by_text('File unavailable on server', exact=True)).to_be_visible()
                     expect(page.get_by_role('button', name='Play Fixture artist — Missing tone', exact=True)).to_have_count(0)
+                    arriving = page.get_by_role('button', name='Play Incoming artist — Incoming tone', exact=True)
+                    expect(arriving).to_have_count(0)
+                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='archived')
+                    LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=incoming.pk,
+                        artist=incoming.artist, title=incoming.title, format='aiff',
+                        file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'c' * 64)
+                    expect(arriving).to_be_enabled(timeout=12000)
+                    expect(player.locator('audio')).to_have_count(0)
+                    self.assertFalse(writes)
                     page.get_by_role('button', name='Play Fixture artist — Pipeline tone', exact=True).click()
                     page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
                     expect(player.get_by_role('button', name='In Wanted')).to_have_count(0)

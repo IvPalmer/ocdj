@@ -17,6 +17,8 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status as http_status
 
+from library.snapshot_import import register_review_archive
+from library.snapshots import SnapshotError
 from organize.models import PipelineItem
 from organize.services.publisher import claim_publishable, is_canonical_publish_dir
 
@@ -184,10 +186,19 @@ def _confirm_locked(request, pk, persistent_id):
             },
             status=http_status.HTTP_409_CONFLICT,
         )
+    if 'review_archive' in request.data:
+        if persistent_id != '_REVIEW_LANDED':
+            return Response({'error': 'Expected a Mac review delivery'}, status=400)
+        try:
+            register_review_archive(request.data['review_archive'], item)
+        except SnapshotError:
+            return Response({'error': 'Invalid review archive receipt'}, status=400)
+
     if publish_dir and os.path.isdir(publish_dir):
         try:
             shutil.rmtree(publish_dir)
         except OSError as exc:
+            transaction.set_rollback(True)
             logger.error(f'drain: could not rm {publish_dir}: {exc}')
             return Response(
                 {'error': f'rmtree failed: {exc}'},
