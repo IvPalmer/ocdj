@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 
 from organize.models import PipelineItem
 from .models import Download, SearchQueueItem, SearchResult
-from .services import SlskdClient
+from .services import SlskdClient, generate_queries, score_result, simplify_query
 
 
 class HistoryClientTests(SimpleTestCase):
@@ -76,6 +76,71 @@ class BrowseDownloadTests(SimpleTestCase):
         ])
         self.assertEqual(locked_dir['files'][0]['filename'], 'private/release/locked.flac')
         self.assertTrue(locked_dir['files'][0]['locked'])
+
+    @patch('soulseek.views.SlskdClient')
+    def test_browse_opens_exact_search_path_through_directory_api(self, client_class):
+        client = client_class.return_value
+        path = r'@@music\House\Artist-Release_(Edit)'
+        client.directory_contents.return_value = [{'name': path, 'files': [{'filename': 'track.flac'}]}]
+        response = APIClient().get('/api/soulseek/browse/', {
+            'username': 'fixture-peer', 'directory': path, 'audio_only': 1,
+        })
+        self.assertEqual(response.status_code, 200)
+        client.directory_contents.assert_called_once_with('fixture-peer', path)
+        client.browse_user.assert_not_called()
+        self.assertFalse(response.data['partial'])
+        self.assertEqual(response.data['directories'][0]['files'][0]['filename'], path + r'\track.flac')
+
+    @patch('soulseek.views.SlskdClient.browse_user')
+    def test_filter_finds_nested_folder_by_name(self, browse_user):
+        browse_user.return_value = {'directories': [
+            {'name': r'share\House\Artist-Release', 'files': []},
+            {'name': r'share\Other', 'files': []},
+        ]}
+        response = APIClient().get('/api/soulseek/browse/', {'username': 'peer', 'dir_prefix': 'ARTIST release'})
+        self.assertEqual(response.data['matched_dirs'], 1)
+
+
+class BrowseSearchFallbackTests(TestCase):
+    @patch('soulseek.views.SlskdClient.directory_contents', return_value=[])
+    def test_partial_listing_uses_only_exact_folder_from_same_peer_and_search(self, directory_contents):
+        queue = SearchQueueItem.objects.create(raw_query='fixture')
+        another = SearchQueueItem.objects.create(raw_query='other')
+        folder = r'@@music\House\Artist-Release_(Edit)'
+        matches = [
+            (queue, 'peer', folder + r'\track.flac'),
+            (queue, 'peer', folder + r'-Other\track.flac'),
+            (queue, 'other-peer', folder + r'\other.flac'),
+            (another, 'peer', folder + r'\other-search.flac'),
+        ]
+        for item, peer, filename in matches:
+            SearchResult.objects.create(queue_item=item, username=peer, filename=filename, file_size=42,
+                                        file_extension='flac', match_score=90, is_locked=True)
+        response = APIClient().get('/api/soulseek/browse/', {
+            'username': 'peer', 'directory': folder, 'queue_item_id': queue.pk, 'audio_only': 1,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['partial'])
+        files = response.data['directories'][0]['files']
+        self.assertEqual([f['filename'] for f in files], [matches[0][2]])
+        self.assertTrue(files[0]['locked'])
+
+
+class SearchMatchingTests(SimpleTestCase):
+    def test_normalizes_punctuation_and_broadens_named_remix_if_needed(self):
+        self.assertEqual(simplify_query('Natebytheway — Sorry_Sucka (Edit)'), 'natebytheway sorry sucka')
+        self.assertEqual(generate_queries('The Pinch', 'I Want You (Moneybitch Remix)')[:2], [
+            'the pinch want you moneybitch', 'the pinch want you',
+        ])
+
+    def test_ranks_requested_edit_above_other_versions_with_cleaner_names(self):
+        def score(name):
+            return score_result('Natebytheway', 'Sorry Sucka (Edit)', name)
+
+        exact = score('01-natebytheway-sorry_sucka_(edit).flac')
+        self.assertEqual(exact, 100)
+        self.assertGreater(exact, score('Natebytheway - Sorry Sucka (Club).mp3'))
+        self.assertGreater(exact, score('Natebytheway - Sorry Sucka (Original Mix).mp3'))
 
 
 class ClearDownloadsTests(TestCase):

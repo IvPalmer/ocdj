@@ -273,14 +273,18 @@ export function useClearDownloads() {
   })
 }
 
-export function useBrowseUser({ username, dirPrefix = '', audioOnly = true, limit = 200, enabled = true } = {}) {
+export function useBrowseUser({ username, directory, queueItemId, dirPrefix = '', audioOnly = true, limit = 200, enabled = true } = {}) {
   const params = new URLSearchParams()
   if (username) params.set('username', username)
   if (dirPrefix) params.set('dir_prefix', dirPrefix)
+  if (directory) {
+    params.set('directory', directory)
+    if (queueItemId) params.set('queue_item_id', queueItemId)
+  }
   if (audioOnly) params.set('audio_only', '1')
   if (limit) params.set('limit', String(limit))
   return useQuery({
-    queryKey: ['browse-user', username, dirPrefix, audioOnly, limit],
+    queryKey: ['browse-user', params.toString()],
     // slskd's peer-browse can take up to 60s before it itself times out, so
     // we need to give the request more headroom than the global 30s default.
     queryFn: () => api.get(`/soulseek/browse/?${params.toString()}`, { timeout: 90_000 }),

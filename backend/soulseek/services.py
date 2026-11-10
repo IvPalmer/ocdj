@@ -143,6 +143,13 @@ class SlskdClient:
         r.raise_for_status()
         return r.json()
 
+    def directory_contents(self, username, directory):
+        """Ask the peer for the exact folder from a search result."""
+        r = self.session.post(self._url(f'/users/{quote(username, safe="")}/directory'),
+                              json={'directory': directory}, timeout=DEFAULT_TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+
     def remove_download_history(self, username, transfer_id):
         """Remove an already terminal transfer from slskd's history.
 
@@ -165,10 +172,14 @@ class SlskdClient:
 
 # ── Matching Engine ───────────────────────────────────────────
 
-# Common patterns to strip from queries
-STRIP_PATTERNS = [
+FEATURE_CREDITS = (
     r'\(feat\.?\s+[^)]+\)',    # (feat. Someone)
     r'\(ft\.?\s+[^)]+\)',      # (ft. Someone)
+)
+
+# Common patterns to strip from queries
+STRIP_PATTERNS = [
+    *FEATURE_CREDITS,
     r'\(remix\)',               # (remix)
     r'\(original mix\)',        # (original mix)
     r'\[.*?\]',                # [anything in brackets]
@@ -177,16 +188,18 @@ STRIP_PATTERNS = [
 AUDIO_EXTENSIONS = {'mp3', 'flac', 'wav', 'aiff', 'aif', 'ogg', 'opus', 'wma', 'aac', 'm4a'}
 
 
+def _word_text(text):
+    folded = unicodedata.normalize('NFKD', text.casefold())
+    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch))
+    return re.sub(r'[\W_]+', ' ', folded).strip()
+
+
 def normalize_text(text):
-    """Normalize text for matching: lowercase, strip special chars."""
-    if not text:
-        return ''
-    text = text.lower().strip()
-    for pattern in STRIP_PATTERNS:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    # Collapse whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    """Compare words while keeping mix and edit names for ranking."""
+    text = text or ''
+    for pattern in FEATURE_CREDITS:
+        text = re.sub(pattern, ' ', text, flags=re.IGNORECASE)
+    return _word_text(text)
 
 
 # Words that are noise in slsk queries (artist credits inflate the term count
@@ -222,16 +235,9 @@ def simplify_query(text, max_tokens=6):
     for pattern in STRIP_PATTERNS:
         cleaned = re.sub(pattern, ' ', cleaned, flags=re.IGNORECASE)
 
-    # ASCII-fold accents: "Sébastien" -> "Sebastien"
-    cleaned = unicodedata.normalize('NFKD', cleaned)
-    cleaned = ''.join(ch for ch in cleaned if not unicodedata.combining(ch))
-
-    # Anything that isn't a letter or digit becomes a space.
-    cleaned = re.sub(r'[^a-zA-Z0-9]+', ' ', cleaned).lower()
-
-    # Drop noise words. Single-letter artist names (Mr. G, K-Hand) survive
-    # because they're not in the noise list.
-    tokens = [t for t in cleaned.split() if t and t not in _QUERY_NOISE_WORDS]
+    tokens = list(dict.fromkeys(
+        token for token in _word_text(cleaned).split() if token not in _QUERY_NOISE_WORDS
+    ))
 
     if max_tokens and len(tokens) > max_tokens:
         tokens = tokens[:max_tokens]
@@ -266,6 +272,12 @@ def generate_queries(artist, title, release_name='', catalog_number='', label=''
     if artist_clean and title_clean:
         queries.append(f"{artist_clean} {title_clean}")
 
+    # A named remix can be indexed under the base title on some peers.
+    base_title = simplify_query(re.sub(r'\([^()]*\b(?:remix|mix|edit|version)\b[^()]*\)', ' ', title or '',
+                                       flags=re.IGNORECASE))
+    if artist_clean and base_title and base_title != title_clean:
+        queries.append(f"{artist_clean} {base_title}")
+
     # 3. Artist + release name (for finding full releases)
     if artist_clean and release_clean and release_clean != title_clean:
         queries.append(f"{artist_clean} {release_clean}")
@@ -290,7 +302,7 @@ def generate_queries(artist, title, release_name='', catalog_number='', label=''
     # past ~6 tokens because no single uploader's filename hits every term.
     capped = []
     for q in queries:
-        toks = q.split()
+        toks = list(dict.fromkeys(q.split()))
         if len(toks) > 6:
             toks = toks[:6]
         capped.append(' '.join(toks))

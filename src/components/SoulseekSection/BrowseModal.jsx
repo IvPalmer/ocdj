@@ -12,24 +12,35 @@ function basename(path) {
   return (path || '').split(/[/\\]/).pop()
 }
 
-function parentDir(path) {
-  const norm = (path || '').replace(/\\/g, '/')
-  const idx = norm.lastIndexOf('/')
-  return idx >= 0 ? norm.slice(0, idx) : ''
+function parentDir(path = '') {
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return idx >= 0 ? path.slice(0, idx) : ''
 }
+
+const folderKey = name => (name || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase()
 
 export default function BrowseModal({ username, initialFilename = '', queueItemId, wantedItemId, onClose }) {
   // Default scope = the folder containing the file the user clicked Browse on.
-  // They can clear/edit the prefix to widen.
-  const initialPrefix = useMemo(() => parentDir(initialFilename), [initialFilename])
+  // Clearing or editing the filter browses the full share.
+  const initialDirectory = useMemo(() => parentDir(initialFilename), [initialFilename])
+  const initialPrefix = initialDirectory.replace(/\\/g, '/')
   const [dirPrefix, setDirPrefix] = useState(initialPrefix)
+  const [dirQuery, setDirQuery] = useState(initialPrefix.trim())
   const [audioOnly, setAudioOnly] = useState(true)
-  const [expandedDirs, setExpandedDirs] = useState(() => new Set([initialPrefix.replace(/\\/g, '/').toLowerCase()]))
+  const [expandedDirs, setExpandedDirs] = useState(() => new Set([folderKey(initialDirectory)]))
   const [limit, setLimit] = useState(200)
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDirQuery(dirPrefix.trim()), 350)
+    return () => clearTimeout(timer)
+  }, [dirPrefix])
+
+  const browsingResult = !!initialDirectory && dirQuery === initialPrefix.trim()
   const { data, isLoading, error, isFetching, refetch } = useBrowseUser({
     username,
-    dirPrefix,
+    directory: browsingResult ? initialDirectory : undefined,
+    queueItemId,
+    dirPrefix: browsingResult ? '' : dirQuery,
     audioOnly,
     limit,
   })
@@ -45,11 +56,11 @@ export default function BrowseModal({ username, initialFilename = '', queueItemI
 
   const dirs = data?.directories || []
   const isInitialFolder = (name) => name && initialFilename
-    && name.replace(/\\/g, '/').toLowerCase() === parentDir(initialFilename).replace(/\\/g, '/').toLowerCase()
+    && folderKey(name) === folderKey(initialDirectory)
 
   const toggle = (name) => {
     setExpandedDirs(prev => {
-      const k = name.replace(/\\/g, '/').toLowerCase()
+      const k = folderKey(name)
       const next = new Set(prev)
       if (next.has(k)) next.delete(k); else next.add(k)
       return next
@@ -93,7 +104,8 @@ export default function BrowseModal({ username, initialFilename = '', queueItemI
             type="text"
             className="browse-modal-prefix"
             value={dirPrefix}
-            placeholder="Filter by folder path (clear to show everything)"
+            placeholder="Search folder names or paths"
+            aria-label="Search folder names or paths"
             onChange={e => setDirPrefix(e.target.value)}
           />
           <label className="browse-modal-checkbox">
@@ -112,13 +124,19 @@ export default function BrowseModal({ username, initialFilename = '', queueItemI
               Browse failed: {error?.data?.error || error?.message}
             </div>
           )}
+          {data?.partial && (
+            <p className="browse-modal-warn" role="status">
+              The peer did not list this folder. Showing files found in your search.
+            </p>
+          )}
           {!error && !isLoading && dirs.length === 0 && (
             <div className="browse-modal-empty">
-              No folders match. Clear the filter or try a shorter prefix.
+              {browsingResult ? 'The peer did not list this folder. Clear the filter to browse their share.'
+                : 'No folders match. Try a shorter search.'}
             </div>
           )}
           {dirs.map(dir => {
-            const k = (dir.name || '').replace(/\\/g, '/').toLowerCase()
+            const k = folderKey(dir.name)
             const open = expandedDirs.has(k)
             const highlighted = isInitialFolder(dir.name)
             return (
