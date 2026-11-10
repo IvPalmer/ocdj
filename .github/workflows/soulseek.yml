@@ -40,5 +40,5 @@ jobs:
       - run: pip install -r backend/requirements.txt -r tools/instagram/qa-requirements.txt
       - run: python -m playwright install --with-deps chromium
       - run: npm ci && npm run build
-      - run: python backend/manage.py test soulseek --noinput
+      - run: python backend/manage.py test soulseek organize.tests.test_pipeline --noinput
       - run: python -m unittest tools.soulseek.test_clear_browser -v
