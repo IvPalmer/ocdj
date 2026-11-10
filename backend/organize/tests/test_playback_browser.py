@@ -32,7 +32,8 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         draining_path = self.downloads / 'incoming.aiff'
         draining_path.write_bytes(self.path.read_bytes())
         incoming = PipelineItem.objects.create(original_filename='incoming.aiff', artist='Incoming artist',
-            title='Incoming tone', current_path=str(draining_path), stage='published', archive_state='draining')
+            title='Incoming tone', current_path=str(draining_path), work_path=str(draining_path),
+            stage='published', archive_state='draining', sha256='c' * 64)
         download = Download.objects.create(username='fixture', filename='second.wav', status='completed')
         second.download = download
         second.save(update_fields=['download'])
@@ -43,7 +44,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
             slskd.return_value.get_downloads.return_value = []
             for engine in ['chromium', 'webkit']:
                 with self.subTest(engine=engine):
-                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='draining')
+                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='draining', work_path=str(draining_path), archived_at=None, music_persistent_id='')
                     LibraryTrack.objects.filter(archive_item_id=incoming.pk).delete()
                     browser = getattr(pw, engine).launch()
                     page = browser.new_page()
@@ -80,7 +81,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     expect(page.get_by_role('button', name='Play Fixture artist — Missing tone', exact=True)).to_have_count(0)
                     arriving = page.get_by_role('button', name='Play Incoming artist — Incoming tone', exact=True)
                     expect(arriving).to_have_count(0)
-                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='archived')
+                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='archived', work_path='', archived_at=timezone.now(), music_persistent_id='_REVIEW_LANDED')
                     LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=incoming.pk,
                         artist=incoming.artist, title=incoming.title, format='aiff',
                         file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'c' * 64)
