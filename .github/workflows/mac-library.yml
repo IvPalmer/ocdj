@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'backend/library/**'
+      - 'backend/drain/**'
       - 'tools/mac_library/**'
       - 'tools/test_bottom_player.py'
       - 'src/components/Player/**'
@@ -36,9 +37,9 @@ jobs:
       - run: pip install -r backend/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: PYTHONPATH=backend python -m unittest library.test_snapshots library.test_matching -v
-      - run: PYTHONPATH=backend:. python -m unittest tools.mac_library.test_helper -v
+      - run: PYTHONPATH=backend:.:tools/mac_library python -m unittest tools.mac_library.test_helper tools.mac_library.test_reveal_map tools.mac_library.test_register_review -v
       - run: python backend/manage.py makemigrations library --check --dry-run
-      - run: python backend/manage.py test library --noinput
+      - run: python backend/manage.py test library drain --noinput
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

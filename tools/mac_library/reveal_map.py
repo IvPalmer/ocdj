@@ -1,4 +1,6 @@
 """Private Mac-only sidecar. Never part of the server snapshot payload."""
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 import stat
@@ -23,7 +25,7 @@ def review_fingerprint(info):
 def write_reveal_map(destination, payload, root, paths):
     """Replace only the local sidecar, atomically, after a complete validated scan."""
     # Playback needs only default_map_path; snapshot dependencies stay with export.
-    from library.snapshots import EXCLUDED, FORMATS, MAX_BYTES, SnapshotError, read_audio, validate
+    from library.snapshots import EXCLUDED, FORMATS, SnapshotError, read_audio, validate
 
     validate(payload)
     root = Path(root).expanduser().resolve(strict=True)
@@ -51,20 +53,50 @@ def write_reveal_map(destination, payload, root, paths):
                         fingerprint != review_fingerprint(os.fstat(handle.fileno()))):
                     raise SnapshotError('Review archive changed; rescan the library.')
                 fingerprints[opaque] = fingerprint
-    data = json.dumps(dict(version=1, collection_id=payload['collection_id'],
-                           root=str(root), tracks=paths, review_fingerprints=fingerprints), ensure_ascii=True).encode()
-    if len(data) > MAX_BYTES:
-        raise SnapshotError('Local map exceeds size limit.')
     destination = Path(destination)
+    try:
+        with map_lock(destination):
+            if destination.exists():
+                with destination.open('rb') as handle:
+                    old = json.load(handle)
+                if old.get('review_registered_at', '') >= payload['captured_at']:
+                    raise SnapshotError('A review delivery changed the map during the scan. Rescan the library.')
+            save_map(destination, dict(version=1, collection_id=payload['collection_id'],
+                                       root=str(root), tracks=paths, review_fingerprints=fingerprints))
+    except ValueError as error:
+        raise SnapshotError('Could not replace the private local map. Rescan the library.') from error
+
+
+@contextmanager
+def map_lock(destination):
+    """Serialize full snapshot and incremental writes on a stable lock inode."""
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if destination.parent.resolve(strict=True) != destination.parent.absolute():
-        raise SnapshotError('Local map directory must not be a symlink.')
-    if destination.is_symlink():
-        raise SnapshotError('Local map destination must not be a symlink.')
-    if destination.exists():
-        info = destination.stat()
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise SnapshotError('Existing local map must be private and owned by this user.')
+        raise ValueError('Local map directory must not be a symlink.')
+    lock = destination.with_name(destination.name + '.lock')
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(fd, 'rb') as handle:
+        check_private(os.fstat(handle.fileno()))
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        if destination.is_symlink():
+            raise ValueError('Local map destination must not be a symlink.')
+        if destination.exists():
+            check_private(destination.stat())
+        yield
+
+
+def check_private(info):
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o077 or info.st_nlink != 1):
+        raise ValueError('Expected a private file owned by this user.')
+
+
+def save_map(destination, mapping):
+    from library.snapshots import MAX_BYTES, MAX_TRACKS, SnapshotError
+
+    data = json.dumps(mapping, ensure_ascii=True).encode()
+    if len(data) > MAX_BYTES or len(mapping['tracks']) > MAX_TRACKS:
+        raise SnapshotError('Local map exceeds size limit.')
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as handle:

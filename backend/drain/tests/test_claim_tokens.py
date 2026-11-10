@@ -264,3 +264,45 @@ class PublishDirValidationTests(DrainClaimTestCase):
         item.refresh_from_db()
         self.assertEqual(item.archive_state, 'failed')
         self.assertEqual(item.claim_token, '')
+
+
+class ReviewArchiveRegistrationTests(DrainClaimTestCase):
+    def test_exact_review_is_playable_without_a_playback_request(self):
+        from library.models import LibraryTrack, MacPlayback
+        from library.snapshot_import import import_snapshot
+        from library.test_snapshot_import import fixture
+
+        payload = fixture()
+        import_snapshot(payload, apply=True)
+        original = LibraryTrack.objects.get()
+        item = self.make_published()
+        claim = self.claim()[0]
+        receipt = dict(collection_id=payload['collection_id'], sha256=item.sha256,
+                       track={**payload['tracks'][0], 'archive_item_id': item.pk})
+        body = dict(music_persistent_id='_REVIEW_LANDED', claim_token=claim['claim_token'])
+        url = f'/api/drain/{item.pk}/confirm/'
+        for bad_receipt in ({**receipt, 'sha256': 'f'*64},
+                            {**receipt, 'track': {**receipt['track'], 'file_path': '/Mac/private'}}):
+            response = self.client.post(url, data={**body, 'review_archive': bad_receipt},
+                                        content_type='application/json', **AUTH)
+            self.assertEqual(response.status_code, 400)
+            self.assertTrue(os.path.exists(item.work_path))
+
+        body['review_archive'] = receipt
+        response = self.client.post(url, data=body, content_type='application/json', **AUTH)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(os.path.exists(item.work_path))
+        self.assertEqual(self.client.post(url, data=body, content_type='application/json', **AUTH).status_code, 200)
+        archived = LibraryTrack.objects.get(archive_item_id=item.pk)
+        original.refresh_from_db()
+        self.assertTrue(original.missing)
+        self.assertNotEqual(original.pk, archived.pk)
+        row = self.client.get(f'/api/organize/pipeline/{item.pk}/').json()
+        self.assertEqual(row['archive_library_match']['matches'][0]['playback_id'], archived.pk)
+        self.assertFalse(MacPlayback.objects.exists())
+
+        # A full snapshot captured before this delivery cannot erase its link.
+        import_snapshot(fixture('2026-01-02T00:00:00.000000Z'), apply=True)
+        archived.refresh_from_db()
+        self.assertFalse(archived.missing)
+        self.assertEqual(archived.archive_item_id, item.pk)

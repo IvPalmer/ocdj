@@ -14,6 +14,8 @@
 #   VPS_SSH=ubuntu@main-instance
 #   VPS_PUBLISH_ROOT=/srv/ocdj/publish
 #   STAGING_DIR=/Users/palmer/Music/ocdj-staging
+#   REVIEW_IDENTITY_KEY (optional): path to the existing private snapshot key.
+#     Enables immediate playback registration via the installed Mac connector.
 #   MUSIC_IMPORT_DIR (optional, default: ~/Music/iTunes/iTunes Media/Music/ocdj)
 #     Where the daemon MOVES files before telling Music.app to import.
 #     Music.app's `add POSIX file` AppleScript call ignores the
@@ -157,10 +159,18 @@ api_confirm() {
   local id=$1
   local persistent_id=$2
   local claim_token=${3-}   # default: a missed arg logs a retryable 409, not a fatal set -u abort
+  local review_archive=${4-}
+  local body
+  body=$(printf '{"music_persistent_id":"%s","claim_token":"%s"' "$persistent_id" "$claim_token")
+  if [[ -n "$review_archive" ]]; then
+    body+=',"review_archive":'
+    body+="$review_archive"
+  fi
+  body+='}'
   curl -fsS -X POST \
     -H "Authorization: Bearer ${DRAIN_TOKEN}" \
     -H "Content-Type: application/json" \
-    --data "$(printf '{"music_persistent_id":"%s","claim_token":"%s"}' "$persistent_id" "$claim_token")" \
+    --data "$body" \
     --max-time 15 \
     "${DRAIN_API_URL}/${id}/confirm/" >/dev/null 2>&1
 }
@@ -277,8 +287,21 @@ drain_one() {
   # delivery; use a synthetic marker so VPS can archive the row.
   local persistent_id="_REVIEW_LANDED"
 
+  local review_archive=''
+  if [[ -n "${REVIEW_IDENTITY_KEY:-}" ]]; then
+    local support="$HOME/Library/Application Support/OCDJ/login-connectors"
+    local runtime="$HOME/.local/share/ocdj/mac-connectors-runtime/bin/python"
+    if ! review_archive=$(PYTHONPATH="$support/code:$support/code/backend" "$runtime" \
+        -m tools.mac_library.register_review "$support/config.json" "$REVIEW_IDENTITY_KEY" \
+        "$import_path" "$id" "$sha" 2>>"$LOG_FILE"); then
+      log "drain: delivered file could not be indexed id=$id — will retry next cycle"
+      api_fail "$id" "could not index verified review file" "$claim_token"
+      return 1
+    fi
+  fi
+
   # Confirm with VPS — it deletes its copy on success.
-  if ! api_confirm "$id" "$persistent_id" "$claim_token"; then
+  if ! api_confirm "$id" "$persistent_id" "$claim_token" "$review_archive"; then
     log "drain: confirm API failed id=$id — will retry next cycle"
     # The file is already in review. The next cycle can confirm the same bytes.
     return 1

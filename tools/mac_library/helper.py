@@ -154,7 +154,7 @@ class API:
         return response.json()
 
 
-def serve_one(api, map_data, *, ffmpeg='ffmpeg'):
+def serve_one(api, map_data, *, ffmpeg='ffmpeg', refresh_map=None):
     job = api.post('claim/', data={'collection_id': map_data['collection_id']})
     if job is None:
         return False
@@ -166,7 +166,8 @@ def serve_one(api, map_data, *, ffmpeg='ffmpeg'):
     with tempfile.TemporaryDirectory(prefix='ocdj-playback-') as temporary:
         try:
             output = Path(temporary) / 'audio.mp3'
-            with source(map_data, job.get('collection_id'), job.get('opaque_id')) as (fd, demuxer):
+            current_map = refresh_map() if refresh_map else map_data
+            with source(current_map, job.get('collection_id'), job.get('opaque_id')) as (fd, demuxer):
                 transcode(fd, demuxer, output, ffmpeg)
         except (OSError, ValueError, subprocess.SubprocessError):
             api.post(endpoint, data={}, lease=job['token'])
@@ -191,10 +192,10 @@ def singleton(filename=None):
         yield
 
 
-def listen(api, data, *, seconds=900, ffmpeg='ffmpeg'):
+def listen(api, data, *, seconds=900, ffmpeg='ffmpeg', refresh_map=None):
     deadline = time.monotonic() + seconds if seconds is not None else None
     while deadline is None or time.monotonic() < deadline:
-        if not serve_one(api, data, ffmpeg=ffmpeg):
+        if not serve_one(api, data, ffmpeg=ffmpeg, refresh_map=refresh_map):
             time.sleep(2 if deadline is None else min(2, max(0, deadline - time.monotonic())))
 
 
@@ -226,7 +227,8 @@ def main():
             os.close(fd)
             api = API(args.api, os.environ.get('DRAIN_TOKEN', ''))
             print('Playback connector listening; Ctrl-C stops; no automatic restart.', flush=True)
-            listen(api, data, seconds=None if args.login_session else args.seconds, ffmpeg=args.ffmpeg)
+            listen(api, data, seconds=None if args.login_session else args.seconds, ffmpeg=args.ffmpeg,
+                   refresh_map=lambda: load_map(args.map, args.root))
     except KeyboardInterrupt:
         print('Playback connector stopped by session/operator; no restart.', flush=True)
         return 130

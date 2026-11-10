@@ -64,7 +64,10 @@ def detach(command, log_path):
 def playback(config):
     # Same singleton as manual helper: no second worker even across launch contexts.
     with helper.singleton():
-        data = helper.load_map(Path(config['map']), config['root'])
+        def refresh_map():
+            return helper.load_map(Path(config['map']), config['root'])
+
+        data = refresh_map()
         fd = helper.open_absolute(config['root'], directory=True)
         os.close(fd)
         with socket.socket() as sock:
@@ -82,7 +85,7 @@ def playback(config):
                 if tunnel.poll() is not None:
                     raise helper.Refused()
                 try:
-                    helper.serve_one(api, data, ffmpeg=config['ffmpeg'])
+                    helper.serve_one(api, data, ffmpeg=config['ffmpeg'], refresh_map=refresh_map)
                 except (requests.ConnectionError, requests.Timeout, ChunkedEncodingError):
                     event('playback-waiting-for-backend')
                     # The prior attempt is over. The server skips live leases

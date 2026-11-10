@@ -1,10 +1,12 @@
 """Built app + real synthetic Django list/stream, only in CI PostgreSQL."""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from unittest import skipUnless
 
+from django.db import connections, transaction
 from django.test import LiveServerTestCase
 from django.utils import timezone
 
@@ -29,16 +31,39 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=archived_item.pk,
             artist='Retagged artist', title='Retagged title', format='aiff',
             file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'b' * 64)
+        draining_path = self.downloads / 'incoming.aiff'
+        draining_path.write_bytes(self.path.read_bytes())
+        incoming = PipelineItem.objects.create(original_filename='incoming.aiff', artist='Incoming artist',
+            title='Incoming tone', current_path=str(draining_path), work_path=str(draining_path),
+            stage='published', archive_state='draining', sha256='c' * 64)
+        def change_delivery_state(delivered):
+            try:
+                with transaction.atomic():
+                    row = PipelineItem.objects.filter(pk=incoming.pk)
+                    if delivered:
+                        row.update(archive_state='archived', work_path='', archived_at=timezone.now(),
+                                   music_persistent_id='_REVIEW_LANDED')
+                        LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=incoming.pk,
+                            artist=incoming.artist, title=incoming.title, format='aiff',
+                            file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'c' * 64)
+                    else:
+                        row.update(archive_state='draining', work_path=str(draining_path),
+                                   archived_at=None, music_persistent_id='')
+                        LibraryTrack.objects.filter(archive_item_id=incoming.pk).delete()
+            finally:
+                connections.close_all()
+
         download = Download.objects.create(username='fixture', filename='second.wav', status='completed')
         second.download = download
         second.save(update_fields=['download'])
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
         from unittest.mock import patch
-        with patch('soulseek.views.SlskdClient') as slskd, sync_playwright() as pw:
+        with patch('soulseek.views.SlskdClient') as slskd, ThreadPoolExecutor(1) as db, sync_playwright() as pw:
             slskd.return_value.get_downloads.return_value = []
             for engine in ['chromium', 'webkit']:
                 with self.subTest(engine=engine):
+                    db.submit(change_delivery_state, False).result()
                     browser = getattr(pw, engine).launch()
                     page = browser.new_page()
                     errors, writes, media_requests = [], [], []
@@ -72,6 +97,12 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     player = page.get_by_role('region', name='Persistent player')
                     expect(page.get_by_text('File unavailable on server', exact=True)).to_be_visible()
                     expect(page.get_by_role('button', name='Play Fixture artist — Missing tone', exact=True)).to_have_count(0)
+                    arriving = page.get_by_role('button', name='Play Incoming artist — Incoming tone', exact=True)
+                    expect(arriving).to_have_count(0)
+                    db.submit(change_delivery_state, True).result()
+                    expect(arriving).to_be_enabled(timeout=12000)
+                    expect(player.locator('audio')).to_have_count(0)
+                    self.assertFalse(writes)
                     page.get_by_role('button', name='Play Fixture artist — Pipeline tone', exact=True).click()
                     page.wait_for_function("document.querySelector('.bottom-player audio')?.currentTime > 0")
                     expect(player.get_by_role('button', name='In Wanted')).to_have_count(0)
@@ -98,7 +129,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     }""", self.url)
                     self.assertEqual(result, [206, f'bytes 100-199/{self.path.stat().st_size}', 100])
                     page.get_by_role('link', name='Organize', exact=True).click()
-                    expect(page.get_by_text('On Mac', exact=True)).to_be_visible()
+                    expect(page.locator('.pipeline-table__row').filter(has=arriving).get_by_text('On Mac', exact=True)).to_be_visible()
                     archived = page.get_by_role('button', name='Queue Archived credit — Archived tone', exact=True)
                     expect(archived).to_be_enabled()
                     archived.click()
