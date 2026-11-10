@@ -91,9 +91,10 @@ or production):
 python tools/instagram/connector.py --api http://127.0.0.1:8002 --fixture tools/instagram/fixture.json --work-seconds 600
 ```
 
-Only fixture mode uploads synthetic tone videos eagerly. Live mode imports
-metadata, then downloads/uploads only explicitly requested selected media.
-This uploads synthetic tone videos and labels the whole workspace as fixture.
+Fixture mode uploads synthetic tone videos eagerly and labels the workspace
+as fixture. Live mode imports metadata first. Opening a post or selecting a
+video requests that video, then prepares at most the next video in the same
+carousel. Loading the collection alone does not fetch originals.
 Recognition of fixture jobs is simulated and clearly marked by the banner.
 
 ## State, leases and playback boundary
