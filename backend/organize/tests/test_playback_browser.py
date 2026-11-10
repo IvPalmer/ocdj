@@ -1,10 +1,12 @@
 """Built app + real synthetic Django list/stream, only in CI PostgreSQL."""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from unittest import skipUnless
 
+from django.db import connections, transaction
 from django.test import LiveServerTestCase
 from django.utils import timezone
 
@@ -34,18 +36,34 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
         incoming = PipelineItem.objects.create(original_filename='incoming.aiff', artist='Incoming artist',
             title='Incoming tone', current_path=str(draining_path), work_path=str(draining_path),
             stage='published', archive_state='draining', sha256='c' * 64)
+        def change_delivery_state(delivered):
+            try:
+                with transaction.atomic():
+                    row = PipelineItem.objects.filter(pk=incoming.pk)
+                    if delivered:
+                        row.update(archive_state='archived', work_path='', archived_at=timezone.now(),
+                                   music_persistent_id='_REVIEW_LANDED')
+                        LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=incoming.pk,
+                            artist=incoming.artist, title=incoming.title, format='aiff',
+                            file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'c' * 64)
+                    else:
+                        row.update(archive_state='draining', work_path=str(draining_path),
+                                   archived_at=None, music_persistent_id='')
+                        LibraryTrack.objects.filter(archive_item_id=incoming.pk).delete()
+            finally:
+                connections.close_all()
+
         download = Download.objects.create(username='fixture', filename='second.wav', status='completed')
         second.download = download
         second.save(update_fields=['download'])
         dist = Path(__file__).resolve().parents[3] / 'dist'
         self.assertTrue((dist / 'index.html').is_file())
         from unittest.mock import patch
-        with patch('soulseek.views.SlskdClient') as slskd, sync_playwright() as pw:
+        with patch('soulseek.views.SlskdClient') as slskd, ThreadPoolExecutor(1) as db, sync_playwright() as pw:
             slskd.return_value.get_downloads.return_value = []
             for engine in ['chromium', 'webkit']:
                 with self.subTest(engine=engine):
-                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='draining', work_path=str(draining_path), archived_at=None, music_persistent_id='')
-                    LibraryTrack.objects.filter(archive_item_id=incoming.pk).delete()
+                    db.submit(change_delivery_state, False).result()
                     browser = getattr(pw, engine).launch()
                     page = browser.new_page()
                     errors, writes, media_requests = [], [], []
@@ -81,10 +99,7 @@ class OrganizeBrowserTests(PlaybackFixture, LiveServerTestCase):
                     expect(page.get_by_role('button', name='Play Fixture artist — Missing tone', exact=True)).to_have_count(0)
                     arriving = page.get_by_role('button', name='Play Incoming artist — Incoming tone', exact=True)
                     expect(arriving).to_have_count(0)
-                    PipelineItem.objects.filter(pk=incoming.pk).update(archive_state='archived', work_path='', archived_at=timezone.now(), music_persistent_id='_REVIEW_LANDED')
-                    LibraryTrack.objects.create(source='mac_snapshot', archive_item_id=incoming.pk,
-                        artist=incoming.artist, title=incoming.title, format='aiff',
-                        file_path='mac-snapshot:00000000-0000-0000-0000-000000000001:' + 'c' * 64)
+                    db.submit(change_delivery_state, True).result()
                     expect(arriving).to_be_enabled(timeout=12000)
                     expect(player.locator('audio')).to_have_count(0)
                     self.assertFalse(writes)
