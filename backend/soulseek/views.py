@@ -21,6 +21,11 @@ from .serializers import (
 )
 from .services import SlskdClient, generate_queries, score_result, filter_results, extract_file_info, simplify_query
 
+from .lifecycle import (
+    ACTIVE, hide_downloads, is_terminal_transfer as _is_terminal_transfer,
+    match_downloads, sync_linked_items, transfer_entries, transfer_status, update_transfer,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -465,27 +470,42 @@ def download_file(request):
     queue_item_id = serializer.validated_data.get('queue_item_id')
     wanted_item_id = serializer.validated_data.get('wanted_item_id')
 
-    download = Download.objects.create(
-        username=username,
-        filename=filename,
-        queue_item_id=queue_item_id,
-        wanted_item_id=wanted_item_id,
-        slskd_id=slskd_id,
-        status='queued',
-    )
-
-    # Update queue item status
-    if download.queue_item:
-        download.queue_item.status = 'downloading'
-        download.queue_item.save()
-
-    # Update wanted item status
-    if download.wanted_item:
-        download.wanted_item.status = 'downloading'
-        download.wanted_item.save()
+    with transaction.atomic():
+        # Serialize local enqueue with linked-state reconciliation. Queue-only
+        # requests inherit their Wanted provenance just like auto-downloads.
+        qi = SearchQueueItem.objects.select_for_update().filter(pk=queue_item_id).first()
+        wanted_item_id = wanted_item_id or (qi.wanted_item_id if qi else None)
+        wi = WantedItem.objects.select_for_update().filter(pk=wanted_item_id).first()
+        download = Download.objects.create(
+            username=username, filename=filename, queue_item_id=queue_item_id,
+            wanted_item_id=wanted_item_id, slskd_id=slskd_id, status='queued',
+        )
+        if qi:
+            SearchQueueItem.objects.filter(pk=qi.pk).update(status='downloading', updated=timezone.now())
+        if wi:
+            WantedItem.objects.filter(pk=wi.pk).update(status='downloading', updated=timezone.now())
 
     logger.info(f"Download queued: {filename} from {username} (slskd_id={slskd_id})")
     return Response(DownloadSerializer(download).data, status=201)
+
+
+def _refresh_downloads(entries):
+    """Capture outcomes before history removal or the display cap can hide them."""
+    all_downloads = list(Download.objects.all().order_by('-started', '-pk'))
+    matches = match_downloads(all_downloads, entries)
+    for dl in all_downloads:
+        if dl.pk not in matches:
+            continue
+        transfer = entries[matches[dl.pk]][1]
+        if update_transfer(dl, transfer):
+            def _ingest(_id=dl.pk, _size=transfer.get('size')):
+                try:
+                    from organize.services.pipeline import auto_ingest_download
+                    threading.Thread(target=auto_ingest_download, args=(_id, _size), daemon=True).start()
+                except Exception as exc:
+                    logger.warning(f"auto_ingest dispatch failed for {_id}: {exc}")
+            transaction.on_commit(_ingest)
+    return all_downloads, matches
 
 
 @api_view(['GET'])
@@ -497,123 +517,51 @@ def downloads_status(request):
     """
     client = SlskdClient()
 
-    # Build lookup: (username, filename) -> transfer data from slskd
-    slskd_transfer_map = {}
     slskd_unreachable = False
     slskd_error = ''
+    entries = []
     try:
-        slskd_downloads = client.get_downloads()
-        for user_entry in slskd_downloads:
-            username = user_entry.get('username', '')
-            for directory in user_entry.get('directories', []):
-                for transfer in directory.get('files', []):
-                    fn = transfer.get('filename', '')
-                    key = (username.lower(), fn.lower())
-                    slskd_transfer_map[key] = transfer
+        entries = transfer_entries(client.get_downloads())
     except Exception as e:
         slskd_unreachable = True
         slskd_error = str(e)[:200]
         logger.warning(f"Could not fetch slskd downloads: {e}")
 
-    our_downloads = Download.objects.all().order_by('-started')[:50]
+    all_downloads, matches = _refresh_downloads(entries)
+    if not slskd_unreachable:
+        sync_linked_items(entries)
 
-    # Keys we managed to match, so anything slskd is doing that we have no row
-    # for can be surfaced below instead of vanishing.
-    matched_keys = set()
-
+    # Claim matches using ALL rows, including hidden history and rows beyond 50,
+    # so neither can come back as an apparently untracked transfer.
+    matched = set(matches.values())
+    history = [dl for dl in all_downloads if dl.hidden_at is None and dl.status not in ACTIVE]
+    history_ids = {dl.pk for dl in history[:50]}
+    our_downloads = [dl for dl in all_downloads if dl.status in ACTIVE or dl.pk in history_ids]
     enriched = []
     for dl in our_downloads:
         data = DownloadSerializer(dl).data
-
-        key = (dl.username.lower(), dl.filename.lower())
-        transfer = slskd_transfer_map.get(key)
-        if transfer:
-            matched_keys.add(key)
-
-        if transfer:
-            state = transfer.get('state', '')
-            data['slskd_state'] = state
-            data['percent'] = transfer.get('percentComplete', 0)
-            data['speed'] = transfer.get('averageSpeed', 0)
-            data['bytes_transferred'] = transfer.get('bytesTransferred', 0)
-            data['bytes_remaining'] = transfer.get('bytesRemaining', 0)
-            data['elapsed'] = transfer.get('elapsedTime', '')
-            data['remaining'] = transfer.get('remainingTime', '')
-            data['slskd_transfer_id'] = transfer.get('id', '')
-
-            if 'Completed' in state and 'Succeeded' in state and dl.status != 'completed':
-                with transaction.atomic():
-                    dl.status = 'completed'
-                    dl.progress = 100
-                    dl.completed_at = timezone.now()
-                    dl.save()
-                data['status'] = 'completed'
-                data['progress'] = 100
-                # Auto-trigger organize pipeline after commit so thread sees completed row
-                dl_id = dl.id
-                def _ingest(_id=dl_id, _size=transfer.get('size')):
-                    try:
-                        from organize.services.pipeline import auto_ingest_download
-                        threading.Thread(target=auto_ingest_download, args=(_id, _size), daemon=True).start()
-                    except Exception as exc:
-                        logger.warning(f"auto_ingest dispatch failed for {_id}: {exc}")
-                transaction.on_commit(_ingest)
-            elif 'InProgress' in state and dl.status != 'downloading':
-                dl.status = 'downloading'
-                dl.progress = transfer.get('percentComplete', 0)
-                dl.save()
-                data['status'] = 'downloading'
-            elif 'Completed' in state and (
-                'Cancelled' in state or 'Errored' in state
-                or 'TimedOut' in state or 'Rejected' in state
-            ):
-                if dl.status not in ('failed', 'cancelled'):
-                    if 'Cancelled' in state:
-                        dl.status = 'cancelled'
-                    else:
-                        # Rejected/Errored/TimedOut → genuine failure the user
-                        # should see in the Failed group. Includes peers that
-                        # rejected the share (privileges, disabled, banned us).
-                        dl.status = 'failed'
-                    dl.error_message = state
-                    dl.save()
-                    data['status'] = dl.status
-        else:
-            data['slskd_state'] = ''
-            data['percent'] = dl.progress
-            data['speed'] = 0
-            data['bytes_transferred'] = 0
-            data['bytes_remaining'] = 0
-            data['elapsed'] = ''
-            data['remaining'] = ''
-            data['slskd_transfer_id'] = ''
-
+        transfer = entries[matches[dl.pk]][1] if dl.pk in matches else {}
+        data.update({
+            'slskd_state': transfer.get('state', ''),
+            'percent': transfer.get('percentComplete', dl.progress),
+            'speed': transfer.get('averageSpeed', 0),
+            'bytes_transferred': transfer.get('bytesTransferred', 0),
+            'bytes_remaining': transfer.get('bytesRemaining', 0),
+            'elapsed': transfer.get('elapsedTime', ''),
+            'remaining': transfer.get('remainingTime', ''),
+            'slskd_transfer_id': transfer.get('id', ''),
+        })
         enriched.append(data)
 
-    # Anything slskd is transferring that we have no row for. This panel used
-    # to list only our own Download rows and merely decorate them with slskd
-    # progress, so a transfer slskd accepted but we failed to record — or one
-    # started from slskd's own interface — was invisible here no matter how
-    # busy it was. Three files sat "Queued, Remotely" for a day while this page
-    # showed an empty list. Untracked entries are read-only: there is no local
-    # row to cancel or delete, and inventing one would be worse than saying so.
-    for (username, _fn), transfer in slskd_transfer_map.items():
-        key = (username, (transfer.get('filename') or '').lower())
-        if key in matched_keys:
+    for index, (username, transfer) in enumerate(entries):
+        if index in matched:
             continue
         state = transfer.get('state', '') or ''
         if 'Cancelled' in state:
             continue
-        if 'Succeeded' in state:
-            status = 'completed'
-        elif 'Completed' in state:
-            status = 'failed'
-        elif 'InProgress' in state:
-            status = 'downloading'
-        else:
-            status = 'queued'
+        status = transfer_status(transfer)
         enriched.append({
-            'id': f"slskd:{username}:{transfer.get('id', '')}",
+            'id': f"slskd:{username.casefold()}:{transfer.get('id', '')}",
             'untracked': True,
             'username': username,
             'filename': transfer.get('filename', ''),
@@ -631,52 +579,16 @@ def downloads_status(request):
             'started': transfer.get('requestedAt', ''),
         })
 
-    # Auto-sync SearchQueueItem status
-    queue_ids_seen = set()
-    for dl in our_downloads:
-        if dl.queue_item_id and dl.queue_item_id not in queue_ids_seen:
-            queue_ids_seen.add(dl.queue_item_id)
-            try:
-                qi = SearchQueueItem.objects.get(id=dl.queue_item_id)
-                if qi.status == 'downloading':
-                    item_downloads = Download.objects.filter(queue_item=qi)
-                    all_done = item_downloads.exists() and not item_downloads.exclude(
-                        status__in=['completed', 'failed', 'cancelled']
-                    ).exists()
-                    any_completed = item_downloads.filter(status='completed').exists()
-                    if all_done and any_completed:
-                        qi.status = 'downloaded'
-                        qi.save()
-                        logger.info(f"QueueItem {qi.id} '{qi}' auto-synced to 'downloaded'")
-            except SearchQueueItem.DoesNotExist:
-                pass
-
-    # Auto-sync WantedItem status
-    wanted_ids_seen = set()
-    for dl in our_downloads:
-        if dl.wanted_item_id and dl.wanted_item_id not in wanted_ids_seen:
-            wanted_ids_seen.add(dl.wanted_item_id)
-            try:
-                wi = WantedItem.objects.get(id=dl.wanted_item_id)
-                if wi.status == 'downloading':
-                    item_downloads = Download.objects.filter(wanted_item=wi)
-                    all_done = item_downloads.exists() and not item_downloads.exclude(
-                        status__in=['completed', 'failed', 'cancelled']
-                    ).exists()
-                    any_completed = item_downloads.filter(status='completed').exists()
-                    if all_done and any_completed:
-                        wi.status = 'downloaded'
-                        wi.save()
-                        logger.info(f"WantedItem {wi.id} '{wi}' auto-synced to 'downloaded'")
-            except WantedItem.DoesNotExist:
-                pass
-
-    # Download indicators for UI
+    # These are acquisition indicators, not a history listing. Hidden successes
+    # still count, but a live retry wins regardless of iteration/creation order.
     download_indicators = {}
-    for dl in our_downloads:
-        fn_key = dl.filename.lower()
-        if dl.status in ('queued', 'downloading', 'completed'):
-            download_indicators[fn_key] = dl.status
+    priority = {'completed': 1, 'queued': 2, 'downloading': 3}
+    indicators = [(dl.filename, dl.status) for dl in all_downloads]
+    indicators.extend((t.get('filename') or '', transfer_status(t)) for _, t in entries)
+    for filename, status in indicators:
+        key = filename.lower()
+        if priority.get(status, 0) > priority.get(download_indicators.get(key), 0):
+            download_indicators[key] = status
 
     completed = {row['id']: row for row in enriched if row['status'] == 'completed' and not row.get('untracked')}
     serializer = PipelineItemSerializer()
@@ -735,9 +647,13 @@ def cancel_download(request):
     if dl.status not in ('queued', 'downloading'):
         return Response({'error': 'This transfer already ended. Refresh Downloads.'}, status=409)
     try:
-        matches = [(peer, t) for peer, t in _peer_transfers(client.get_downloads(), dl.username)
-                   if (t.get('filename') or '').casefold() == dl.filename.casefold()]
+        entries = transfer_entries(client.get_downloads())
+        matches = [(peer, t) for peer, t in entries
+                   if peer.casefold() == dl.username.casefold()
+                   and (t.get('filename') or '').casefold() == dl.filename.casefold()]
         active = [(peer, t) for peer, t in matches if not _is_terminal_transfer(t.get('state'))]
+        if active and not dl.slskd_id and dl.pk not in match_downloads(list(Download.objects.all()), entries):
+            return Response({'error': 'The active transfer is ambiguous. Refresh Downloads.'}, status=409)
         if len(active) > 1 or any(not t.get('id') or (dl.slskd_id and t['id'] != dl.slskd_id) for _, t in active):
             return Response({'error': 'The active transfer changed. Refresh Downloads.'}, status=409)
         if active:
@@ -748,16 +664,11 @@ def cancel_download(request):
     except requests.RequestException:
         return Response({'error': 'Could not cancel the transfer. Refresh and try again.'}, status=502)
 
-    dl.status = 'cancelled'
-    dl.save()
-
-    if dl.queue_item and dl.queue_item.status == 'downloading':
-        dl.queue_item.status = 'found'
-        dl.queue_item.save()
-
-    if dl.wanted_item and dl.wanted_item.status == 'downloading':
-        dl.wanted_item.status = 'found'
-        dl.wanted_item.save()
+    Download.objects.filter(pk=dl.pk, status__in=ACTIVE).update(status='cancelled')
+    # The successful cancellation removed that live attempt from the snapshot.
+    remaining = [(peer, t) for peer, t in entries
+                 if not any(peer == p and t == transfer for p, transfer in active)]
+    sync_linked_items(remaining)
 
     return Response({'status': 'cancelled', 'id': dl.id})
 
@@ -873,14 +784,9 @@ def browse_user(request):
     })
 
 
-def _is_terminal_transfer(state):
-    flags = {flag.strip() for flag in (state or '').split(',')}
-    return 'Completed' in flags and not flags.intersection({'InProgress', 'Queued'})
-
-
 @api_view(['DELETE'])
 def delete_download(request, download_id=None):
-    """Remove exactly one terminal entry, including rows owned only by slskd."""
+    """Dismiss one terminal history entry while retaining its provenance."""
     dl = None
     if download_id is None:
         value = request.data.get('download_id')
@@ -895,13 +801,18 @@ def delete_download(request, download_id=None):
             return Response({'error': 'Download not found'}, status=404)
         if dl.status not in ('completed', 'failed', 'cancelled'):
             return Response({'error': 'This transfer is still active. Cancel it first.'}, status=409)
+        if dl.hidden_at is not None:
+            return Response(status=status.HTTP_204_NO_CONTENT)
         username, transfer_id = dl.username, dl.slskd_id
 
     client = SlskdClient()
     try:
-        transfers = _peer_transfers(client.get_downloads(), username)
+        entries = transfer_entries(client.get_downloads())
+        transfers = [(peer, t) for peer, t in entries if peer.casefold() == username.casefold()]
         same_file = [(peer, t) for peer, t in transfers if dl is not None
                      and (t.get('filename') or '').casefold() == dl.filename.casefold()]
+        if dl is not None and same_file and not dl.slskd_id and dl.pk not in match_downloads(list(Download.objects.all()), entries):
+            return Response({'error': 'A matching transfer is ambiguous. Refresh Downloads.'}, status=409)
         if any(not _is_terminal_transfer(t.get('state')) for _, t in same_file):
             return Response({'error': 'A retry of this download is still active.'}, status=409)
         matches = ([(peer, t) for peer, t in transfers if t.get('id') == transfer_id]
@@ -917,13 +828,18 @@ def delete_download(request, download_id=None):
         return Response({'error': 'Could not remove the transfer from slskd. Refresh and try again.'}, status=502)
 
     if dl is not None:
-        dl.delete()
+        if matches:
+            update_transfer(dl, matches[0][1])
+        hide_downloads([dl.pk])
+    remaining = [(peer, t) for peer, t in entries
+                 if not any(peer == p and t == transfer for p, transfer in matches)]
+    sync_linked_items(remaining)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['POST'])
 def clear_downloads(request):
-    """Clear selected terminal history in slskd before deleting local rows."""
+    """Clear selected terminal slskd history, then hide local history once."""
     mode = request.data.get('mode', 'completed')
     statuses = {
         'completed': ['completed'],
@@ -942,6 +858,8 @@ def clear_downloads(request):
         return Response({'error': 'Could not reach slskd. History was preserved; try again.',
                          'cleared': 0, 'slskd_cleared': 0}, status=502)
 
+    # Persist known outcomes before deleting slskd's only remaining evidence.
+    _refresh_downloads(transfer_entries(users))
     transfers_by_id = {}
     transfers_by_file = {}
     removed = set()
@@ -973,7 +891,7 @@ def clear_downloads(request):
                     failed += 1
 
     local_ids = []
-    for dl in Download.objects.filter(status__in=statuses[mode]):
+    for dl in Download.objects.filter(status__in=statuses[mode], hidden_at__isnull=True):
         if dl.slskd_id:
             key = (dl.username.lower(), dl.slskd_id)
             keys = [key] if key in transfers_by_id else []
@@ -983,7 +901,9 @@ def clear_downloads(request):
             keys = transfers_by_file.get((dl.username.lower(), dl.filename.lower()), [])
         if all(key in removed for key in keys):
             local_ids.append(dl.pk)
-    count, _ = Download.objects.filter(pk__in=local_ids, status__in=statuses[mode]).delete()
+    count = hide_downloads(local_ids)
+    sync_linked_items([(peer, t) for peer, t in transfer_entries(users)
+                       if (peer.lower(), t.get('id', '')) not in removed])
     result = {'cleared': count, 'slskd_cleared': len(removed), 'slskd_failed': failed}
     if failed:
         result['error'] = 'Some slskd history could not be cleared. Remaining entries were preserved; try again.'

@@ -136,7 +136,11 @@ class SearchResult(models.Model):
 
 
 class Download(models.Model):
-    """Tracks a download from slskd."""
+    """Durable transfer provenance, also used by Wanted and Organize.
+
+    Dismissal only sets hidden_at. Keep the default manager unfiltered: pipeline,
+    automation and reverse FK consumers must still see dismissed attempts.
+    """
 
     STATUS_CHOICES = [
         ('queued', 'Queued'),
@@ -172,6 +176,9 @@ class Download(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='queued')
     progress = models.FloatField(default=0)  # 0-100
     error_message = models.TextField(blank=True)
+
+    # History UI visibility is independent of transfer outcome/provenance.
+    hidden_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     # slskd tracking
     slskd_id = models.CharField(max_length=255, blank=True, help_text='slskd transfer ID')
