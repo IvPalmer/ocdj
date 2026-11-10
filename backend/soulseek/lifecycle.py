@@ -80,7 +80,7 @@ def match_downloads(downloads, entries):
 def update_transfer(dl, transfer):
     """Reconcile an active attempt only; return True for a new completion.
 
-    Terminal attempts are immutable here. A retry is a separate Download, not a
+    Terminal outcomes are immutable here. A retry is a separate Download, not a
     reason to resurrect a dismissed success or failure.
     """
     # Bind a uniquely resolved legacy identity before it can be hidden, so

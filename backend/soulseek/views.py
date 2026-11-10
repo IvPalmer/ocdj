@@ -534,8 +534,8 @@ def downloads_status(request):
     # Claim matches using ALL rows, including hidden history and rows beyond 50,
     # so neither can come back as an apparently untracked transfer.
     matched = set(matches.values())
-    history_ids = {dl.pk for dl in [row for row in all_downloads
-                                  if row.hidden_at is None and row.status not in ACTIVE][:50]}
+    history = [dl for dl in all_downloads if dl.hidden_at is None and dl.status not in ACTIVE]
+    history_ids = {dl.pk for dl in history[:50]}
     our_downloads = [dl for dl in all_downloads if dl.status in ACTIVE or dl.pk in history_ids]
     enriched = []
     for dl in our_downloads:
@@ -652,6 +652,8 @@ def cancel_download(request):
                    if peer.casefold() == dl.username.casefold()
                    and (t.get('filename') or '').casefold() == dl.filename.casefold()]
         active = [(peer, t) for peer, t in matches if not _is_terminal_transfer(t.get('state'))]
+        if active and not dl.slskd_id and dl.pk not in match_downloads(list(Download.objects.all()), entries):
+            return Response({'error': 'The active transfer is ambiguous. Refresh Downloads.'}, status=409)
         if len(active) > 1 or any(not t.get('id') or (dl.slskd_id and t['id'] != dl.slskd_id) for _, t in active):
             return Response({'error': 'The active transfer changed. Refresh Downloads.'}, status=409)
         if active:
@@ -809,6 +811,8 @@ def delete_download(request, download_id=None):
         transfers = [(peer, t) for peer, t in entries if peer.casefold() == username.casefold()]
         same_file = [(peer, t) for peer, t in transfers if dl is not None
                      and (t.get('filename') or '').casefold() == dl.filename.casefold()]
+        if dl is not None and same_file and not dl.slskd_id and dl.pk not in match_downloads(list(Download.objects.all()), entries):
+            return Response({'error': 'A matching transfer is ambiguous. Refresh Downloads.'}, status=409)
         if any(not _is_terminal_transfer(t.get('state')) for _, t in same_file):
             return Response({'error': 'A retry of this download is still active.'}, status=409)
         matches = ([(peer, t) for peer, t in transfers if t.get('id') == transfer_id]

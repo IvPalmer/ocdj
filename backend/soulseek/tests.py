@@ -423,6 +423,29 @@ class ClearDownloadsTests(TestCase):
         old.refresh_from_db()
         self.assertEqual(old.status, 'failed')
 
+    def test_single_actions_refuse_ambiguous_legacy_local_attempts(self):
+        for local_status, state, method in [
+            ('failed', 'Completed, Errored', 'dismiss'),
+            ('queued', 'Queued, Remotely', 'cancel'),
+        ]:
+            with self.subTest(method=method):
+                dl, _ = self.add(local_status, state)
+                dl.slskd_id = ''
+                dl.save()
+                Download.objects.create(username='peer', filename=dl.filename, status=local_status)
+                if method == 'dismiss':
+                    result = self.client.delete(f'/api/soulseek/downloads/{dl.pk}/')
+                else:
+                    with patch.object(self.peer, 'cancel_download') as cancel:
+                        result = self.client.post('/api/soulseek/downloads/cancel/',
+                            {'download_id': dl.pk}, format='json')
+                        cancel.assert_not_called()
+                self.assertEqual(result.status_code, 409)
+                dl.refresh_from_db()
+                self.assertEqual(dl.status, local_status)
+                self.assertIsNone(dl.hidden_at)
+        self.assertEqual(self.removed, [])
+
     def test_ambiguous_legacy_attempts_are_not_assigned_one_transfer(self):
         old, _ = self.add('queued', 'Completed, Succeeded')
         old.slskd_id = ''
