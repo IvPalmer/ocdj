@@ -732,6 +732,15 @@ def browse_user(request):
     def _normalize(p):
         return (p or '').replace('\\', '/').lower().strip('/')
 
+    def _download_path(directory, filename):
+        # Browse reports basenames, whereas slskd transfers require the full peer path.
+        if not directory or not filename or '\\' in filename or '/' in filename:
+            return filename
+        if directory.endswith(('\\', '/')):
+            return directory + filename
+        separator = '/' if '/' in directory and '\\' not in directory else '\\'
+        return directory + separator + filename
+
     prefix_norm = _normalize(dir_prefix)
     filtered = []
     total_files = 0
@@ -755,7 +764,7 @@ def browse_user(request):
                 'locked': locked,
                 'files': [
                     {
-                        'filename': f.get('filename', ''),
+                        'filename': _download_path(name, f.get('filename', '')),
                         'size': f.get('size', 0),
                         'extension': (f.get('extension') or '').lstrip('.'),
                         'bitrate': f.get('bitRate'),
