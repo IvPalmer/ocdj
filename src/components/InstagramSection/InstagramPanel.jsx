@@ -92,7 +92,8 @@ export default function InstagramPanel() {
   const [postView, setPostView] = useState('grid')
   const player = usePlayer()
   const postDetailRef = useRef(null)
-  const [playbackError, setPlaybackError] = useState(false)
+  const [failedStream, setFailedStream] = useState(null)
+  const [streamRetry, setStreamRetry] = useState(null)
   const query = useQuery({ queryKey: ['instagram'], queryFn: () => api.get('/instagram/'), refetchInterval: 5000 })
   const mutation = useMutation({ mutationFn: ({ id, action, data }) => action ? api.post(`/instagram/media/${id}/${action}/`, {}) : api.patch(`/instagram/media/${id}/`, data), onSuccess: () => client.invalidateQueries({ queryKey: ['instagram'] }) })
   const playback = useMutation({
@@ -104,6 +105,8 @@ export default function InstagramPanel() {
   const visiblePosts = posts.filter(p => p.media.some(m => matches(m, filter)))
   const post = visiblePosts.find(p => p.id === selectedPost) || visiblePosts[0]
   const media = post?.media.find(m => m.id === selectedMedia) || post?.media.find(m => matches(m, filter))
+  const streamKey = media && `${media.id}:${media.playback_version}:${streamRetry?.id === media.id ? streamRetry.count : 0}`
+  const playbackError = streamKey != null && failedStream === streamKey
   const videos = posts.flatMap(p => p.media).filter(m => m.kind === 'video')
   const reviewed = videos.filter(m => m.reviewed).length
   const identified = videos.filter(m => m.status === 'identified').length
@@ -125,8 +128,7 @@ export default function InstagramPanel() {
     }
   }
   const preparing = waiting || (automaticTarget != null && automaticTarget === media?.id)
-  useEffect(() => { setPlaybackError(false); mutation.reset() }, [media?.id])
-  useEffect(() => { setPlaybackError(false) }, [media?.playback_version])
+  useEffect(() => { setFailedStream(null); mutation.reset() }, [media?.id])
   useEffect(() => {
     if (automaticTarget == null) return
     // Avoid enqueuing clips the user skips past while browsing.
@@ -141,8 +143,13 @@ export default function InstagramPanel() {
   }
 
   function loadSelected() {
-    setSelectedMedia(media.id)
-    requestPlayback(media.id)
+    const id = media.id
+    setSelectedMedia(id)
+    requestPlayback(id, {
+      onSuccess: () => {
+        if (playbackError) setStreamRetry(retry => ({ id, count: (retry?.count ?? 0) + 1 }))
+      },
+    })
   }
 
   return <section className="ig-workspace">
@@ -190,8 +197,8 @@ export default function InstagramPanel() {
             {media && <>
               <div className="ig-player">
                 {ready ? (media.kind === 'image'
-                  ? <img key={media.playback_version} src={media.playback_url} alt={`Carousel image ${media.position+1}`} onError={() => setPlaybackError(true)} />
-                  : <video key={`${media.id}:${media.playback_version}`} data-playback-version={media.playback_version} controls preload="metadata" playsInline src={media.playback_url} onPlay={player.pause} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setPlaybackError(true)} />
+                  ? <img key={streamKey} src={media.playback_url} alt={`Carousel image ${media.position+1}`} onError={() => setFailedStream(streamKey)} />
+                  : <video key={streamKey} data-playback-version={media.playback_version} controls preload="metadata" playsInline src={media.playback_url} onPlay={player.pause} aria-label={`Post ${posts.indexOf(post)+1}, video ${media.position+1}`} onError={() => setFailedStream(streamKey)} />
                 ) : preparing ? <p role="status">{media.kind === 'image' ? 'Getting image ready…' : 'Getting video ready…'}</p> : <div>
                   {playbackError || media.playback_error || requestFailed(media.id) ? <>
                     <p role="status">{playbackError ? 'Playback unavailable or cache expired.' : 'Could not load this media.'}</p>

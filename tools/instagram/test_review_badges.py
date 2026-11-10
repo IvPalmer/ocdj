@@ -142,6 +142,7 @@ with sync_playwright() as p:
     page.clock.install()
     posts = [fixture_post(1, 'first', [False] * 3), fixture_post(2, 'second', [False])]
     requests = []
+    fail_once = set()
     audio = io.BytesIO()
     with wave.open(audio, 'wb') as wav:
         wav.setparams((1, 2, 8000, 0, 'NONE', 'not compressed'))
@@ -153,12 +154,18 @@ with sync_playwright() as p:
         if path == 'instagram/':
             data = dict(fixture=True, connector_status='ready', posts=posts)
         elif path.endswith('/playback/'):
+            assert r.request.method == 'POST'
             media_id = int(path.split('/')[2])
             requests.append(media_id)
             data = next(m for post in posts for m in post['media'] if m['id'] == media_id)
             data['playback_requested'] = True
         elif path.startswith('fixture-video/'):
-            r.fulfill(content_type='audio/wav', body=audio.getvalue())
+            media_id = int(path.split('/')[-1])
+            if media_id in fail_once:
+                fail_once.remove(media_id)
+                r.abort()
+            else:
+                r.fulfill(content_type='audio/wav', body=audio.getvalue())
             return
         r.fulfill(json=data)
 
@@ -170,8 +177,9 @@ with sync_playwright() as p:
     page.clock.run_for(1000)
     assert requests == [], requests
 
-    cards.first.click()
-    page.clock.run_for(1000)
+    with page.expect_response('**/media/10/playback/', timeout=4000):
+        cards.first.click()
+        page.clock.run_for(1000)
     expect(page.get_by_text('Getting video ready…')).to_be_visible()
     assert requests == [10], requests
 
@@ -180,21 +188,29 @@ with sync_playwright() as p:
                     playback_version=str(clip['id']))
         page.get_by_role('button', name='Refresh status').click()
 
-    finish(posts[0]['media'][0])
     video = page.locator('.ig-player video')
-    expect(video).to_have_attribute('src', '/api/fixture-video/10')
-    page.wait_for_function('document.querySelector(".ig-player video").readyState >= 1')
-    expect(video).to_have_js_property('paused', True)
-    page.clock.run_for(1000)
+    with page.expect_response('**/media/11/playback/', timeout=4000):
+        finish(posts[0]['media'][0])
+        expect(video).to_have_attribute('src', '/api/fixture-video/10')
+        page.wait_for_function('document.querySelector(".ig-player video").readyState >= 1')
+        expect(video).to_have_js_property('paused', True)
+        page.clock.run_for(1000)
     assert requests == [10, 11], requests
 
     finish(posts[0]['media'][1])
     page.clock.run_for(1000)
     assert requests == [10, 11], requests
+    fail_once.add(11)
     page.get_by_role('button', name='video 2, pending', exact=True).click()
+    expect(page.get_by_text('Playback unavailable or cache expired.')).to_be_visible()
+    with page.expect_response('**/media/11/playback/', timeout=4000):
+        page.get_by_role('button', name='Retry playback').click()
     expect(video).to_have_attribute('src', '/api/fixture-video/11')
     expect(video).to_have_js_property('paused', True)
-    page.clock.run_for(1000)
-    assert requests == [10, 11, 12], requests
+    assert requests == [10, 11, 11], requests
+    with page.expect_response('**/media/12/playback/', timeout=4000):
+        finish(posts[0]['media'][1])
+        page.clock.run_for(1000)
+    assert requests == [10, 11, 11, 12], requests
     browser.close()
-    print('PASS: selection loads one video, prepares one next clip, and leaves playback paused')
+    print('PASS: selection loads one video, prepares one next clip, stays paused, and retries a cached stream')
