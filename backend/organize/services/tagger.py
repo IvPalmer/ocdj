@@ -401,6 +401,13 @@ def tag_file(pipeline_item):
     """Orchestrate tagging: read existing -> merge WantedItem data -> enrich -> write -> update item."""
     filepath = pipeline_item.current_path
 
+    if pipeline_item.metadata_source == 'manual':
+        write_tags_atomic(filepath, {
+            field: getattr(pipeline_item, field) for field in
+            ('artist', 'title', 'album', 'label', 'catalog_number', 'genre', 'year', 'track_number')
+        })
+        return
+
     # Read existing tags from file
     existing = read_existing_tags(filepath)
 

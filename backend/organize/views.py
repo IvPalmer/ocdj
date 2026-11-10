@@ -108,10 +108,14 @@ def _remove_item_files(item):
 def pipeline_detail(request, pk):
     """Get, update, or remove a single pipeline item."""
     if request.method in ('PATCH', 'DELETE'):
+        from .services.pipeline import pipeline_item_lock
+
         # Read the archive state and act on it under a row lock. Checking first
         # and writing afterwards leaves room for a drain claim (or an
         # auto-publish) to land in between and invalidate the check.
-        with transaction.atomic():
+        with pipeline_item_lock(pk) as acquired, transaction.atomic():
+            if not acquired:
+                return Response({'error': 'This item is processing. Try again when it finishes.'}, status=409)
             return _pipeline_detail_write(request, pk)
 
     try:
@@ -252,8 +256,8 @@ def pipeline_process_single(request, pk):
     except PipelineItem.DoesNotExist:
         return Response({'error': 'Not found'}, status=http_status.HTTP_404_NOT_FOUND)
 
-    from .services.pipeline import process_pipeline_item
-    threading.Thread(target=process_pipeline_item, args=(item.id,), daemon=True).start()
+    from .tasks import process_item
+    process_item(item.id)
     return Response({'message': f'Processing item {item.id}'})
 
 
@@ -268,18 +272,25 @@ def pipeline_retry(request, pk):
     if item.stage != 'failed':
         return Response({'error': 'Item is not in failed state'}, status=http_status.HTTP_400_BAD_REQUEST)
 
-    item.stage = 'downloaded'
-    item.error_message = ''
-    item.save()
-
-    from .services.pipeline import process_pipeline_item
-    threading.Thread(target=process_pipeline_item, args=(item.id,), daemon=True).start()
+    if not os.path.isfile(item.current_path):
+        return Response({'error': 'Source file unavailable'}, status=http_status.HTTP_409_CONFLICT)
+    from .tasks import process_item
+    process_item(item.id, force_retry=True)
     return Response({'message': f'Retrying item {item.id}'})
 
 
 @api_view(['POST'])
 def pipeline_skip(request, pk):
     """Skip current stage — advance to the next one."""
+    from .services.pipeline import pipeline_item_lock
+
+    with pipeline_item_lock(pk) as acquired:
+        if not acquired:
+            return Response({'error': 'This item is processing. Try again when it finishes.'}, status=409)
+        return _pipeline_skip(pk)
+
+
+def _pipeline_skip(pk):
     try:
         item = PipelineItem.objects.get(pk=pk)
     except PipelineItem.DoesNotExist:
@@ -347,7 +358,11 @@ def pipeline_retag(request, pk):
     broke two tracks: it renames without moving work_path and rewrites the
     bytes without recomputing sha256. Published rows go through /refresh/.
     """
-    with transaction.atomic():
+    from .services.pipeline import pipeline_item_lock
+
+    with pipeline_item_lock(pk) as acquired, transaction.atomic():
+        if not acquired:
+            return Response({'error': 'This item is processing. Try again when it finishes.'}, status=409)
         try:
             item = PipelineItem.objects.select_for_update().get(pk=pk)
         except PipelineItem.DoesNotExist:

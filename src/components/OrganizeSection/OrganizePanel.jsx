@@ -21,6 +21,7 @@ const STAGES = [
   { key: 'ready', label: 'Ready', color: 'var(--accent-green)' },
   { key: 'published', label: 'Published', color: 'var(--accent-purple, var(--accent-blue))' },
   { key: 'failed', label: 'Failed', color: 'var(--accent-red)' },
+  { key: 'held', label: 'Held', color: 'var(--text-muted)' },
 ]
 
 const EDITABLE_FIELDS = [
@@ -643,23 +644,25 @@ function OrganizePanel() {
                   {details && <span className="col-file__original" title={details}>{details}</span>}
                 </span>
                 <span className="col-stage">
-                  {location ? <span className="stage-pill" style={{ '--pill-color': location[1] }}>{location[0]}</span>
+                  {item.retry_after ? <span className="stage-pill" style={{ '--pill-color': 'var(--accent-amber)' }} title={item.error_message}>Retry scheduled</span>
+                    : location ? <span className="stage-pill" style={{ '--pill-color': location[1] }}>{location[0]}</span>
                     : <StagePill stage={item.stage} />}
                   {item.metadata_source && <span className="col-source">{item.metadata_source}</span>}
                 </span>
                 <span className="col-actions">
-                  <TrackPlayback sourceOnly archiveOnly track={{
+                  {item.stage === 'held' ? <span className="col-source" title={item.error_message}>Waiting for a lossless copy</span>
+                    : <TrackPlayback sourceOnly archiveOnly track={{
                     pipelineId: item.id, artist: item.artist, title: item.title || currentName,
                     wantedId: item.wanted_item, source: directSource(item),
                     archiveLibraryMatch: item.archive_library_match,
                     description: 'Organize · server file',
-                  }} unavailable={item.playback_unavailable || 'File unavailable on server'} />
-                  <button
+                  }} unavailable={item.playback_unavailable || 'File unavailable on server'} />}
+                  {item.stage !== 'held' && <button
                     className="btn btn-xs"
                     onClick={() => setEditingItem(item)}
                   >
                     Edit tags
-                  </button>
+                  </button>}
                   {item.stage === 'downloaded' && (
                     <button
                       className="btn btn-xs"
@@ -678,7 +681,7 @@ function OrganizePanel() {
                       Retry
                     </button>
                   )}
-                  {!['ready', 'failed', 'published'].includes(item.stage) && !item.stage.endsWith('ing') && (
+                  {!['ready', 'failed', 'published', 'held'].includes(item.stage) && !item.stage.endsWith('ing') && (
                     <button
                       className="btn btn-xs"
                       onClick={() => skipStage.mutate(item.id)}

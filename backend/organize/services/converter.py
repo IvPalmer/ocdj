@@ -337,11 +337,11 @@ def convert_pipeline_item(pipeline_item):
     # Re-embed artwork
     _embed_artwork_to_file(converted_path, artwork_data)
 
-    # Remove original file (it's been replaced)
-    if os.path.exists(filepath) and filepath != converted_path:
-        os.remove(filepath)
-
     # Update pipeline item
     pipeline_item.current_path = converted_path
     pipeline_item.final_filename = os.path.basename(converted_path)
     pipeline_item.save(update_fields=['current_path', 'final_filename'])
+
+    # Keep the source available until the converted file is recorded.
+    if os.path.exists(filepath) and filepath != converted_path:
+        os.remove(filepath)

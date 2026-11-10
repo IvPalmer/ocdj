@@ -23,7 +23,7 @@ from .services import SlskdClient, generate_queries, score_result, filter_result
 
 from .lifecycle import (
     ACTIVE, hide_downloads, is_terminal_transfer as _is_terminal_transfer,
-    match_downloads, sync_linked_items, transfer_entries, transfer_status, update_transfer,
+    match_downloads, reconcile_downloads, sync_linked_items, transfer_entries, transfer_status, update_transfer,
 )
 
 logger = logging.getLogger(__name__)
@@ -491,21 +491,9 @@ def download_file(request):
 
 def _refresh_downloads(entries):
     """Capture outcomes before history removal or the display cap can hide them."""
-    all_downloads = list(Download.objects.all().order_by('-started', '-pk'))
-    matches = match_downloads(all_downloads, entries)
-    for dl in all_downloads:
-        if dl.pk not in matches:
-            continue
-        transfer = entries[matches[dl.pk]][1]
-        if update_transfer(dl, transfer):
-            def _ingest(_id=dl.pk, _size=transfer.get('size')):
-                try:
-                    from organize.services.pipeline import auto_ingest_download
-                    threading.Thread(target=auto_ingest_download, args=(_id, _size), daemon=True).start()
-                except Exception as exc:
-                    logger.warning(f"auto_ingest dispatch failed for {_id}: {exc}")
-            transaction.on_commit(_ingest)
-    return all_downloads, matches
+    from organize.tasks import ingest_soulseek_download
+
+    return reconcile_downloads(entries, on_completed=ingest_soulseek_download)
 
 
 @api_view(['GET'])

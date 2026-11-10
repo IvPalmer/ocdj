@@ -18,6 +18,7 @@ class PipelineItem(models.Model):
         ('ready', 'Ready'),
         ('published', 'Published'),
         ('failed', 'Failed'),
+        ('held', 'Held'),
     ]
 
     ARCHIVE_STATE_CHOICES = [
@@ -68,6 +69,9 @@ class PipelineItem(models.Model):
     # Pipeline state
     stage = models.CharField(max_length=20, choices=STAGE_CHOICES, default='downloaded')
     error_message = models.TextField(blank=True)
+    retry_from = models.CharField(max_length=20, blank=True)
+    retry_attempts = models.PositiveSmallIntegerField(default=0)
+    retry_after = models.DateTimeField(null=True, blank=True)
     metadata_source = models.CharField(
         max_length=20,
         choices=METADATA_SOURCE_CHOICES,
@@ -99,6 +103,10 @@ class PipelineItem(models.Model):
 
     class Meta:
         ordering = ['-created']
+        indexes = [
+            models.Index(fields=['archive_state'], name='idx_pipeline_archstate'),
+            models.Index(fields=['archive_state', 'draining_until'], name='idx_pipeline_lease'),
+        ]
         constraints = [
             models.CheckConstraint(
                 check=(
