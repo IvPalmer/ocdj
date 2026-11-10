@@ -56,6 +56,28 @@ class HistoryClientTests(SimpleTestCase):
             client.remove_download_history('peer', 'failed')
 
 
+class BrowseDownloadTests(SimpleTestCase):
+    @patch('soulseek.views.SlskdClient.browse_user')
+    def test_browse_returns_transfer_paths_for_both_open_and_locked_files(self, browse_user):
+        browse_user.return_value = {
+            'directories': [{'name': r'share\release', 'files': [
+                {'filename': 'track.flac'},
+                {'filename': r'share\release\already-full.flac'},
+            ]}],
+            'lockedDirectories': [{'name': 'private/release/', 'files': [
+                {'filename': 'locked.flac'},
+            ]}],
+        }
+        response = APIClient().get('/api/soulseek/browse/', {'username': 'fixture-peer'})
+        self.assertEqual(response.status_code, 200)
+        open_dir, locked_dir = response.data['directories']
+        self.assertEqual([f['filename'] for f in open_dir['files']], [
+            r'share\release\track.flac', r'share\release\already-full.flac',
+        ])
+        self.assertEqual(locked_dir['files'][0]['filename'], 'private/release/locked.flac')
+        self.assertTrue(locked_dir['files'][0]['locked'])
+
+
 class ClearDownloadsTests(TestCase):
     def setUp(self):
         self.client = APIClient()

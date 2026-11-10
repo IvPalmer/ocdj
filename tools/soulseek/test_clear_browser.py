@@ -19,6 +19,7 @@ class ClearBrowserTests(unittest.TestCase):
         rows = [{'id': i, 'filename': f'fixture-{i}.flac', 'username': 'fixture-peer',
                  'status': status, 'progress': 0}
                 for i, status in enumerate(['completed', 'failed', 'cancelled', 'queued', 'downloading'])]
+        rows[1]['error_message'] = 'Completed, Rejected'
         modes = []
         fetches = []
         fail_next = [False]
@@ -78,7 +79,10 @@ class ClearBrowserTests(unittest.TestCase):
                 page.goto(f'http://127.0.0.1:{server.server_port}/')
                 page.get_by_role('link', name='Soulseek', exact=True).click()
                 expect(page.get_by_role('button', name='Clear Completed (1)', exact=True)).to_be_visible()
-                expect(page.get_by_role('button', name='Clear Failed (2)', exact=True)).to_be_visible()
+                expect(page.get_by_text('Failed (1)', exact=True)).to_be_visible()
+                expect(page.get_by_text('Cancelled (1)', exact=True)).to_be_visible()
+                expect(page.get_by_text('Rejected by peer', exact=True)).to_be_visible()
+                expect(page.get_by_role('button', name='Clear Failed & Cancelled (2)', exact=True)).to_be_visible()
                 page.get_by_role('button', name='Clear Completed (1)', exact=True).click()
                 expect(page.get_by_role('button', name='Clear Completed', exact=False)).to_have_count(0)
                 expect(page.locator('.dl-row')).to_have_count(4)
@@ -86,9 +90,9 @@ class ClearBrowserTests(unittest.TestCase):
                 page.goto(f'http://127.0.0.1:{server.server_port}/')
                 page.get_by_role('link', name='Soulseek', exact=True).click()
                 expect(page.get_by_role('button', name='Clear Completed', exact=False)).to_have_count(0)
-                expect(page.get_by_role('button', name='Clear Failed (2)', exact=True)).to_be_visible()
+                expect(page.get_by_role('button', name='Clear Failed & Cancelled (2)', exact=True)).to_be_visible()
                 fail_next[0] = True
-                page.get_by_role('button', name='Clear Failed (2)', exact=True).click()
+                page.get_by_role('button', name='Clear Failed & Cancelled (2)', exact=True).click()
                 expect(page.get_by_role('alert')).to_contain_text('Remaining entries were preserved')
                 expect(page.get_by_role('button', name='Clear Failed (1)', exact=True)).to_be_visible()
                 page.get_by_role('button', name='Clear Failed (1)', exact=True).click()
@@ -107,6 +111,7 @@ class ClearBrowserTests(unittest.TestCase):
                 page.goto(f'http://127.0.0.1:{server.server_port}/')
                 page.get_by_role('link', name='Soulseek', exact=True).click()
                 timeout_row = page.locator('.dl-row').filter(has_text='timeout.flac')
+                expect(timeout_row.get_by_text('Timed out', exact=True)).to_be_visible()
                 timeout_row.get_by_title('Remove from list').click()
                 expect(timeout_row).to_have_count(0)
                 expect(page.locator('.dl-row')).to_have_count(2)

@@ -24,6 +24,15 @@ const STATUS_ORDER = [
   'not_found', 'failed', 'downloaded',
 ]
 
+function downloadOutcome(dl) {
+  if (dl.status === 'cancelled') return 'Cancelled'
+  const state = dl.slskd_state || dl.error_message || ''
+  const flags = state.split(',').map(flag => flag.trim())
+  if (flags.includes('Rejected')) return 'Rejected by peer'
+  if (flags.includes('TimedOut')) return 'Timed out'
+  return 'Transfer failed'
+}
+
 function SoulseekPanel() {
   const { data: health, refetch: refetchHealth } = useSlskdHealth()
   const [connecting, setConnecting] = useState(false)
@@ -77,7 +86,9 @@ function SoulseekPanel() {
   // Split downloads by status
   const activeDownloads = allDownloads.filter(d => d.status === 'queued' || d.status === 'downloading')
   const completedDownloads = allDownloads.filter(d => d.status === 'completed')
-  const failedDownloads = allDownloads.filter(d => d.status === 'failed' || d.status === 'cancelled')
+  const failedDownloads = allDownloads.filter(d => d.status === 'failed')
+  const cancelledDownloads = allDownloads.filter(d => d.status === 'cancelled')
+  const unsuccessfulCount = failedDownloads.length + cancelledDownloads.length
 
   // Free-text search: add to queue + auto-trigger search
   const handleFreeSearch = async (e) => {
@@ -346,13 +357,13 @@ function SoulseekPanel() {
                   Clear Completed ({completedDownloads.length})
                 </button>
               )}
-              {failedDownloads.length > 0 && (
+              {unsuccessfulCount > 0 && (
                 <button
                   className="btn btn-xs"
                   onClick={() => clearDlMutation.mutate('failed')}
                   disabled={clearDlMutation.isPending}
                 >
-                  Clear Failed ({failedDownloads.length})
+                  Clear {cancelledDownloads.length ? (failedDownloads.length ? 'Failed & Cancelled' : 'Cancelled') : 'Failed'} ({unsuccessfulCount})
                 </button>
               )}
             </div>
@@ -414,15 +425,18 @@ function SoulseekPanel() {
             </div>
           )}
 
-          {failedDownloads.length > 0 && (
-            <div className="dl-group">
-              <div className="dl-group-label">Failed ({failedDownloads.length})</div>
-              {failedDownloads.map(dl => (
-                <div key={dl.id} className="dl-row dl-row--failed">
-                  <span className="dl-icon">✗</span>
+          {[
+            ['Failed', failedDownloads],
+            ['Cancelled', cancelledDownloads],
+          ].map(([label, downloads]) => downloads.length > 0 && (
+            <div key={label} className="dl-group">
+              <div className="dl-group-label">{label} ({downloads.length})</div>
+              {downloads.map(dl => (
+                <div key={dl.id} className={`dl-row dl-row--terminal dl-row--${dl.status}`}>
+                  <span className="dl-icon" aria-hidden="true">{dl.status === 'cancelled' ? '−' : '✗'}</span>
                   <span className="dl-name">{dl.filename.split(/[/\\]/).pop()}</span>
                   <span className="dl-error" title={dl.error_message || dl.slskd_state}>
-                    {dl.error_message || dl.slskd_state || dl.status}
+                    {downloadOutcome(dl)}
                   </span>
                   {dl.untracked && (
                     <span className="dl-untracked" title="Live from slskd — this app has no record of it">
@@ -440,7 +454,7 @@ function SoulseekPanel() {
                 </div>
               ))}
             </div>
-          )}
+          ))}
         </div>
       )}
 

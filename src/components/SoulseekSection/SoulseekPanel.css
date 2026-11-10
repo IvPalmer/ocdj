@@ -627,7 +627,7 @@
   padding: 6px 12px;
 }
 
-.dl-row--failed {
+.dl-row--terminal {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -697,7 +697,7 @@
 }
 
 .dl-row--completed .dl-name,
-.dl-row--failed .dl-name {
+.dl-row--terminal .dl-name {
   flex: 1;
   min-width: 0;
 }
@@ -761,6 +761,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 300px;
+}
+
+.dl-row--cancelled .dl-error {
+  color: var(--text-muted);
 }
 
 /* ── Progress Bar ── */
