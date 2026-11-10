@@ -4,6 +4,8 @@ import json
 import os
 import stat
 import sys
+import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,17 +48,91 @@ def register(root, map_path, key_path, path, item_id, sha):
     return dict(collection_id=mapping['collection_id'], track=track, sha256=sha)
 
 
+def read_request(path):
+    with os.fdopen(open_absolute(str(path)), 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        check_private(info)
+        if not 0 < info.st_size <= 16384:
+            raise Refused()
+        return json.load(handle)
+
+
+def write_reply(path, payload):
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(json.dumps(payload).encode())
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def pending_directory(inbox):
+    inbox.mkdir(mode=0o700, exist_ok=True)
+    fd = open_absolute(str(inbox), directory=True)
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise Refused()
+    finally:
+        os.close(fd)
+
+
+def submit(inbox, request, *, timeout=150):
+    """The LaunchAgent has no access to the app's Finder map sandbox."""
+    pending_directory(inbox)
+    with tempfile.TemporaryDirectory(prefix='delivery-', dir=inbox) as name:
+        folder = Path(name)
+        write_reply(folder / 'request.json', request)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                receipt = read_request(folder / 'reply.json')
+            except FileNotFoundError:
+                time.sleep(.25)
+                continue
+            if receipt:
+                return receipt
+            raise Refused()
+    raise TimeoutError()
+
+
+def process_pending(config, inbox):
+    """The signed-in playback helper already owns access to the Finder map."""
+    if not inbox.exists():
+        return
+    pending_directory(inbox)
+    for folder in sorted(inbox.glob('delivery-*')):
+        if folder.is_symlink() or not folder.is_dir():
+            continue
+        reply = folder / 'reply.json'
+        if reply.exists():
+            continue
+        try:
+            key, path, item_id, sha = read_request(folder / 'request.json')
+        except FileNotFoundError:
+            continue
+        except (ValueError, OSError, TypeError):
+            receipt = None
+        else:
+            try:
+                receipt = register(Path(config['root']), Path(config['map']), Path(key), Path(path), int(item_id), sha)
+            except Exception:
+                receipt = None
+        try:
+            write_reply(reply, receipt)
+        except FileNotFoundError:
+            # The sender can time out and remove its temporary directory.
+            continue
+
+
 def main():
     try:
-        config_path, key, path, item_id, sha = sys.argv[1:]
-        with os.fdopen(open_absolute(config_path), 'rb') as handle:
-            info = os.fstat(handle.fileno())
-            check_private(info)
-            if info.st_size > 65536:
-                raise Refused()
-            config = json.load(handle)
-        print(json.dumps(register(Path(config['root']), Path(config['map']), Path(key),
-                                  Path(path), int(item_id), sha)))
+        config_path, *request = sys.argv[1:]
+        print(json.dumps(submit(Path(config_path).parent / 'review-pending', request)))
+    except TimeoutError:
+        print('Review indexing is waiting for the signed-in Playback connector.', file=sys.stderr)
+        return 1
     except Exception:
         print('Review indexing refused: verify the private map and delivered file.', file=sys.stderr)
         return 1

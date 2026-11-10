@@ -1,7 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 import wave
 
@@ -9,7 +11,7 @@ from mutagen.id3 import GRP1
 from mutagen.wave import WAVE
 
 from tools.mac_library.helper import Refused, load_map, source
-from tools.mac_library.register_review import register
+from tools.mac_library.register_review import process_pending, register, submit
 
 
 class ReviewRegisterTests(unittest.TestCase):
@@ -39,7 +41,17 @@ class ReviewRegisterTests(unittest.TestCase):
                 with self.assertRaises(Refused):
                     register(root, mapping, key, archive, item, digest)
                 self.assertEqual(mapping.read_bytes(), before)
-            data = register(root, mapping, key, archive, 246, sha)
+            inbox = root / 'review-pending'
+            with ThreadPoolExecutor(1) as agent:
+                request = agent.submit(submit, inbox, [str(key), str(archive), '246', sha], timeout=3)
+                for _ in range(100):
+                    if list(inbox.glob('delivery-*/request.json')):
+                        break
+                    time.sleep(.02)
+                self.assertEqual(mapping.read_bytes(), before)
+                process_pending({'root': str(root), 'map': str(mapping)}, inbox)
+                data = request.result()
+            self.assertEqual(list(inbox.iterdir()), [])
             opaque = data['track']['id']
             self.assertEqual(data['track']['archive_item_id'], 246)
             self.assertNotIn(str(root), json.dumps(data))
