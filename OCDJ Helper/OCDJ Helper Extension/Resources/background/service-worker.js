@@ -279,11 +279,15 @@ const messageHandlers = {
     // Try backend first, fall back to local-only
     try {
       const result = await apiCall('/api/dig/add/', 'POST', data);
-      // Also store locally for popup display
-      const { wantlist = [] } = await chrome.storage.local.get('wantlist');
       if (result.created) {
-        wantlist.push({ ...data, added_at: Date.now() });
-        await chrome.storage.local.set({ wantlist });
+        try {
+          // The optional popup cache must not replace a confirmed server result.
+          const { wantlist = [] } = await chrome.storage.local.get('wantlist');
+          if (!wantlist.some(existing => isDuplicate(existing, data))) {
+            wantlist.push({ ...data, added_at: Date.now() });
+            await chrome.storage.local.set({ wantlist });
+          }
+        } catch (_) { /* the server already accepted the capture */ }
       }
       return result;
     } catch (e) {
@@ -310,7 +314,7 @@ const messageHandlers = {
         added_at: Date.now(),
       };
       if (wantlist.some(existing => isDuplicate(existing, item))) {
-        return { created: false, duplicate: true, fuzzy_score: 100 };
+        return { created: false, duplicate: true, offline: true };
       }
       wantlist.push(item);
       await chrome.storage.local.set({ wantlist });

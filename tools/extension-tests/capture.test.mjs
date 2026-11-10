@@ -190,6 +190,80 @@ for (const root of roots) {
 }
 
 const { runInNewContext } = await import('node:vm');
+const safariRoot = roots[1];
+
+test('Safari Wantlist recovers when the message callback never runs', async () => {
+  const f = fixture(safariRoot, 'youtube', 'https://www.youtube.com/watch?v=fixture',
+    '<h1 class="title">Artist - Track</h1><div id="actions"><div id="actions-inner"></div></div>');
+  try {
+    await pause();
+    const button = f.w.document.querySelector('.ocdj-dig-btn');
+    assert.ok(button);
+    const setTimeout = f.w.setTimeout.bind(f.w);
+    f.w.setTimeout = (fn, delay, ...args) => setTimeout(fn, delay === 15000 ? 0 : delay, ...args);
+    let lateReply;
+    f.w.chrome.runtime.sendMessage = (message, done) => { lateReply = done; };
+    button.click();
+    assert.equal(button.textContent, '...');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(button.textContent, 'Wantlist');
+    assert.match(button.title, /did not confirm/i);
+    lateReply({ created: true });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(button.textContent, 'Wantlist');
+
+    f.w.chrome.runtime.sendMessage = (message, done) => done({ duplicate: true, offline: true });
+    button.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(button.textContent, 'Wantlist');
+    assert.match(button.title, /Saved locally/);
+
+    f.w.chrome.runtime.sendMessage = (message, done) => done({ duplicate: true });
+    button.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(button.title, 'Already in Wantlist');
+  } finally { await f.close(); }
+});
+
+test('Safari worker reports a local-only duplicate until the server confirms', async () => {
+  const stored = {};
+  const listener = { addListener() {} };
+  let serverResult;
+  let failCache = false;
+  const context = {
+    AbortSignal, console,
+    chrome: {
+      runtime: { onStartup: listener, onInstalled: listener, onMessage: listener, onConnect: listener },
+      storage: { onChanged: listener, local: {
+        get: async () => stored,
+        set: async data => {
+          if (failCache && data.wantlist) throw new Error('Cache unavailable');
+          Object.assign(stored, data);
+        },
+      } },
+    },
+    fetch: async () => ({
+      ok: Boolean(serverResult),
+      json: async () => serverResult || { error: 'Unavailable' },
+    }),
+  };
+  const handlers = runInNewContext(readFileSync(`${safariRoot}/background/service-worker.js`, 'utf8') + '\nmessageHandlers;', context);
+  const track = { artist: 'Artist', title: 'Track' };
+  assert.equal((await handlers['dig:add'](track)).offline, true);
+  assert.equal((await handlers['dig:add'](track)).offline, true);
+  assert.equal(stored.wantlist.length, 1);
+  serverResult = { duplicate: true };
+  const result = await handlers['dig:add'](track);
+  assert.equal(result.duplicate, true);
+  assert.equal(result.offline, undefined);
+
+  serverResult = { created: true };
+  failCache = true;
+  const created = await handlers['dig:add']({ artist: 'Artist', title: 'Another track' });
+  assert.equal(created.created, true);
+  assert.equal(created.offline, undefined);
+});
+
 test('Safari release queue search reads current URL/token on each call and preserves API errors', async () => {
   const root = 'OCDJ Helper/OCDJ Helper Extension/Resources';
   const stored = { backendUrl: 'https://fixture.invalid', digToken: 'synthetic-first' };
@@ -362,7 +436,6 @@ for (const root of roots) {
   });
 }
 
-const safariRoot = roots[1];
 test('Safari SoundCloud preserves native track API embeds', async () => {
   const f = fixture(safariRoot, 'soundcloud', 'https://soundcloud.com/artist/song',
     '<div class="soundTitle"><span class="soundTitle__usernameText">Artist</span><div class="soundTitle__title"><span>Song</span></div></div>',

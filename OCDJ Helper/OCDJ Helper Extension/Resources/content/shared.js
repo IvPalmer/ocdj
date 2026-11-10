@@ -22,40 +22,38 @@ const OCDJ = (() => {
       btn.classList.add('ocdj-dig-btn--loading');
       btn.textContent = '...';
 
+      let timeout;
       try {
-        const result = await onClick();
-        if (result && result.duplicate) {
+        // An invalidated Safari extension can leave the message callback pending.
+        const deadline = new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(
+            'OCDJ did not confirm the save. Reload the page and try again.'
+          )), 15000);
+        });
+        const result = await Promise.race([onClick(), deadline]);
+        if (result?.offline) {
+          btn.title = 'Saved locally — click Wantlist to retry';
+          showToast('Saved locally — not in Wanted List. Click Wantlist to retry.', 'duplicate');
+        } else if (result?.duplicate) {
           markAsDuplicate(btn);
           showToast('Already in Wantlist', 'duplicate');
-        } else if (result && result.created) {
+        } else if (result?.created) {
           markAsAdded(btn);
           const artist = result.item?.artist || '';
           const title = result.item?.title || result.item?.release_name || '';
-          if (result.offline) {
-            btn.title = 'Saved locally — not in OCDJ Wanted List';
-            // The app was unreachable and this went to browser storage instead.
-            // Saying "Saved" would claim it reached the Wanted List; it didn't.
-            showToast('Saved locally — app unreachable, not in Wanted List', 'duplicate');
-          } else {
-            showToast(`Saved: ${artist}${artist && title ? ' - ' : ''}${title}`, 'success');
-          }
-        } else if (result && result.error) {
-          btn.classList.remove('ocdj-dig-btn--loading');
-          btn.textContent = label;
-          showToast(result.error, 'error');
+          showToast(`Saved: ${artist}${artist && title ? ' - ' : ''}${title}`, 'success');
         } else {
-          // Any shape we don't recognise. Without this the button keeps its
-          // loading state forever and the click looks like it broke the page —
-          // which is exactly what a dropped round trip to the service worker
-          // looked like in Safari, where MV3 workers are torn down eagerly.
-          btn.classList.remove('ocdj-dig-btn--loading');
-          btn.textContent = label;
-          showToast('No answer from the extension — try again', 'error');
+          throw new Error(result?.error || 'No answer from the extension — try again');
         }
       } catch (err) {
-        btn.classList.remove('ocdj-dig-btn--loading');
-        btn.textContent = label;
-        showToast(err.message || 'Failed to add', 'error');
+        btn.title = err.message || 'Failed to add';
+        showToast(btn.title, 'error');
+      } finally {
+        clearTimeout(timeout);
+        if (btn.classList.contains('ocdj-dig-btn--loading')) {
+          btn.classList.remove('ocdj-dig-btn--loading');
+          btn.textContent = label;
+        }
       }
     });
 
