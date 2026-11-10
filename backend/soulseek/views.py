@@ -19,7 +19,7 @@ from .serializers import (
     SearchResultSerializer, DownloadSerializer, QualityPresetSerializer,
     SearchRequestSerializer, DownloadRequestSerializer,
 )
-from .services import SlskdClient, generate_queries, score_result, filter_results, extract_file_info, simplify_query
+from .services import SlskdClient, generate_queries, score_result, filter_results, extract_file_info, simplify_query, normalize_text
 
 from .lifecycle import (
     ACTIVE, hide_downloads, is_terminal_transfer as _is_terminal_transfer,
@@ -664,15 +664,41 @@ def cancel_download(request):
 AUDIO_EXT_SET = {'mp3', 'flac', 'wav', 'aiff', 'aif', 'ogg', 'opus', 'wma', 'aac', 'm4a'}
 
 
+def _normalized_peer_path(path):
+    return (path or '').replace('\\', '/').casefold().strip('/')
+
+
+def _files_from_search(username, directory, queue_item_id):
+    if not queue_item_id:
+        return []
+    try:
+        queue_item_id = int(queue_item_id)
+    except ValueError:
+        return []
+    parent = _normalized_peer_path(directory)
+    files = {}
+    for result in SearchResult.objects.filter(username=username, queue_item_id=queue_item_id):
+        if _normalized_peer_path(result.filename).rpartition('/')[0] != parent:
+            continue
+        if result.filename in files and result.is_locked:
+            continue
+        files[result.filename] = {
+            'filename': result.filename, 'size': result.file_size, 'extension': result.file_extension,
+            'bitRate': result.bitrate, 'sampleRate': result.sample_rate, 'bitDepth': result.bit_depth,
+            'isLocked': result.is_locked,
+        }
+    return list(files.values())
+
+
 @api_view(['GET'])
 def browse_user(request):
     """Browse a Soulseek user's shared files.
 
     Query params:
       username: required
-      dir_prefix: optional path prefix — only directories whose name starts with
-        this are returned. Slskd uses backslashes in paths; we normalise both
-        sides to forward-slashes for matching so the FE can pass a clean prefix.
+      directory: exact peer path from a search result, passed through verbatim.
+      queue_item_id: search results to use if the peer does not list that folder.
+      dir_prefix: optional text to filter the peer's full share by folder path.
       audio_only: '1' to drop non-audio files (default: include everything).
       limit: max number of directories to return (default 200).
     """
@@ -680,6 +706,9 @@ def browse_user(request):
     if not username:
         return Response({'error': 'username is required'}, status=400)
 
+    directory = request.query_params.get('directory', '')
+    if len(directory) > 1000:
+        return Response({'error': 'Folder path is too long'}, status=400)
     dir_prefix = request.query_params.get('dir_prefix', '').strip()
     audio_only = request.query_params.get('audio_only') in ('1', 'true', 'True')
     try:
@@ -688,12 +717,29 @@ def browse_user(request):
         limit = 200
 
     client = SlskdClient()
+    partial = False
     try:
-        data = client.browse_user(username)
+        if directory:
+            lookup_error = None
+            try:
+                listing = client.directory_contents(username, directory)
+            except (requests.exceptions.HTTPError, requests.exceptions.Timeout) as exc:
+                listing = []
+                lookup_error = exc
+            if not any(d.get('files') for d in listing):
+                files = _files_from_search(username, directory, request.query_params.get('queue_item_id'))
+                if files:
+                    listing = [{'name': directory, 'files': files}]
+                    partial = True
+                elif lookup_error:
+                    raise lookup_error
+            data = {'directories': listing}
+        else:
+            data = client.browse_user(username)
     except requests.exceptions.HTTPError as e:
         body = ''
         try:
-            body = e.response.text if e.response else ''
+            body = e.response.text if e.response is not None else ''
         except Exception:
             pass
         # slskd surfaces peer-side timeouts as a 500 with a TimeoutException
@@ -705,7 +751,7 @@ def browse_user(request):
                 status=504,
             )
         msg = body[:200] or str(e)
-        return Response({'error': msg}, status=e.response.status_code if e.response else 502)
+        return Response({'error': msg}, status=e.response.status_code if e.response is not None else 502)
     except requests.exceptions.Timeout:
         return Response(
             {'error': f'Browse timed out — {username} may be offline.'},
@@ -717,9 +763,6 @@ def browse_user(request):
     raw_dirs = data.get('directories', []) if isinstance(data, dict) else []
     raw_locked = data.get('lockedDirectories', []) if isinstance(data, dict) else []
 
-    def _normalize(p):
-        return (p or '').replace('\\', '/').lower().strip('/')
-
     def _download_path(directory, filename):
         # Browse reports basenames, whereas slskd transfers require the full peer path.
         if not directory or not filename or '\\' in filename or '/' in filename:
@@ -729,7 +772,8 @@ def browse_user(request):
         separator = '/' if '/' in directory and '\\' not in directory else '\\'
         return directory + separator + filename
 
-    prefix_norm = _normalize(dir_prefix)
+    path_filter = _normalized_peer_path(dir_prefix)
+    word_filter = normalize_text(dir_prefix)
     filtered = []
     total_files = 0
 
@@ -737,7 +781,8 @@ def browse_user(request):
         nonlocal total_files
         for d in dir_list:
             name = d.get('name', '')
-            if prefix_norm and not _normalize(name).startswith(prefix_norm):
+            if (path_filter and path_filter not in _normalized_peer_path(name)
+                    and not (word_filter and word_filter in normalize_text(name))):
                 continue
             files = d.get('files', []) or []
             if audio_only:
@@ -759,7 +804,7 @@ def browse_user(request):
                         'sample_rate': f.get('sampleRate'),
                         'bit_depth': f.get('bitDepth'),
                         'length': f.get('length'),
-                        'locked': locked,
+                        'locked': locked or f.get('isLocked') is True,
                     }
                     for f in files
                 ],
@@ -778,6 +823,7 @@ def browse_user(request):
         'locked_dirs': len(raw_locked),
         'total_files': total_files,
         'truncated': truncated,
+        'partial': partial,
     })
 
 
