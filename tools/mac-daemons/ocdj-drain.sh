@@ -295,7 +295,7 @@ drain_one() {
         -m tools.mac_library.register_review "$support/config.json" "$REVIEW_IDENTITY_KEY" \
         "$import_path" "$id" "$sha" 2>>"$LOG_FILE"); then
       log "drain: delivered file could not be indexed id=$id — will retry next cycle"
-      api_fail "$id" "could not index verified review file" "$claim_token"
+      # Keep the verified delivery and let the claim expire if Playback is offline.
       return 1
     fi
   fi

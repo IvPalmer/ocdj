@@ -61,7 +61,10 @@ def detach(command, log_path):
                          stdout=log, stderr=subprocess.STDOUT, close_fds=True)
 
 
-def playback(config):
+def playback(config, review_inbox=None):
+    if review_inbox is not None:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
+        from tools.mac_library.register_review import process_pending
     # Same singleton as manual helper: no second worker even across launch contexts.
     with helper.singleton():
         def refresh_map():
@@ -85,6 +88,8 @@ def playback(config):
                 if tunnel.poll() is not None:
                     raise helper.Refused()
                 try:
+                    if review_inbox is not None:
+                        process_pending(config, review_inbox)
                     helper.serve_one(api, data, ffmpeg=config['ffmpeg'], refresh_map=refresh_map)
                 except (requests.ConnectionError, requests.Timeout, ChunkedEncodingError):
                     event('playback-waiting-for-backend')
@@ -130,7 +135,7 @@ def main():
         if args.mode == 'instagram':
             code = transport.run(600, resident=True, allow_keychain_prompt=args.allow_keychain_prompt)
         else:
-            playback(config)
+            playback(config, args.config.with_name('review-pending'))
             code = 0
     except transport.RunError as exc:
         # Transport emits fixed reason codes, never raw subprocess/HTTP details.
