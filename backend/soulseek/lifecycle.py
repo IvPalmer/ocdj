@@ -93,7 +93,7 @@ def update_transfer(dl, transfer):
     status = transfer_status(transfer)
     fields = {'status': status, 'progress': transfer.get('percentComplete', dl.progress)}
     if status == 'completed':
-        fields.update(progress=100, completed_at=timezone.now())
+        fields.update(progress=100, completed_at=timezone.now(), completed_size=transfer.get('size') or 0)
     elif status in ('failed', 'cancelled'):
         fields['error_message'] = transfer.get('state') or ''
     changed = Download.objects.filter(pk=dl.pk, status__in=ACTIVE).update(**fields)
@@ -101,6 +101,19 @@ def update_transfer(dl, transfer):
         for field, value in fields.items():
             setattr(dl, field, value)
     return bool(changed and status == 'completed')
+
+
+def reconcile_downloads(entries, on_completed=None):
+    """Apply a transfer snapshot, then dispatch work for newly completed rows."""
+    downloads = list(Download.objects.order_by('-started', '-pk'))
+    matches = match_downloads(downloads, entries)
+    for download in downloads:
+        if download.pk not in matches:
+            continue
+        transfer = entries[matches[download.pk]][1]
+        if update_transfer(download, transfer) and on_completed is not None:
+            transaction.on_commit(lambda pk=download.pk: on_completed(pk), robust=True)
+    return downloads, matches
 
 
 def hide_downloads(ids):

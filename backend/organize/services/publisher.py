@@ -113,7 +113,7 @@ def publish_pipeline_item(item):
       1. Verify stage == 'ready'.
       2. Write ocdj:<id> into the file's GRP1 grouping tag.
       3. Compute sha256 of the resulting file.
-      4. Move to 06_publish/<id>/<filename>. Atomic rename on same FS.
+      4. Copy to 06_publish/<id>/<filename> and keep the source until commit.
       5. Update PipelineItem fields in one save().
 
     Idempotent: if archive_state is already publishable/draining/archived,
@@ -130,6 +130,7 @@ def publish_pipeline_item(item):
 
 
 def _publish_locked(item_id):
+    from django.db import transaction
     from organize.models import PipelineItem
 
     item = PipelineItem.objects.select_for_update().get(pk=item_id)
@@ -156,7 +157,11 @@ def _publish_locked(item_id):
     basename = os.path.basename(src)
     dest = os.path.join(dest_dir, basename)
 
-    shutil.move(src, dest)
+    # Keep the source until the published row commits. A worker interruption
+    # leaves a ready item with its source intact and an unclaimable destination.
+    if os.path.abspath(src) != os.path.abspath(dest):
+        shutil.copy2(src, dest)
+        transaction.on_commit(lambda: os.unlink(src), robust=True)
 
     now = timezone.now()
     item.stage = 'published'

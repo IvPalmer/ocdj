@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 
 from core.models import Config
 from organize.models import PipelineItem
@@ -222,6 +223,92 @@ class PipelineServiceTestCase(TestCase):
         self.assertEqual(next_skippable_stage('converting'), 'ready')
         self.assertIsNone(next_skippable_stage('ready'))
         self.assertIsNone(next_skippable_stage('failed'))
+
+    @patch.dict(os.environ, {'OCDJ_AUTOPUBLISH': '0'})
+    @patch('organize.services.pipeline.db.connections.close_all')
+    @patch('organize.services.converter.convert_pipeline_item')
+    @patch('organize.services.tagger.tag_file')
+    @patch('organize.tasks.SlskdClient')
+    def test_worker_detects_completed_download_and_processes_without_http(self, slskd, tag, convert, close):
+        from organize.tasks import recover_pipeline
+
+        filename = r'Share\Release\Artist - Track.flac'
+        download = Download.objects.create(
+            username='peer', filename=filename, slskd_id='transfer-id', status='queued',
+        )
+        self.write_file('01_downloaded', 'Release', 'Artist - Track.flac')
+        slskd.return_value.get_downloads.return_value = [{
+            'username': 'peer',
+            'directories': [{'files': [{
+                'filename': filename, 'id': 'transfer-id', 'state': 'Completed, Succeeded', 'size': 5,
+            }]}],
+        }]
+        with patch('organize.services.agent_enrich.looks_like_garbage', return_value=False):
+            recover_pipeline.call_local()
+            recover_pipeline.call_local()
+        download.refresh_from_db()
+        self.assertEqual((download.status, download.completed_size), ('completed', 5))
+        self.assertEqual(download.pipeline_items.get().stage, 'ready')
+        tag.assert_called_once()
+        convert.assert_called_once()
+
+    def test_inbox_waits_for_new_and_tracked_files(self):
+        from organize.services.pipeline import scan_settled_inbox
+
+        settled = self.write_file('01_downloaded', 'settled.flac')
+        self.write_file('01_downloaded', 'recent.flac')
+        tracked = self.write_file('01_downloaded', 'peer.flac')
+        Download.objects.create(username='peer', filename='peer.flac', status='queued')
+        older = timezone.now().timestamp() - 180
+        for path in (settled, tracked):
+            os.utime(path, (older, older))
+        self.assertEqual(scan_settled_inbox(), (1, []))
+        self.assertEqual(PipelineItem.objects.get().current_path, settled)
+
+    @patch.dict(os.environ, {'OCDJ_AUTOPUBLISH': '0'})
+    @patch('organize.services.pipeline.db.connections.close_all')
+    @patch('organize.services.converter.convert_pipeline_item')
+    @patch('organize.services.tagger.tag_file')
+    def test_worker_recovers_interrupted_conversion_without_retagging(self, tag, convert, close):
+        from organize.tasks import recover_pipeline
+
+        path = self.write_file('03_renamed', 'Artist - Track.flac')
+        item = PipelineItem.objects.create(original_filename='track.flac', current_path=path, stage='converting')
+        held = PipelineItem.objects.create(original_filename='held.mp3', current_path='', stage='held')
+        recover_pipeline.call_local()
+        item.refresh_from_db()
+        self.assertEqual((item.stage, item.retry_from), ('failed', 'renamed'))
+        self.assertGreater(item.retry_after, timezone.now())
+        recover_pipeline.call_local()
+        convert.assert_not_called()
+
+        PipelineItem.objects.filter(pk=item.pk).update(retry_after=timezone.now())
+        recover_pipeline.call_local()
+        item.refresh_from_db()
+        held.refresh_from_db()
+        self.assertEqual((item.stage, item.retry_attempts, item.retry_after), ('ready', 0, None))
+        self.assertEqual(held.stage, 'held')
+        self.assertTrue(os.path.isfile(item.current_path))
+        self.assertEqual(os.path.dirname(item.current_path), stage_folder_path('ready'))
+        tag.assert_not_called()
+        convert.assert_called_once()
+
+    @patch('organize.services.pipeline.db.connections.close_all')
+    @patch('organize.services.converter.convert_pipeline_item', side_effect=OSError('fixture failure'))
+    def test_conversion_retry_budget_is_bounded(self, convert, close):
+        item = PipelineItem.objects.create(
+            original_filename='track.flac', current_path=self.write_file('03_renamed', 'track.flac'),
+            stage='renamed',
+        )
+        process_pipeline_item(item.pk)
+        for _ in range(3):
+            PipelineItem.objects.filter(pk=item.pk).update(retry_after=timezone.now())
+            process_pipeline_item(item.pk)
+        process_pipeline_item(item.pk)
+        item.refresh_from_db()
+        self.assertEqual((item.stage, item.retry_from, item.retry_attempts, item.retry_after),
+                         ('failed', 'renamed', 3, None))
+        self.assertEqual(convert.call_count, 4)
 
 
 def make_archived(**kwargs):

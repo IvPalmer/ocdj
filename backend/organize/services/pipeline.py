@@ -1,9 +1,13 @@
 import os
 import shutil
 import logging
+import stat
 import threading
+from contextlib import contextmanager
+from datetime import timedelta
 
 from django import db
+from django.utils import timezone
 
 from core.services.config import get_config
 
@@ -50,6 +54,8 @@ ACTIVE_STAGE_TO_DONE = {
     'renaming': 'renamed',
     'converting': 'converted',
 }
+ACTIVE_STAGE_TO_START = {'tagging': 'downloaded', 'renaming': 'tagged', 'converting': 'renamed'}
+MAX_STAGE_RETRIES = 3
 
 
 def get_pipeline_root():
@@ -147,20 +153,28 @@ def _move_to_stage(filepath, stage):
     ensure_pipeline_folders()
     dest_folder = stage_folder_path(stage)
     basename = os.path.basename(filepath)
-    dest_path = os.path.join(dest_folder, basename)
-    if os.path.exists(dest_path) and dest_path != filepath:
-        dest_path = _available_path(dest_folder, basename)
-
-    if filepath != dest_path:
-        shutil.move(filepath, dest_path)
+    with db.transaction.atomic():
+        _lock_staged_path(dest_folder)
+        dest_path = os.path.join(dest_folder, basename)
+        if os.path.exists(dest_path) and dest_path != filepath:
+            dest_path = _available_path(dest_folder, basename)
+        if filepath != dest_path:
+            shutil.move(filepath, dest_path)
     return dest_path
 
 
 def move_item_to_stage(item, stage):
     """Move an item file to a durable stage folder and persist that stage."""
-    item.current_path = _move_to_stage(item.current_path, stage)
+    original = item.current_path
+    item.current_path = _move_to_stage(original, stage)
     item.stage = stage
-    item.save(update_fields=['current_path', 'stage'])
+    try:
+        item.save(update_fields=['current_path', 'stage'])
+    except Exception:
+        if item.current_path != original and not os.path.exists(original):
+            shutil.move(item.current_path, original)
+            item.current_path = original
+        raise
     return item
 
 
@@ -199,10 +213,24 @@ def _update_wanted_status(item, wanted_status):
         item.wanted_item.save(update_fields=['status'])
 
 
-def _mark_failed(item, label, exc):
+def _mark_failed(item, source_stage, label, exc):
     item.stage = 'failed'
     item.error_message = f"{label} failed: {exc}"
-    item.save(update_fields=['stage', 'error_message'])
+    item.retry_from = source_stage
+    item.retry_after = None
+    if (item.retry_attempts < MAX_STAGE_RETRIES and os.path.isfile(item.current_path)
+            and not isinstance(exc, (FileNotFoundError, ValueError))):
+        item.retry_after = timezone.now() + timedelta(minutes=2 ** item.retry_attempts)
+    item.save(update_fields=['stage', 'error_message', 'retry_from', 'retry_after', 'updated'])
+
+
+def _clear_retry(item):
+    if item.retry_from:
+        item.retry_from = ''
+        item.retry_after = None
+        item.retry_attempts = 0
+        item.error_message = ''
+        item.save(update_fields=['retry_from', 'retry_after', 'retry_attempts', 'error_message', 'updated'])
 
 
 def _run_stage_step(item, *, source_stage, working_stage, done_stage, label, action,
@@ -224,15 +252,16 @@ def _run_stage_step(item, *, source_stage, working_stage, done_stage, label, act
         item.refresh_from_db()
         move_item_to_stage(item, done_stage)
         _update_wanted_status(item, wanted_status)
+        _clear_retry(item)
         return True
     except Exception as e:
         logger.error(f"{label} failed for item {item.id}: {e}")
-        _mark_failed(item, label, e)
+        _mark_failed(item, source_stage, label, e)
         return False
 
 
-def _staged_candidates(download):
-    root = stage_folder_path('downloaded')
+def _staged_candidates(download, root=None):
+    root = root or stage_folder_path('downloaded')
     parts = download.filename.replace(chr(92), '/').split('/')[-2:]
     if any(part in ('', '.', '..') for part in parts):
         return set()
@@ -314,7 +343,7 @@ def _lock_staged_path(path):
 
 
 @db.transaction.atomic
-def discover_and_ingest(download_id, expected_size=None):
+def discover_and_ingest(download_id, expected_size=None, *, require_staged=False):
     """Link a proven completed download to its staged pipeline item."""
     from organize.models import PipelineItem
     from soulseek.models import Download
@@ -325,9 +354,13 @@ def discover_and_ingest(download_id, expected_size=None):
     if PipelineItem.objects.filter(download=dl).exists():
         return None
 
-    size = expected_size or (dl.search_result.file_size if dl.search_result_id else 0)
+    size = expected_size or dl.completed_size or (dl.search_result.file_size if dl.search_result_id else 0)
     staged = _staged_download_path(dl, size)
+    if require_staged and (dl.status != 'completed' or not staged):
+        return None
     filepath = dl.local_path or staged or reconstruct_download_path(dl)
+    if require_staged:
+        filepath = staged
     if not os.path.isfile(filepath):
         logger.warning("File not found for download %s", dl.id)
         return None
@@ -441,7 +474,19 @@ def scan_completed_downloads():
     }
 
 
-def _scan_filesystem_orphans(deferred):
+def scan_settled_inbox():
+    """Import files intentionally dropped in the inbox after writes settle."""
+    from soulseek.models import Download
+
+    # A staged path known to Soulseek must go through transfer reconciliation,
+    # even if its bytes appear before a matching success or history is cleared.
+    inbox = stage_folder_path('downloaded')
+    deferred = {path for download in Download.objects.only('filename').iterator()
+                for path in _staged_candidates(download, inbox)}
+    return _scan_filesystem_orphans(deferred, settle_before=timezone.now().timestamp() - 120)
+
+
+def _scan_filesystem_orphans(deferred, *, settle_before=None):
     """Create PipelineItems for audio files in 01_downloaded/ that aren't tracked.
 
     Walks the stage folder recursively (handles `_to_triage/` and any
@@ -479,6 +524,10 @@ def _scan_filesystem_orphans(deferred):
             if full in tracked_paths or full in deferred:
                 continue
             try:
+                if settle_before is not None:
+                    info = os.stat(full, follow_symlinks=False)
+                    if not stat.S_ISREG(info.st_mode) or not info.st_size or info.st_mtime > settle_before:
+                        continue
                 with db.transaction.atomic():
                     _lock_staged_path(full)
                     if not os.path.isfile(full) or PipelineItem.objects.filter(current_path=full).exists():
@@ -487,6 +536,8 @@ def _scan_filesystem_orphans(deferred):
                         original_filename=fn, current_path=full, stage='downloaded',
                     )
                     created += 1
+                    if settle_before is not None and created >= 25:
+                        return created, errors
             except Exception as e:
                 logger.error(f'Failed to create PipelineItem for {full}: {e}')
                 errors.append({'path': full, 'error': str(e)})
@@ -496,15 +547,57 @@ def _scan_filesystem_orphans(deferred):
     return created, errors
 
 
-def process_pipeline_item(item_id):
-    """Process a single item through all pipeline stages."""
+@contextmanager
+def pipeline_item_lock(item_id):
+    if db.connection.vendor != 'postgresql':
+        yield True
+        return
+    with db.connection.cursor() as cursor:
+        cursor.execute('SELECT pg_try_advisory_lock(172809, %s)', [item_id])
+        acquired = cursor.fetchone()[0]
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                cursor.execute('SELECT pg_advisory_unlock(172809, %s)', [item_id])
+
+
+def process_pipeline_item(item_id, *, force_retry=False):
+    """Process one item under a lock shared by HTTP and Huey workers."""
     try:
-        from organize.models import PipelineItem
-        from .tagger import tag_file
-        from .renamer import rename_file
+        with pipeline_item_lock(item_id) as acquired:
+            if acquired:
+                _process_pipeline_item(item_id, force_retry=force_retry)
+    finally:
+        db.connections.close_all()
 
-        item = PipelineItem.objects.get(id=item_id)
 
+def _process_pipeline_item(item_id, *, force_retry):
+    from organize.models import PipelineItem
+    from .tagger import tag_file
+    from .renamer import rename_file
+
+    item = PipelineItem.objects.filter(pk=item_id, archive_state='on_workbench').first()
+    if not item or item.stage == 'held':
+        return
+    if item.stage in ACTIVE_STAGE_TO_START:
+        _mark_failed(item, ACTIVE_STAGE_TO_START[item.stage], 'Processing', RuntimeError('Interrupted'))
+        return
+    if item.stage == 'failed':
+        if not force_retry and item.retry_from and (
+                item.retry_after is None or item.retry_after > timezone.now()):
+            return
+        if not os.path.isfile(item.current_path):
+            _mark_failed(item, item.retry_from or 'downloaded', 'Processing',
+                         FileNotFoundError('Source file unavailable'))
+            return
+        item.stage = item.retry_from or 'downloaded'
+        item.retry_from = item.stage
+        item.retry_attempts = 0 if force_retry else item.retry_attempts + 1
+        item.retry_after = None
+        item.save(update_fields=['stage', 'retry_from', 'retry_attempts', 'retry_after', 'updated'])
+
+    try:
         # Stage 1: Tag
         if not _run_stage_step(
             item,
@@ -520,7 +613,7 @@ def process_pipeline_item(item_id):
         # Stage 1.5: Agent-enrich if Discogs/MusicBrainz couldn't fix
         # garbage file tags. Gated on env (CLAUDE_CODE_OAUTH_TOKEN) and
         # a cheap heuristic so Opus isn't invoked on already-clean rows.
-        if item.stage == 'tagged':
+        if item.stage == 'tagged' and item.metadata_source != 'manual':
             try:
                 from .agent_enrich import looks_like_garbage, enrich_pipeline_item
                 if looks_like_garbage(item):
@@ -560,28 +653,16 @@ def process_pipeline_item(item_id):
             move_item_to_stage(item, 'ready')
             _update_wanted_status(item, 'organized')
 
-            # Stage 5: VPS mode — auto-publish into 06_publish/<id>/ so the
-            # Mac drain daemon can fetch. No-op on Mac dev.
-            if os.environ.get('OCDJ_AUTOPUBLISH') == '1':
-                try:
-                    from .publisher import publish_pipeline_item
-                    publish_pipeline_item(item)
-                except Exception as e:
-                    logger.error(f'Auto-publish failed for item {item_id}: {e}')
-                    # Leave item at stage=ready, archive_state=on_workbench.
-                    # Publish can be retried manually via API.
+        # A restart or a failed publish can leave a ready item on the workbench.
+        if item.stage == 'ready' and os.environ.get('OCDJ_AUTOPUBLISH') == '1':
+            from .publisher import publish_pipeline_item
+            _clear_retry(publish_pipeline_item(item))
     except Exception as e:
         logger.error(f"Pipeline processing failed for item {item_id}: {e}")
-        try:
-            from organize.models import PipelineItem
-            item = PipelineItem.objects.get(id=item_id)
-            item.stage = 'failed'
-            item.error_message = str(e)
-            item.save(update_fields=['stage', 'error_message'])
-        except Exception:
-            pass
-    finally:
-        db.connections.close_all()
+        item.refresh_from_db()
+        if item.archive_state == 'on_workbench':
+            source_stage = ACTIVE_STAGE_TO_START.get(item.stage, item.stage)
+            _mark_failed(item, source_stage, 'Processing', e)
 
 
 def process_all_pending(already_claimed=False):
@@ -605,15 +686,3 @@ def process_all_pending(already_claimed=False):
         release_processing_all()
         db.connections.close_all()
     return True
-
-
-def auto_ingest_download(download_id, expected_size=None):
-    """Auto-trigger: discover file, create PipelineItem, process through pipeline."""
-    try:
-        item = discover_and_ingest(download_id, expected_size)
-        if item:
-            process_pipeline_item(item.id)
-    except Exception as e:
-        logger.error(f"Auto-ingest failed for download {download_id}: {e}")
-    finally:
-        db.connections.close_all()

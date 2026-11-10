@@ -176,6 +176,7 @@ class Download(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='queued')
     progress = models.FloatField(default=0)  # 0-100
     error_message = models.TextField(blank=True)
+    completed_size = models.PositiveBigIntegerField(default=0)
 
     # History UI visibility is independent of transfer outcome/provenance.
     hidden_at = models.DateTimeField(null=True, blank=True, db_index=True)
