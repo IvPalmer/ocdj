@@ -16,7 +16,7 @@ DJ music acquisition: Wanted lists, recognition, Soulseek downloads, TraxDB sync
 
 ## Mac runtime
 
-Production data lives only on the VPS, and the VPS never stores audio: the Mac does.
+Production data lives only on the VPS. The Mac holds the music library: the VPS only stages audio in its pipeline and publish folders until `ocdj-drain` pulls it, and TraxDB audio never goes to the VPS.
 
 LaunchAgents `dev.grooveops.ocdj-{drain,incoming,traxdb-local,yt-local}` run the scripts in `~/bin/` (copies in `tools/mac-daemons/` and `tools/traxdb_sync/`; copy a script back after editing it). Only `ocdj-traxdb-local` runs code from this folder, through `REPO_ROOT` in its wrapper. Its `.venv` was made under an older folder name, so in practice the wrapper runs Homebrew `python3`.
 - Check: `launchctl print gui/$(id -u)/dev.grooveops.ocdj-<name>` shows `last exit code = 0`; logs in `~/Library/Logs/ocdj-*.log`. `yt-local` is silent when it has no jobs.
@@ -28,7 +28,7 @@ Local compose stack, project `ocdj`: `db`, `slskd`, `backend`, `worker`, all `re
 ## Working rules
 
 - Every tunable a future user would set (API keys, playlists, destination paths, thresholds) lives in the DB-backed `core.Config` store through `get_config()`, with an env fallback. No new per-module constants.
-- Long jobs (recognize, Soulseek, TraxDB, Organize batches) run on the Huey worker so they survive a backend restart. No raw `threading.Thread` for work that must finish.
+- Long jobs (recognize, Soulseek, TraxDB, Organize batches) belong on the Huey worker so they survive a backend restart. Some Organize and Soulseek paths still start daemon threads; move them to Huey rather than add new ones.
 - TraxDB is a separate archive under `.../ID3/traxdb/YYYY-MM-DD/`. It never feeds Organize automatically.
 - A TraxDB date folder that exists is closed, an empty one included: the operator prunes tracks by hand, so never re-download or fill gaps into it.
 - TraxDB audio downloads go to the Mac (`ocdj-traxdb-local`), never to the VPS. `TRAXDB_DOWNLOAD_TARGET` fails closed.
