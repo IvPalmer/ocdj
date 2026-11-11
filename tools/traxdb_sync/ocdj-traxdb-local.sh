@@ -6,7 +6,7 @@
 # preflight failure so launchd surfaces it.
 set -euo pipefail
 
-REPO_ROOT="${OCDJ_REPO_ROOT:-/Users/palmer/Work/Dev/ocdj}"
+REPO_ROOT="${OCDJ_REPO_ROOT:-/Users/palmer/Dev/music/research/ocdj}"
 LOG_FILE="${HOME}/Library/Logs/ocdj-traxdb-local.log"
 LIMIT="${TRAXDB_LOCAL_LIMIT:-3}"
 
