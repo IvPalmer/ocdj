@@ -1,13 +1,12 @@
-# Runtime — VPS-only
+# Runtime — production is on the VPS
 
-**This project runs on the elder-brain VPS, not your Mac.**
+**Production runs on the elder-brain VPS, not your Mac.**
 
-This Mac dir is a **source clone for editing context only**. Local Docker
-is disabled here. Never run:
-
-- `docker compose up` / `make dev` / anything that boots a local DB or API.
-- A previous "local dev" stack used to live here — it's been torn down and
-  the named volumes nuked. Do not reanimate it.
+This Mac folder is the source clone. It also runs a local compose stack
+(`db`, `slskd`, `backend`, `worker`; project `ocdj`) and four LaunchAgents;
+[AGENTS.md](AGENTS.md) lists them and how to check them. The local stack keeps
+its data in named volumes: never `docker compose down -v` here and never
+recreate a volume.
 
 ## Where it actually runs
 
