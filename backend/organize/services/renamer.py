@@ -15,6 +15,16 @@ DEFAULT_TEMPLATE = '{artist} - {title}'
 
 # [CATALOG] at end: all-caps/digits optionally with separator.
 _CATALOG_BRACKET_RE = re.compile(r'\s*\[\s*[A-Z0-9][A-Z0-9\- .]*\s*\]\s*$', re.IGNORECASE)
+# What counts as a catalog number when it ends a title in (...) or [...]:
+# uppercase letters then digits, optionally split by one hyphen or space
+# (DDC011, GRAVITATE04, PT301, GRDT-001, CAT 635662). Case-sensitive on
+# purpose, so "(Original Mix)", "(Part 2)", "(2013)" and "(10)" never match.
+_CATALOG_NUMBER_RE = re.compile(r'[A-Z]{2,}[- ]?\d{2,}')
+_TRAILING_TOKEN_RE = re.compile(r'\s*(?:\(\s*([^()]*?)\s*\)|\[\s*([^\[\]]*?)\s*\])\s*$')
+# Discogs disambiguation suffix: "Sisto (2)", also inside "A (2), B (3)".
+_DISCOGS_SUFFIX_RE = re.compile(r'\s+\(\d+\)(?=\s*(?:[,&/]|$))')
+# Characters that can end an artist prefix inside a title.
+_ARTIST_SEPARATORS = ' -–—_.'
 # Website stamp tail: " - www.anything.tld" plus anything after (including
 # underscored tracking suffixes like `www.x.com_639119973180043201`).
 _URL_STAMP_RE = re.compile(
@@ -92,11 +102,29 @@ def _clean_segment(s: str) -> str:
     return re.sub(r'\s+', ' ', s).strip(' -–—.')
 
 
+def split_catalog_number(title: str) -> tuple[str, str]:
+    """Split a trailing "(DDC011)" or "[DDC011]" catalog number off a title.
+
+    Returns (title without the token, catalog number). Returns (title, '') when
+    the title does not end in a catalog number, or is nothing but one.
+    """
+    s = (title or '').strip()
+    m = _TRAILING_TOKEN_RE.search(s)
+    if m:
+        token = m.group(1) if m.group(1) is not None else m.group(2)
+        rest = s[:m.start()].rstrip()
+        if rest and _CATALOG_NUMBER_RE.fullmatch(token):
+            return rest, token
+    return title or '', ''
+
+
 def _strip_artist_prefix(title: str, artist: str) -> str:
     """If the title starts with the artist name (case-insensitive), drop it.
 
     Fixes filename-derived titles like "Urban Myths I Just Can't Help" when the
-    artist is "Urban Myths". Also strips a trailing separator after the artist.
+    artist is "Urban Myths", or "Sisto-Turn It Up" when it is "Sisto". The
+    artist has to end at a separator, so "Brennan-Ital" stays whole unless
+    the artist is "Brennan".
     """
     if not title or not artist:
         return title
@@ -105,7 +133,10 @@ def _strip_artist_prefix(title: str, artist: str) -> str:
     if not aw:
         return title
     if ts.lower().startswith(aw.lower()):
-        rest = ts[len(aw):].lstrip(' -–—_.')
+        tail = ts[len(aw):]
+        if tail and tail[0] not in _ARTIST_SEPARATORS:
+            return title
+        rest = tail.lstrip(_ARTIST_SEPARATORS)
         # Guard: don't strip if the rest would be empty (title literally IS
         # the artist name) or identical to the artist (avoids clearing legit
         # self-titled tracks).
@@ -115,13 +146,23 @@ def _strip_artist_prefix(title: str, artist: str) -> str:
 
 
 def clean_artist(artist: str) -> str:
-    return _clean_segment(artist or '')
+    return _DISCOGS_SUFFIX_RE.sub('', _clean_segment(artist or ''))
+
+
+def clean_title_and_catalog(title: str) -> tuple[str, str]:
+    """Clean a title and return it with the catalog number it ended with.
+
+    The catalog number is '' when there was none. Callers that write tags keep
+    it (tagger._clean_metadata); the filename only needs the clean title.
+    """
+    rest, catalog = split_catalog_number(title)
+    cleaned = _clean_segment(rest)
+    cleaned = _EMBEDDED_TRACK_TITLE_RE.sub('', cleaned, count=1)
+    return re.sub(r'\s+', ' ', cleaned).strip(' -–—.'), catalog
 
 
 def clean_title(title: str) -> str:
-    cleaned = _clean_segment(title or '')
-    cleaned = _EMBEDDED_TRACK_TITLE_RE.sub('', cleaned, count=1)
-    return re.sub(r'\s+', ' ', cleaned).strip(' -–—.')
+    return clean_title_and_catalog(title)[0]
 
 
 def clean_album(album: str) -> str:

@@ -532,12 +532,16 @@ def retag_directory(request):
                     continue
                 old_artist = (audio.get('artist') or [''])[0]
                 old_title = (audio.get('title') or [''])[0]
+                old_catalog = (audio.get('catalognumber') or [''])[0]
                 if not old_artist and not old_title:
                     skipped += 1
                     continue
-                cleaned_md = _clean_metadata({'artist': old_artist, 'title': old_title})
+                cleaned_md = _clean_metadata({
+                    'artist': old_artist, 'title': old_title, 'catalog_number': old_catalog,
+                })
                 new_artist = cleaned_md.get('artist', old_artist)
                 new_title = cleaned_md.get('title', old_title)
+                new_catalog = cleaned_md.get('catalog_number', old_catalog)
                 if new_artist == old_artist and new_title == old_title:
                     continue
                 entry = {
@@ -545,10 +549,16 @@ def retag_directory(request):
                     'artist': [old_artist, new_artist],
                     'title': [old_title, new_title],
                 }
+                if new_catalog != old_catalog:
+                    entry['catalog_number'] = [old_catalog, new_catalog]
                 cleaned.append(entry)
                 if not dry_run:
                     # Use the low-level write (re-cleans again but that's idempotent).
+                    # The catalog the title ended with is already stripped from
+                    # new_title, so pass it on or it is lost.
                     meta = {'artist': new_artist, 'title': new_title}
+                    if new_catalog != old_catalog:
+                        meta['catalog_number'] = new_catalog
                     write_tags(full, meta)
             except Exception as e:
                 errors.append({'file': fn, 'error': str(e)})
@@ -596,7 +606,7 @@ def pipeline_retag_clean(request):
     same basename under MUSIC_ROOT and retags wherever it actually lives.
     """
     from .services.tagger import write_tags
-    from .services.renamer import clean_artist, clean_title, clean_album, _strip_artist_prefix
+    from .services.renamer import clean_artist, clean_title_and_catalog, clean_album, _strip_artist_prefix
     from core.services.config import get_config
 
     stage = request.data.get('stage', 'ready')
@@ -615,7 +625,8 @@ def pipeline_retag_clean(request):
     for item in items:
         try:
             new_a = clean_artist(item.artist or '')
-            new_t = clean_title(item.title or '')
+            new_t, title_catalog = clean_title_and_catalog(item.title or '')
+            new_catalog = item.catalog_number or title_catalog
             new_album = clean_album(item.album or '')
             if new_a:
                 new_t = _strip_artist_prefix(new_t, new_a)
@@ -638,7 +649,7 @@ def pipeline_retag_clean(request):
             metadata = {
                 'artist': new_a, 'title': new_t,
                 'album': new_album, 'label': item.label,
-                'catalog_number': item.catalog_number,
+                'catalog_number': new_catalog,
                 'genre': item.genre, 'year': item.year,
                 'track_number': item.track_number,
             }
@@ -647,12 +658,14 @@ def pipeline_retag_clean(request):
                 (new_a != item.artist)
                 or (new_t != item.title)
                 or (new_album != item.album)
+                or (new_catalog != item.catalog_number)
             )
             if changed:
                 item.artist = new_a
                 item.title = new_t
                 item.album = new_album
-                item.save(update_fields=['artist', 'title', 'album'])
+                item.catalog_number = new_catalog
+                item.save(update_fields=['artist', 'title', 'album', 'catalog_number'])
                 cleaned += 1
         except Exception as e:
             errors.append({'id': item.id, 'error': str(e)})
