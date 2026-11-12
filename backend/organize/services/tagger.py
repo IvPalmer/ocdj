@@ -243,17 +243,22 @@ def _clean_metadata(metadata: dict) -> dict:
     repetition in title. Musical version labels such as Remix, Edit, Dub,
     and Original Mix are intentionally retained. Applied here so any code
     path that writes tags produces the same clean result.
+
+    A catalog number that ended the title ("Untitled A2 (GRAVITATE04)") moves
+    to catalog_number when that is empty or absent; an existing value wins.
     """
-    from .renamer import clean_artist, clean_title, clean_album, _strip_artist_prefix
+    from .renamer import clean_artist, clean_title_and_catalog, clean_album, _strip_artist_prefix
     out = dict(metadata)
     a = clean_artist(out.get('artist') or '')
-    t = clean_title(out.get('title') or '')
+    t, catalog = clean_title_and_catalog(out.get('title') or '')
     if a:
         t = _strip_artist_prefix(t, a)
     if a:
         out['artist'] = a
     if t:
         out['title'] = t
+    if catalog and not out.get('catalog_number'):
+        out['catalog_number'] = catalog
     if out.get('album'):
         out['album'] = clean_album(out['album'])
     return out
@@ -308,6 +313,8 @@ def write_tags(filepath, metadata):
     alone. Callers that build a partial dict (the pipeline tagger) therefore
     keep their additive behaviour, while callers that submit the whole form
     (manual edit, published-artifact refresh) can actually erase a field.
+    The one addition: a catalog number at the end of the title fills an empty
+    or absent catalog_number (see _clean_metadata).
     """
     metadata = _clean_metadata(metadata)
     try:
