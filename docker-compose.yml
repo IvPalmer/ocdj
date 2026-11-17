@@ -10,11 +10,14 @@ services:
       - POSTGRES_PASSWORD=djtools_password
     ports:
       - "5433:5432"  # 5433 to avoid conflict with Vault's postgres (5432)
-    restart: always
+    restart: unless-stopped
 
   # slskd (Soulseek daemon)
   slskd:
     image: slskd/slskd:0.24.5
+    # Off by default on the Mac: Soulseek runs on the VPS (same share).
+    # Start it only with `--profile soulseek`.
+    profiles: ["soulseek"]
     ports:
       - "5030:5030"
       - "50300:50300"
@@ -32,7 +35,7 @@ services:
       - SLSKD_SHARED_DIR=[Music]/shares/collection
       - SLSKD_SLSK_USERNAME=${SLSKD_SLSK_USERNAME:-}
       - SLSKD_SLSK_PASSWORD=${SLSKD_SLSK_PASSWORD:-}
-    restart: always
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:5030"]
       interval: 30s
@@ -43,10 +46,13 @@ services:
   # Django Backend
   backend:
     build: ./backend
-    restart: always
+    restart: unless-stopped
     depends_on:
-      - db
-      - slskd
+      db:
+        condition: service_started
+      slskd:
+        condition: service_started
+        required: false
     environment:
       - DEBUG=1
       - POSTGRES_DB=djtools
@@ -91,7 +97,7 @@ services:
   # reads/writes the shared huey_volume SQLite queue.
   worker:
     build: ./backend
-    restart: always
+    restart: unless-stopped
     depends_on:
       - db
     environment:
