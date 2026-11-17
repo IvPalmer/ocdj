@@ -21,9 +21,9 @@ Production data lives only on the VPS. The Mac holds the music library: the VPS 
 LaunchAgents `dev.grooveops.ocdj-{drain,incoming,traxdb-local,yt-local}` run the scripts in `~/bin/` (copies in `tools/mac-daemons/` and `tools/traxdb_sync/`; copy a script back after editing it). Only `ocdj-traxdb-local` runs code from this folder, through `REPO_ROOT` in its wrapper. Its `.venv` was made under an older folder name, so in practice the wrapper runs Homebrew `python3`.
 - Check: `launchctl print gui/$(id -u)/dev.grooveops.ocdj-<name>` shows `last exit code = 0`; logs in `~/Library/Logs/ocdj-*.log`. `yt-local` is silent when it has no jobs.
 
-Local compose stack, project `ocdj`: `db`, `slskd`, `backend`, `worker`, all `restart: always` (`frontend` is not run). Data sits in the named volumes `ocdj_postgres_data`, `ocdj_huey_volume` and `ocdj_static_volume` and in the `~/Music/Musicas` binds.
-- Never `docker compose down -v` and never recreate a volume. The project name comes from this folder's name; start the stack from here with `docker compose -p ocdj up -d db slskd backend worker`.
-- Check: `curl -s http://127.0.0.1:8002/api/core/health/` returns `"status":"ok"`, the slskd UI answers on :5030, and `docker logs ocdj-slskd-1` shows it logged in. The local slskd uses its own Soulseek account, never the operator's personal one.
+Local compose stack, project `ocdj`: `db`, `backend`, `worker`, plus `slskd` behind the `soulseek` profile (`frontend` is not run). **It is down by default and runs on demand** (elder-brain#692): every service is `restart: unless-stopped`, so a stopped stack stays stopped when the Docker VM wakes, and Docker Desktop's Resource Saver can stop the VM while nothing runs. Soulseek runs on the VPS (`ocdj-slskd-1`, same share), so the Mac slskd stays off. Data sits in the named volumes `ocdj_postgres_data`, `ocdj_huey_volume` and `ocdj_static_volume` and in the `~/Music/Musicas` binds.
+- Never `docker compose down -v` and never recreate a volume. The project name comes from this folder's name; start the stack from here with `docker compose -p ocdj up -d db backend worker` and stop it with `docker compose -p ocdj stop` when done. Add `--profile soulseek` (and `slskd` to the service list) only when the Mac slskd is really needed.
+- Check: `curl -s http://127.0.0.1:8002/api/core/health/` returns `"status":"ok"`; with the soulseek profile, the slskd UI answers on :5030 and `docker logs ocdj-slskd-1` shows it logged in. The local slskd uses its own Soulseek account, never the operator's personal one.
 
 ## Working rules
 

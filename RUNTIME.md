@@ -2,8 +2,9 @@
 
 **Production runs on the elder-brain VPS, not your Mac.**
 
-This Mac folder is the source clone. It also runs a local compose stack
-(`db`, `slskd`, `backend`, `worker`; project `ocdj`) and four LaunchAgents;
+This Mac folder is the source clone. It also has a local compose stack
+(`db`, `backend`, `worker`, optional `slskd`; project `ocdj`), down by default
+and started on demand, and four LaunchAgents;
 [AGENTS.md](AGENTS.md) lists them and how to check them. The local stack keeps
 its data in named volumes: never `docker compose down -v` here and never
 recreate a volume.
