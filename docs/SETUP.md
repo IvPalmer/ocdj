@@ -1,3 +1,5 @@
+> Legacy: this covers the old standalone Python tools. To install the app, see [INSTALL.md](INSTALL.md).
+
 ### Setup (current state: Python tools + wrappers)
 
 This repo uses:
