@@ -67,6 +67,9 @@ Check:
 - http://localhost:5030 shows the slskd UI, and `docker compose logs slskd`
   shows it logged in to Soulseek.
 
+Once the checks pass, read [HOW-IT-WORKS.md](HOW-IT-WORKS.md): it explains the
+flow and the questions to ask the person before configuring anything else.
+
 ## 5. Where the music goes
 
 Inside `OCDJ_MUSIC_DIR`:
@@ -75,7 +78,7 @@ Inside `OCDJ_MUSIC_DIR`:
   Organize pipeline works on them.
 - `Electronic/ID3/soulseek/collection/` is the folder shared on Soulseek,
   unless `SLSKD_SHARE_DIR` points somewhere else.
-- `Electronic/_Review/` receives files that need a manual look.
+- `Electronic/_Review/` is the review staging folder.
 
 The paths can be changed under Settings in the app. They are paths inside the
 containers, so they start with `/music`.

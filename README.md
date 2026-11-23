@@ -11,7 +11,8 @@ Django backend with a Huey worker, React/Vite frontend, PostgreSQL and
 Follow [docs/INSTALL.md](docs/INSTALL.md). It works on Windows and macOS with
 Docker Desktop and is written so a coding agent (Claude Code, Codex) can run it
 for you: open this folder in the agent and ask it to install OCDJ following
-that file.
+that file. [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) then explains the
+flow, each tab and how to fit the settings to your workflow.
 
 Use the `vps-deploy` branch. `main` trails it.
 
