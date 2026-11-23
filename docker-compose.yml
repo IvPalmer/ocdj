@@ -22,11 +22,11 @@ services:
       - "5030:5030"
       - "50300:50300"
     volumes:
-      - /Users/palmer/Music/Musicas/Electronic/ID3/soulseek_sync/slskd_app:/app
-      - /Users/palmer/Music/Musicas/Electronic/ID3/soulseek:/downloads
-      # Match the public collection shared by the local SoulseekQt client.
-      # This stays read-only so slskd cannot modify the music library.
-      - /Users/palmer/Music/Musicas/Electronic/ID3/soulseek/collection:/shares/collection:ro
+      - ${OCDJ_MUSIC_DIR}/Electronic/ID3/soulseek_sync/slskd_app:/app
+      - ${OCDJ_MUSIC_DIR}/Electronic/ID3/soulseek:/downloads
+      # The folder shared on the Soulseek network. Read-only, so slskd cannot
+      # modify the music library. Defaults to the pipeline's collection folder.
+      - ${SLSKD_SHARE_DIR:-${OCDJ_MUSIC_DIR}/Electronic/ID3/soulseek/collection}:/shares/collection:ro
     environment:
       - SLSKD_REMOTE_CONFIGURATION=true
       - SLSKD_NO_AUTH=true
@@ -61,8 +61,8 @@ services:
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
       - SLSKD_BASE_URL=http://slskd:5030
-      - SLSKD_API_KEY=${SLSKD_API_KEY}
-      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY}
+      - SLSKD_API_KEY=${SLSKD_API_KEY:-}
+      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY:-}
       - MUSIC_ROOT=/music
       - SOULSEEK_DOWNLOAD_ROOT=/music/Electronic/ID3/soulseek
       - TRAXDB_ROOT=/music/Electronic/ID3/traxdb
@@ -85,7 +85,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools
-      - /Users/palmer/Music/Musicas:/music
+      - ${OCDJ_MUSIC_DIR:?set OCDJ_MUSIC_DIR in .env (see .env.example)}:/music
       - static_volume:/app/staticfiles
       - huey_volume:/app/huey
     command: >
@@ -108,8 +108,8 @@ services:
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
       - SLSKD_BASE_URL=http://slskd:5030
-      - SLSKD_API_KEY=${SLSKD_API_KEY}
-      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY}
+      - SLSKD_API_KEY=${SLSKD_API_KEY:-}
+      - ACOUSTID_API_KEY=${ACOUSTID_API_KEY:-}
       - MUSIC_ROOT=/music
       - SOULSEEK_DOWNLOAD_ROOT=/music/Electronic/ID3/soulseek
       - TRAXDB_ROOT=/music/Electronic/ID3/traxdb
@@ -130,7 +130,7 @@ services:
     volumes:
       - ./backend:/app
       - ./tools:/app/tools
-      - /Users/palmer/Music/Musicas:/music
+      - ${OCDJ_MUSIC_DIR:?set OCDJ_MUSIC_DIR in .env (see .env.example)}:/music
       - huey_volume:/app/huey
     command: python manage.py run_huey
 

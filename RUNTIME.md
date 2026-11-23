@@ -1,5 +1,8 @@
 # Runtime — production is on the VPS
 
+> This file describes the maintainer's installation. Installing OCDJ on your
+> own computer: see [docs/INSTALL.md](docs/INSTALL.md) instead.
+
 **Production runs on the elder-brain VPS, not your Mac.**
 
 This Mac folder is the source clone. It also has a local compose stack
